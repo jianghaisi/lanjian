@@ -1,0 +1,69 @@
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "npm run desktop:build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "check:architecture": "node --test scripts/check-architecture.test.mjs && node scripts/check-architecture.mjs",
+    "desktop:dev": "electron-vite dev",
+    "desktop:build": "npm run typecheck && electron-vite build",
+    "desktop:dist": "npm run desktop:build && electron-builder",
+    "test:desktop": "node scripts/test-desktop.mjs",
+    "test:workspace-migration": "tsx --test scripts/rebind-migrated-workspace.test.ts tests/unit/platform/portable-python-runtime.test.ts",
+    "migrate:workspace": "tsx scripts/rebind-migrated-workspace.ts",
+    "evaluate:continuity": "tsx scripts/evaluate-character-continuity.ts --output artifacts/evaluations/consistency-fixed-v2.json",
+    "evaluate:live": "node scripts/evaluate-live-consistency.mjs",
+    "test:live-evaluation-runner": "node scripts/evaluate-live-consistency.mjs --test-runner",
+    "test:smoke": "npm run typecheck && electron-vite build --mode smoke && node scripts/electron-smoke.mjs",
+    "audit:book": "node scripts/audit-book-preflight.cjs"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.11.0",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.3",
+    "@codemirror/view": "^6.43.11",
+    "@lucide/vue": "^1.41.0",
+    "mammoth": "^1.11.0",
+    "pixi-live2d-display": "^0.4.0",
+    "pixi.js": "^6.5.10",
+    "vue": "^3.5.24"
+  },
+  "devDependencies": {
+    "@types/node": "^26.3.0",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "jszip": "^3.10.1",
+    "playwright": "^1.63.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vite": "^7.2.4"
+  },
+  "overrides": {
+    "postcss": "^8.5.28",
+    "nanoid": "^3.3.18",
+    "pixi-live2d-display": {
+      "gh-pages": "^6.3.0"
+    }
+  },
+  "build": {
+    "appId": "cn.zuolan.novelwriter",
+    "productName": "小说写作助手",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "licenses/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    }
+  }
+}

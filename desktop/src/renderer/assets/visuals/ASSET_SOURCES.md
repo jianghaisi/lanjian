@@ -1,0 +1,20 @@
+# 视觉资产来源
+
+## 岚笺四联视觉系统 v2
+
+- 现实层参考：Historical Photographs of China，`Yang Fang in the smaller courtyard of his house, Beijing`，约 1870 年代。
+- 来源页：https://hpcbristol.net/visual/PF01-09
+- 本地参考：`reference-yang-fang-courtyard.jpg`
+- 四联母版：`lanjian-quartet-master-v2.png`
+- 界面横向衍生：`lanjian-quartet-workbench-v2.png`
+- 生成方法：Starryear-Abstract-Quartet 的现实、编辑记忆、结构抽象、混合重释四阶段。
+
+生成资产不得作为第三方原照片的版权声明替代物。
+
+2026-09-18 核查：来源平台的[使用说明](https://hpcbristol.net/license/what-you-can-and-cannot-do-downloads)标注 CC BY-NC-ND 4.0。项目尚无超出该条件的单独授权记录，因此上述参考照片、四联母版和横向衍生图均不进入首次 GitHub 快照。它们可继续保留在作者本地；`LibraryBookCover` 在缺少本地横向纹理时使用独立生成的 `archive-observatory.png`，保留书名与封面布局。
+
+## 其他运行插画与角色
+
+`archive-observatory.png` 是为岚笺生成的叙事档案馆主题插画，不是历史照片或作品事实地图。其本地设计过程记录在 `design-system/approved-2026-09-08/OBSERVATORY-ASSET.md`，设计历史不随首次工程快照上传。
+
+其余背景、近期作品配图、角色立绘与 Q 版图片为项目本地视觉资产；当前 V3 基线确认复用作者的 `lanjian-rig` 角色。首次快照只纳入实际界面使用的资源，不包含 Cubism 编辑源文件、外部参考照片、设计截图或模型权重。资源不因私有源码上传而获得额外开源授权；第三方运行库见 `desktop/licenses/THIRD-PARTY-NOTICES.md`。

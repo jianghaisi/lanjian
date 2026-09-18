@@ -1,0 +1,43 @@
+# Environment variables
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+backend.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local novel projects never belong in the application repository
+.webnovel/
+作品/
+
+# Node.js (desktop)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local Python and migration backups
+__pycache__/
+*.pyc
+.trellis/tasks/*/research/directory-originals.zip
+.trellis/tasks/*/research/workspace-bridge-originals.zip
+.trellis/tasks/*/research/refactor-originals.zip
+.trellis/tasks/*/research/tooling/
+
+# Temporary Superdesign canvas HTML and command receipts
+.superdesign/tmp/
+
+# Generated local tool caches
+/.chrome-ui-preview/
+/.npm-cache-superdesign/

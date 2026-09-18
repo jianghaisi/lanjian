@@ -1,0 +1,50 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "lanjian-rig.moc3",
+		"Textures": [
+			"lanjian-rig.4096/texture_00.png"
+		],
+		"Physics": "lanjian-rig.physics3.json",
+		"DisplayInfo": "lanjian-rig.cdi3.json",
+		"Motions": {
+			"Idle": [
+				{
+					"File": "lanjian-rig.idle.motion3.json"
+				}
+			],
+			"Blink": [
+				{
+					"File": "lanjian-rig.blink.motion3.json"
+				}
+			],
+			"Nod": [
+				{
+					"File": "lanjian-rig.nod.motion3.json"
+				}
+			],
+			"Shake": [
+				{
+					"File": "lanjian-rig.shake.motion3.json"
+				}
+			]
+		}
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeLOpen",
+				"ParamEyeROpen"
+			]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": [
+				"ParamMouthOpenY"
+			]
+		}
+	]
+}

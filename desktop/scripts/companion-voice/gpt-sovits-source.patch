@@ -1,0 +1,36 @@
+diff --git a/GPT_SoVITS/text/g2pw/g2pw.py b/GPT_SoVITS/text/g2pw/g2pw.py
+index fbfcd09..0cb329b 100644
+--- a/GPT_SoVITS/text/g2pw/g2pw.py
++++ b/GPT_SoVITS/text/g2pw/g2pw.py
+@@ -1,6 +1,7 @@
+ # This code is modified from https://github.com/mozillazg/pypinyin-g2pW
+ 
+ import hashlib
++from ast import literal_eval
+ import pickle
+ import os
+ 
+@@ -151,14 +152,14 @@ def read_dict():
+         line = f.readline()
+         while line:
+             key, value_str = line.split(":")
+-            value = eval(value_str.strip())
++            value = literal_eval(value_str.strip())
+             polyphonic_dict[key.strip()] = value
+             line = f.readline()
+     with open(PP_FIX_DICT_PATH, encoding="utf-8") as f:
+         line = f.readline()
+         while line:
+             key, value_str = line.split(":")
+-            value = eval(value_str.strip())
++            value = literal_eval(value_str.strip())
+             polyphonic_dict[key.strip()] = value
+             line = f.readline()
+     return polyphonic_dict
+@@ -176,4 +177,5 @@ def correct_pronunciation(word, word_pinyins):
+         return new_pinyins
+ 
+ 
+-pp_dict = get_dict()
++# Lanjian standalone audition: parse pinned text, never deserialize pickle caches.
++pp_dict = read_dict()

@@ -1,0 +1,172 @@
+/* Both approved themes share a viewport budget, not a scrollable document.
+ * Colour, artwork and keyframes remain owned by the two loader components. */
+.app-boot,
+.workspace-loading {
+  box-sizing: border-box;
+  inline-size: 100dvw;
+  block-size: 100dvh;
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: clip;
+  isolation: isolate;
+  container-type: size;
+}
+
+.boot-header,
+.archive-header {
+  min-block-size: 3.5rem;
+  padding: .75rem clamp(1rem, 3vw, 2.5rem);
+  gap: 1rem;
+}
+.boot-footer,
+.archive-footer {
+  min-inline-size: 0;
+  padding: .625rem clamp(1rem, 3vw, 2.5rem);
+  gap: .75rem;
+  font-size: .625rem;
+}
+.archive-header button,
+.boot-actions button {
+  min-block-size: 2.5em;
+  padding: .625em 1em;
+  gap: 1em;
+  font-size: .8125rem;
+}
+.archive-channel { font-size: .6875rem; }
+.archive-preview,
+.boot-header .boot-demo { padding: .375em .625em; font-size: .6875rem; }
+
+.boot-body,
+.archive-body {
+  box-sizing: border-box;
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: clip;
+  padding: clamp(1rem, 3cqh, 2.5rem) clamp(1.5rem, 7cqw, 8rem);
+}
+.boot-body {
+  justify-content: center;
+  gap: clamp(1rem, 5cqh, 4rem);
+}
+.terminal-brand { min-block-size: 0; }
+.terminal-brand > p:first-child { margin-block-end: 1rem; font-size: .625rem; }
+.terminal-brand > small { margin-block-start: 1rem; font-size: .6875rem; }
+.terminal-motto { margin-block-start: 1rem; font-size: .75rem; }
+.terminal-wordmark,
+.impact .terminal-wordmark { font-size: clamp(3rem, min(9cqw, 15cqh), 9rem); }
+.impact .terminal-wordmark { gap: 1.25rem; }
+.impact .terminal-wordmark span { inline-size: 1.05em; }
+.boot-console { min-block-size: 0; grid-template-columns: minmax(0, 1fr) minmax(0, .68fr); column-gap: clamp(1rem, 4cqw, 4rem); }
+.boot-current { margin-block: 0 1rem; gap: .5rem; }
+.boot-current b { font-size: .875rem; }
+.boot-current > span { font-size: .75rem; }
+.terminal-meter { gap: 1rem; margin-block-end: .75rem; font-size: .625rem; }
+.terminal-meter strong { font-size: 1.75rem; }
+.impact .terminal-meter strong { font-size: 2.5rem; }
+.terminal-meter small { font-size: .75rem; }
+.boot-steps li { grid-template-columns: 2em minmax(0, 1fr) auto; min-block-size: 2.25em; gap: .5em; font-size: .75rem; }
+.boot-steps li > b { font-size: .625rem; }
+.boot-note { margin-block-start: .75rem; font-size: .6875rem; }
+.boot-error { margin-block: .75rem 0; padding: .75em; font-size: .75rem; }
+
+.archive-body {
+  display: grid;
+  grid-template-columns: minmax(0, .95fr) minmax(0, 1.2fr);
+  gap: clamp(1.5rem, 6cqw, 5.5rem);
+  align-items: center;
+}
+.archive-stage,
+.impact .archive-stage {
+  box-sizing: border-box;
+  min-block-size: 0;
+  block-size: min(100%, 30rem);
+  max-block-size: 100%;
+  margin: 0;
+  padding: 5rem 2rem;
+}
+.impact .archive-stage { block-size: min(100%, 32rem); }
+.archive-stage-label { inset-block-start: 1.875rem; inset-inline: 2rem; font-size: .5625rem; }
+.archive-seal { inset-block-start: 1.8125rem; inset-inline-end: 1.5625rem; inline-size: 3rem; block-size: 3rem; font-size: .5625rem; }
+.impact .archive-seal { inline-size: 3.75rem; block-size: 3.75rem; }
+.archive-book { min-inline-size: 0; }
+.archive-book small { font-size: .6875rem; }
+.archive-book h2,
+.impact .archive-book h2 { margin-block: 1rem !important; font-size: clamp(1.5rem, 3cqw, 3rem); }
+.archive-stage-note { font-size: .75rem; }
+.archive-dossier-meta { inset-inline: 2rem; inset-block-end: 1.5rem; padding-block-start: 1rem; font-size: .5625rem; }
+.archive-progress { min-block-size: 0; max-block-size: 100%; padding: 0; align-self: center; }
+.archive-compact-title { display: none; }
+.archive-eyebrow { margin-block: 0 .75rem; font-size: .625rem; gap: .5rem; }
+.archive-progress h1 { font-size: clamp(1.25rem, 2.5cqw, 2.125rem); }
+.archive-current { margin-block: 1rem; padding-inline-start: 1rem; gap: .375rem; }
+.archive-current b { font-size: .875rem; }
+.archive-current > span { font-size: .75rem; }
+.archive-tree-head { gap: 1rem; padding-block-end: .625rem; font-size: .6875rem; }
+.archive-tree { padding-block: .375rem; }
+.archive-tree li { min-block-size: min(3.5rem, 6cqh); grid-template-columns: 1.75rem minmax(0, 1fr) auto; gap: .75rem; }
+.archive-tree li > div { gap: .25rem; padding-block: .375rem; }
+.tree-node { inline-size: 1.75rem; block-size: 1.75rem; font-size: .6875rem; }
+.archive-tree b { font-size: .75rem; }
+.archive-tree small { font-size: .6875rem; }
+.tree-status { font-size: .625rem; }
+.archive-tree li:not(:last-child)::after { inset-inline-start: .8125rem; top: calc(50% + .875rem); bottom: calc(-50% + .875rem); }
+.archive-phase-meter { margin-block-start: .75rem; }
+.archive-footnote { margin-block: .75rem 0; font-size: .6875rem; }
+.archive-slow { margin-block-start: .75rem; padding: .75em 1em; font-size: .75rem; }
+.archive-slow p { margin-block-start: .5em; }
+.archive-error { padding: .75em 1em; font-size: .75rem; }
+.archive-error p { margin-block-end: .5em; }
+.archive-error button { padding: .5em 1em; font-size: .75rem; }
+
+/* Short windows retain all real phase labels and actions; repeated explanatory
+ * lines become redundant with the current-phase live status above the list. */
+@container (max-height: 42rem) {
+  .boot-body, .archive-body { padding-block: 1rem; }
+  .boot-body { gap: 1.25rem; }
+  .terminal-motto { display: none; }
+  .archive-stage, .impact .archive-stage { padding: 4.25rem 1.5rem; }
+  .archive-stage-label, .archive-dossier-meta { inset-inline: 1.5rem; }
+  .archive-stage-note { display: none !important; }
+  .archive-current { margin-block: .625rem; }
+  .archive-tree small { display: none; }
+  .archive-tree li { min-block-size: 2.25rem; }
+  .archive-tree li > div { padding-block: .25rem; }
+  .archive-eyebrow { margin-block-end: .5rem; }
+  .archive-footnote, .archive-phase-meter { margin-block-start: .5rem; }
+  .archive-slow p { display: none; }
+  .has-error .archive-tree li:not(.active) { display: none; }
+}
+@container (max-width: 46rem) {
+  .archive-body { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .archive-stage, .impact .archive-stage { display: none; }
+  .archive-progress { inline-size: 100%; max-inline-size: 32rem; justify-self: center; }
+  .archive-compact-title { display: block; margin: 0 0 .75rem; font: 600 1rem/1.4 var(--serif, serif); overflow-wrap: anywhere; }
+  .archive-channel { display: none; }
+  .archive-header { flex-wrap: nowrap; min-block-size: 3.5rem; gap: .75rem; }
+  .archive-preview { width: auto; order: initial; margin-inline-start: auto; }
+  .archive-diagonal { display: none !important; }
+  .boot-console { column-gap: 1.5rem; }
+  .boot-footer-code, .archive-footer span:last-child { display: none; }
+}
+@container (max-width: 34rem) {
+  .boot-body, .archive-body { padding-inline: 1rem; }
+  .boot-console { display: block; }
+  .boot-steps { margin-block-start: 1rem; }
+  .terminal-brand > small { letter-spacing: .2em; }
+  .archive-preview { max-inline-size: 10em; }
+  .archive-header { padding-inline: .75rem; }
+  .archive-header button { font-size: .75rem; }
+}
+@container (max-height: 32rem) {
+  .boot-header, .archive-header { min-block-size: 2.75rem; padding-block: .5rem; }
+  .boot-footer, .archive-footer { padding-block: .5rem; }
+  .boot-body, .archive-body { padding-block: .625rem; }
+  .terminal-brand > p:first-child, .terminal-brand > small { display: none; }
+  .boot-body { gap: .75rem; }
+  .terminal-wordmark, .impact .terminal-wordmark { font-size: 3rem; }
+  .boot-current { margin-block-end: .5rem; }
+  .archive-eyebrow, .archive-tree-head, .archive-footnote { display: none; }
+  .archive-current { margin-block: .5rem; }
+  .archive-tree li { min-block-size: 2rem; }
+  .archive-phase-meter { margin-block-start: .375rem; }
+}

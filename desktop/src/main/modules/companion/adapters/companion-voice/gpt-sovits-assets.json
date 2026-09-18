@@ -1,0 +1,236 @@
+{
+  "sourceHashes": {"GPT_SoVITS/text/chinese.py":"076a4741f69f85798aed21079632fb27f78e887e603ef27688bea315f14ba7c0","GPT_SoVITS/export_torch_script_v3v4.py":"d8bc25ea6600e9ea7445a9a45e69b21e77dd08a42fbcd8f3b6134c31057273f5","tools/uvr5/lib/lib_v5/spec_utils.py":"dd6cdc357240e235a6dad7be938ab6ba7df739c1ac0c0a0560ab45c1d8889505","GPT_SoVITS/BigVGAN/alias_free_activation/torch/act.py":"27cab3c7a38a2c46c882f83ea17743edc6e09d9ec8e2becf84d23529fc55eb69","GPT_SoVITS/AR/models/utils.py":"d78528ed601f9845e0a6ef111509393f0215dfbce0b4b5524b30e9792352b1d6","GPT_SoVITS/export_torch_script.py":"5ec608c8dac6ca8eb969a82c13ce905946ecda0f3070a547af54932a6a128a34","GPT_SoVITS/BigVGAN/env.py":"f45ba3af3ca07e3823c5adfdb816de9a6e672bec949b9231d23fe0133c8be275","GPT_SoVITS/AR/modules/activation_onnx.py":"b63f06a70e2f62633ab8c7bfa5cb38f0d7e6e0cbced66dab1cc109a47bb6c8f4","tools/uvr5/lib/lib_v5/model_param_init.py":"9d0676fb010aea6c0072de2a377cf9bc34becda5ed7154020cc87d2e6d0a087f","tools/uvr5/lib/lib_v5/layers_new.py":"e70cb68c6ed1827a933be0c543515ddaf8e41de8c657256df5f0563dd39c0343","GPT_SoVITS/text/cleaner.py":"2200d06b40b8183a48167143de6a2477f0bf6e1aa3212e8ddc512b2de88b74e2","GPT_SoVITS/AR/data/__init__.py":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","GPT_SoVITS/inference_webui.py":"c11946cc51179dd583ddbbae2a235fc23b932772fc7019f9968130b3bcae0966","GPT_SoVITS/BigVGAN/utils0.py":"4533384198a2cfb35000efabc595f5f8a72569a9a6b502f703eb693a5b95f4a7","GPT_SoVITS/s2_train_v3.py":"e861311b159f5e188a03fbfa776a08f4e19a79554b4ee49a59fbe231d0aee7d2","GPT_SoVITS/eres2net/ERes2NetV2.py":"8037df373c020f3f0db6ad0b51147efe0bfbe41367bf1cb4eea45f960247ce01","GPT_SoVITS/prepare_datasets/3-get-semantic.py":"d6cd2e5e26f8b72dfcfa8756ff17ac7c1654dea1a1c63c5d2aa52e0e1f67b5ef","GPT_SoVITS/text/g2pw/__init__.py":"657dd35ae762e18f9a1d89d9669f3fe017de7e20f5a5005755d7bd667031a5bf","tools/AP_BWE_main/datasets1/__init__.py":"7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6","GPT_SoVITS/AR/modules/transformer.py":"462c946db75595e0370c085e198da229e94bab573b756ebfb38a935207bae854","tools/audio_sr.py":"c45860814826f2b2a23e3d1fefb54e0c894a6446d135abd438fd328c9e33275a","tools/asr/funasr_asr.py":"573391db79f14418a5cfa21678d0a240df6bc076506e0aa16680add8bf70184b","tools/__init__.py":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","GPT_SoVITS/AR/modules/lr_schedulers.py":"65f90e0af273e365b9e6acea970208c7b2eb771a4fbb0899d7f3c4a3559b5806","tools/uvr5/bs_roformer/attend.py":"6f8b9a5741b46469aca26f20d0bfc3efe3d1cecf46ba2279f482168725321ca4","tools/asr/fasterwhisper_asr.py":"b9a17e2e7f0e73a0642d9eeeb771c292e93a348a9f9e27a409f1a2477e16c32e","GPT_SoVITS/AR/modules/patched_mha_with_cache_onnx.py":"bcb70ca8a488b673c229808d47caedf6cbeebcf2dd0e2bb1b3926b0856cc89ad","GPT_SoVITS/text/symbols.py":"61ebe855d05060faa83b1421caac7bcf945363270938df4334114a42c62626ea","GPT_SoVITS/AR/data/dataset.py":"beafd92e5852f06d9520655599079ead2ef1dfaf920f5dc39ef34fd01e88ed7f","api.py":"aa43223a7ac7a062897ea605d76c7738a8bab3c152162533b1aa785c0ecf2ef1","GPT_SoVITS/module/core_vq.py":"f4033242846249ecfe2857728196a0373f3838a44a769bf7b9725820715eec12","GPT_SoVITS/module/ddp_utils.py":"c680d5add69690fe5e7ec0599ca02846a466f9c4b83c68f9d4cca5c8adb1506c","GPT_SoVITS/s1_train.py":"fd97c7bc62ae29d8b3646a34549a09a5ca32f4f27f62a9d1aa38d61a11c6a203","GPT_SoVITS/BigVGAN/activations.py":"c76c6deffc336248d5bdfebfc1c672542fbea0605fb9a0e7448594769b2b0765","GPT_SoVITS/text/tone_sandhi.py":"cb8804c30d310afbe3913093e16399d8f2f5601f1895d2353abbfbdf689898a0","tools/uvr5/webui.py":"f55e2050a2c1d929291f6526ba6185f46086f45c022da9266d032eb0a6b9a89e","GPT_SoVITS/text/japanese.py":"4fb9f221002e5c6dbd50fb248a38719efe816deefe58486d71306c55c6e001c7","GPT_SoVITS/module/mel_processing.py":"b8d129863cdce9817f6a522bb97d12ff7524cdb2ec527588e4c045256517a6b1","GPT_SoVITS/f5_tts/model/backbones/dit.py":"adf51829b2c38873bc9ca92c5c4a2340f9cd1cd1e029ee0b754e786c5121a787","tools/AP_BWE_main/models/__init__.py":"7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6","GPT_SoVITS/module/commons.py":"655f04d71a20c4023502f6825db54030aab88dfdf9d3f00f8e71bcec930e90c4","GPT_SoVITS/AR/models/embedding_cudagraph.py":"18a0d17b20fa8577d9340025008e8691c3b26ca9dfecc9ff39e1f3ba521fde76","GPT_SoVITS/eres2net/fusion.py":"18520f6599b5ac399a3133a652f22305012212cf7a5d9887cd0bff32176df88f","tools/assets.py":"178fb947cb085785e3d476b90b3360b820a4852f7678c27629087592a99cf5a4","GPT_SoVITS/module/data_utils.py":"b440dde7ee30981fbc0ac18a37d8addd1c82e2260135366980a137804660e5b1","GPT_SoVITS/BigVGAN/alias_free_activation/torch/resample.py":"90c5ed4e0da369ca7266a002f8843974fe7d921d884a93ba568f684a21608375","tools/uvr5/bs_roformer/mel_band_roformer.py":"446350970791066000658b3559afdd30c855310e5f54734f7e48ce8f582af187","tools/uvr5/lib/lib_v5/nets_new.py":"d7630586f8812dbeebac5b67b2ea2a6d581be0f6257ebc4cb8b8e7d1ea35af62","tools/uvr5/lib/utils.py":"1d74d53273114dc960cba86b79a6574e10e492338b0c3ab0268cac9733827013","GPT_SoVITS/process_ckpt.py":"327c433017946118443d56cd10571a1773d39fc7745c6004ad53f2d1fd500d10","GPT_SoVITS/text/g2pw/dataset.py":"721eb141dae774e356e00ebd797d0aea3c21a2f1cd2c7ac9faf040d148b41da3","GPT_SoVITS/text/en_normalization/expend.py":"222e9eeaa23f8c1ec02bd4b1a0f2f1f02670b9cdc79301eb0af69327ff006042","GPT_SoVITS/text/zh_normalization/chronology.py":"275ed1ac305db02af67a814c5a5125236f02f5f899bf6db4a36ef510810ba437","GPT_SoVITS/AR/modules/__init__.py":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","api_v2.py":"e0627abebcdb030a3f17b6059e39716c7ad8ba34899f0a233b3c6a77681fc1e5","tools/uvr5/bs_roformer/bs_roformer.py":"6e2abc59ac7facf8d45c5144c4434c567addf1a0f66adf03d9d4e1b702c9e354","GPT_SoVITS/text/__init__.py":"f35d8c97e38ab04119739dbff7c95591baca109e21268810c7e9e5e787c6d0cf","GPT_SoVITS/text/chinese2.py":"25bc2851180081448a336100ab62cfce5221d782c75242065129dee7d543d3f4","GPT_SoVITS/download.py":"4c852c4089d1822a0cf8c70d1d6f897fc5b5dbefc1447e506e4dcb7159834830","GPT_SoVITS/AR/modules/scaling.py":"38a1ac25cb5a917d985bf47e46f779cd6093a2de796f41f29ce892ddd5a4a0b9","GPT_SoVITS/AR/modules/embedding_onnx.py":"453fc6bd1eba1c1438b7a3e1d44fdf0e91c86826446900e9f0b95806ab32509c","GPT_SoVITS/text/g2pw/onnx_api.py":"26122dfed55122f635c5f2ddb84ebb3f0accb747301f9dae96547f416b286428","GPT_SoVITS/prepare_datasets/2-get-sv.py":"633837426d5302811f472cfdca5f0651bac7ca734a6aa0ebf0336f0592144b2f","tools/subfix_webui.py":"9ae2d6c2b09f107beb68f23aac8e7faa95634a1d3afdae5462607b57108910a7","tools/uvr5/mdxnet.py":"0f1483007b57ee967efe64acaa948761383b272f6d94c81d56dbbfe30dfde499","GPT_SoVITS/text/zh_normalization/text_normlization.py":"724bd3c28fd233a47675e24a375cbc6b9f76383b3b2a1c21b1db13e4c28830fa","GPT_SoVITS/inference_cli.py":"c3bb3c5a10056230701100401be18503e487350338bf578c1780b26a38f6558f","GPT_SoVITS/text/g2pw/g2pw.py":"e880e8dc1f2b07e505965a0e078ef53133b84d7a2f2c38cc30db466f38542ea0","GPT_SoVITS/text/symbols2.py":"bc0c7d6a8b7f87fd4b69f13bb46c9c00e2a083d0c1c085af3564f0ce1af53065","GPT_SoVITS/inference_gui.py":"f247682d198bb3c229ec5dfd2a5fc6f34da1c36589bc1db987e3ad314e6ce6a0","GPT_SoVITS/AR/models/t2s_model_cudagraph.py":"5e4efef3d6cec963d48e2ed6088ca2040020a95c6104afcbd03dc82b26c72c53","GPT_SoVITS/text/zh_normalization/quantifier.py":"8cb393826cf822cc4c9e8e4e7cddf1f8393a471d48ce49f2c28a8644fe671b50","tools/uvr5/bsroformer.py":"7a0b043785f54f47470d5cd2b5f3113054c51bb710d32ec4fabf2cf8a9b0ff9b","GPT_SoVITS/f5_tts/model/__init__.py":"ec0e9869ff361411b0a766e77fa7d198ca823195871b95944af9d314f88f1e8f","GPT_SoVITS/AR/models/__init__.py":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","GPT_SoVITS/AR/models/t2s_lightning_module.py":"10d0346eb7fef5880609d3339b8f1f454f2d97041b129034fd0dd052955dec9d","GPT_SoVITS/module/transforms.py":"d754f4f46a6bb5f8542e7d2ecf4f1ac1abb0f8a06e0176b8503bf7b9bcd464f2","tools/my_utils.py":"7b181ffa49aa540d457863dee57cd44984147dba54c6b13befa71159f5012e8e","GPT_SoVITS/AR/models/t2s_model_onnx.py":"7247aa0b00274faa26306535f71089586a4b2f033d2dab1f93a99b82b6198061","GPT_SoVITS/AR/models/t2s_model.py":"3911c72644a5928193fa78cdafeda249b93bbcb592a209a07f5dbb2530172050","GPT_SoVITS/AR/models/structs_cudagraph.py":"5edafd44a5825779defda6e268f608c6ba8be12b447fae7905104ef53ff33f36","GPT_SoVITS/prepare_datasets/1-get-text.py":"de50b7d45b1dd1986aa023dad7681541989ba8fa2b28cd7270702101d1bec4aa","tools/AP_BWE_main/models/model.py":"a40c0ea2ff4202d8452eaf65b2f57309fa1190dc902eedc2698a51426221e841","GPT_SoVITS/AR/text_processing/symbols.py":"bbf0a81885e42e360908961aee882f26a85c1de6dd0608bcdfde3765d4a34fe6","GPT_SoVITS/AR/modules/activation.py":"0c2ace48ac9d371260fa9d7b0a42440de35ca2a0c9c61a7663b407efb45865d4","GPT_SoVITS/AR/text_processing/__init__.py":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","GPT_SoVITS/eres2net/pooling_layers.py":"3def78154bec291b46ebb7daa44ffd6da72adbafb9a16ca39fb5dcfcf2649648","GPT_SoVITS/module/__init__.py":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","GPT_SoVITS/AR/utils/initialize.py":"a0a0abe20099aa3f89edfb6221b020e20880dfccbe2daa493e12959fc09b3a11","GPT_SoVITS/module/quantize.py":"22454990effa2bdaafd7d2de2ab3f22d876ca1ed860b2854ea4b3b95a1ccbae1","GPT_SoVITS/feature_extractor/cnhubert.py":"fdbaf4eb52287bcad055f8fb635d1fc1fcd92d9357f50407e20662c2769a857f","GPT_SoVITS/AR/modules/embedding.py":"2985e858c2b82cd209d0db058b8af11e02dbb78ace2fd828dd8945757fe41307","tools/asr/config.py":"9c6ffed740394fcededdd0383cc70e5e2288babe26b1a024284112611dc262f3","GPT_SoVITS/TTS_infer_pack/__init__.py":"bfa6afee49101d73e278fd3540b9e2ffbc5c28480e593af826ce2bf4ec66909c","GPT_SoVITS/sv.py":"5e05784161685ae5d97be5280584cb74eaff08e4e5d5ae3150ef4ad602157e60","GPT_SoVITS/BigVGAN/bigvgan.py":"34f253dbee3c08ce7e6940c8ae9c6af8d30970889955331abb17964ac6df34fd","GPT_SoVITS/BigVGAN/alias_free_activation/torch/filter.py":"c57cbb9a3605856ae25253d6b79d690752dadc02dc00da77d7555ac21aa0905e","GPT_SoVITS/TTS_infer_pack/TextPreprocessor.py":"cd75ddb247e5f81ade2c5deff18e4ecefdbcb2840ad6a84de878abb6b1e23df6","GPT_SoVITS/BigVGAN/alias_free_activation/torch/__init__.py":"565dcd4185bd0a4cae2a29a07556fa670c93cd7e349a05e350a423cdcfa80fe5","tools/uvr5/bs_roformer/__init__.py":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","GPT_SoVITS/AR/data/data_module.py":"bb3686406ee7f6ccefdadc3604a9db60f3e8a6e94b330426e899e01e284aa24a","tools/uvr5/lib/lib_v5/layers_123821KB.py":"766f056d98f7032baf3c8f3e2a4f870bef2e3b9307bcae71caaae42a2a559576","GPT_SoVITS/prepare_datasets/2-get-hubert-wav32k.py":"e46d39e0c3f5f298507ff40540a38f6d50de0ae30a259759862f7efa61a60586","tools/slicer2.py":"5c69c5729b440babefa4ecbeb540dcfd2216091e1f370c8d38631f1d6fffb269","GPT_SoVITS/module/attentions.py":"e3b0e90e1023e90820f009a614b5683ec08682968b79e83e5c9ec2f4428bae3b","GPT_SoVITS/module/models.py":"eacbf63fe0f0d0e8fee3cfd33f2fea01189729b2b1c1108ed2233963cb6d0217","GPT_SoVITS/AR/modules/transformer_onnx.py":"2bd23a38c1a93543d49b441b817c2aa7df0dcf9a00032b2a8b99eff6e366f607","GPT_SoVITS/text/g2pw/utils.py":"770e3759eefaf097e2289bf92fb45498f6d817de72a0fed813ac301500f6fc43","tools/cmd-denoise.py":"acf7f5bae743124cb0ed184291cb3002236295fbf328b02746867f87e171fb1d","GPT_SoVITS/AR/__init__.py":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","GPT_SoVITS/text/zh_normalization/num.py":"971f985ffe293b98d2d1bcbe93024135801488135bf34bdb813ef8fa9d91dd4c","GPT_SoVITS/AR/utils/__init__.py":"537af99ae3afc0cb1de7c3c4b7cb91b9afbc8193061efd2a20b24231621c4d04","GPT_SoVITS/text/LangSegmenter/__init__.py":"3ce6d56e4ce2e2009b0e6a82d5841245fafef4d46437b30b58b921ac6d07ec53","GPT_SoVITS/f5_tts/model/modules.py":"d54f49402172959ee8a73f804735561d9bcbaf4d18c18f2f4138acf854dbccf1","GPT_SoVITS/text/LangSegmenter/langsegmenter.py":"92d7180cccb354670238cb0412e9537f9235398530b56865df5d9a39aa1c0dcf","GPT_SoVITS/text/korean.py":"762ecd468d6cb56c82524deabc059cf9dd2185e1fac0f6d5e602b2c8691f03fb","GPT_SoVITS/feature_extractor/whisper_enc.py":"e80000115c437c06325a2a3037128485efdb973e3652d21ad40c4c8a05a8e2f5","GPT_SoVITS/text/zh_normalization/constants.py":"f972d2825d1eeb9dce499b189e891b2d58d9e58e24cc40cc547e88ec7b57c5be","GPT_SoVITS/module/distrib.py":"b90d12ee6f5cad10bf59e8a205dd648b7d83df3006067d3049830a99368fe9c9","GPT_SoVITS/feature_extractor/__init__.py":"f9f47cb9356bfb135a9c600fe348e6054bef6de2c64f11b68281dc75a1fe7028","GPT_SoVITS/s2_train.py":"6771eff7970f7e0344bd68bd94b6c37fc9376e3f7ba72243de5425db35f906ac","tools/AP_BWE_main/datasets1/dataset.py":"4b84e6adfc4b8076384488c8915e89ad3db799abc77ab1eb36c9d550c2b8a61e","GPT_SoVITS/module/mrte_model.py":"c29b730226d4e261ecc695a87f5be8ae2e9aeb95144e6f420fed9e15929ae9fa","webui.py":"361e3879c4353a4b34ce96f40292495450000cbd7a1b19b976f9cf3f84772159","GPT_SoVITS/stream_v2pro.py":"efad6a0c79e5121d76a27b15882b7cb6f85befac51fe819cc0ee4e1c005f9f63","GPT_SoVITS/module/models_onnx.py":"6bf5a10fd7723b46e680941dc406cc36cd3b69c23cab1d650f2c6407bd600fe7","tools/i18n/i18n.py":"501b68f03ff84777ec7a99b13250f897e8a8644d974440402bc22fa870ba7bd6","GPT_SoVITS/TTS_infer_pack/text_segmentation_method.py":"22602e2497d981336b3d8a45a30b469ef2222ac7646c09a52367f9abeee69e66","GPT_SoVITS/AR/utils/io.py":"f3bc18d2c3779751e9972689e96bdfda2359194108d8201f7eaa34baaa00cb4b","config.py":"6bdf0a0430b3954d5ea85e63e15255cf53f3bfd7bc5195a721d63fc9b7213cfc","GPT_SoVITS/text/cantonese.py":"777b593d86b2d89a7a0bdc5f01dbbd9d67132d8270097161dba3288ae31c20e7","tools/uvr5/lib/lib_v5/nets_61968KB.py":"f5c398f431a03f1a99b289885292cc95ac3c0673f2c5010cf856d289b3f71cb3","GPT_SoVITS/AR/data/bucket_sampler.py":"4da7ef28c78bca1b7a55ac8e6f886386d22b1a023f8d5e1d74c3ff5100021449","GPT_SoVITS/TTS_infer_pack/TTS.py":"75398e84f6625044d794ebfc2f2ac6d6202f328259e13e032c405301e99efb6a","GPT_SoVITS/text/zh_normalization/phonecode.py":"269924b39d8953b75c5d8c5a6a846b5ed9ed53da9b7ab862aaa833be671d03bc","tools/slice_audio.py":"cb680f2d77d3f09803e1d8de25968d8ff46a4fbc6b19e8c1b5153c7f8befbca3","GPT_SoVITS/module/modules.py":"0906cf4ed3a1dcdd45bdb469f4baff8ebe5a7c8cc2640a9853a4bf6898f76f18","GPT_SoVITS/AR/modules/optim.py":"b74bf931cc64c44a5b0d79a62151eb0d28f7ad851712d0bb75bd0ccd077a87e0","GPT_SoVITS/eres2net/kaldi.py":"5f7970c20bfa1eec43c776580db4a945e82cbb2b34d44960a76ab39f365b10c5","GPT_SoVITS/onnx_export.py":"e7f5a385199abc959b58fd940e519e484cd671d7e43b43c7cd889526f8baf391","GPT_SoVITS/text/zh_normalization/__init__.py":"f4d87f962c2bfd708dcde24fbcc670f7fefa7b49ab634f8f0e19d863262ca2fe","GPT_SoVITS/module/attentions_onnx.py":"8120ba1d550570b0f08f32b3107980857cef380c7ed3a48ca8778f5a9aca06b7","GPT_SoVITS/inference_webui_fast.py":"bb20dd94405a4a712cd2289b78ef013afd90a225d1646b6c8750942d4bb91c37","GPT_SoVITS/s2_train_v3_lora.py":"9edbd04e317d2992b9310065f604df3ba6e1d0a81fc09f82c0b687ddcbc2c9eb","GPT_SoVITS/AR/models/t2s_lightning_module_onnx.py":"1f0f1175d1edcb7e6cb3b4de4fd19978c9cd50a7644e6006f407c1fe337c2d0e","tools/uvr5/vr.py":"eb15c6268a04c3834825e16a6f33597c7b1e036740dd73a376ee902ab67bea17","tools/i18n/scan_i18n.py":"a5b3bd6f3ffc3d77d67adc4424d59e20bb25bb47fa62d25fe74497003be3650d","GPT_SoVITS/AR/modules/patched_mha_with_cache.py":"537c028d9fa72506066da0f157239ae3a6d7ba942afe8634d0fc787233afac56","GPT_SoVITS/text/zh_normalization/char_convert.py":"40c9a9567dee1866b6a144f41cef1ee1cbe393d0d308c991849da93f034f8b05","GPT_SoVITS/module/losses.py":"b23e16fab2df2322f54e6302335c9cf575a18e0c330a3658d6abadcbaac1a94e","GPT_SoVITS/text/english.py":"34f3d5c942c9175eef1d1cae4fcc983a5b88aad808ffa88ec29344573d5b12c5","GPT_SoVITS/utils.py":"74b6b73594507532f53d12a9bb8eaeabfce4410a73a2599467cf8c7cba7e87e3","GPT_SoVITS/AR/text_processing/phonemizer.py":"f831682d84393c2590a43c07d29c4469578c0036a07dd968d90588726cf22574"},
+  "sourceRevision": "48b1a0169a28582a8984402f82cf438d3bfa6aca",
+  "safeG2pwSha256": "e880e8dc1f2b07e505965a0e078ef53133b84d7a2f2c38cc30db466f38542ea0",
+  "voices": [
+    {
+      "id": "ningguang",
+      "label": "凝光",
+      "key": "gpt-sovits-ningguang",
+      "prefix": "原神（已更新4.8）/凝光",
+      "gpt": "凝光-e10.ckpt",
+      "sovits": "凝光_e10_s230.pth",
+      "reference": "我的话…偶尔迎迎潮流无妨，但还是对棋戏更感兴趣。.wav",
+      "prompt": "我的话…偶尔迎迎潮流无妨，但还是对棋戏更感兴趣。"
+    },
+    {
+      "id": "ganyu",
+      "label": "甘雨",
+      "key": "gpt-sovits-ganyu",
+      "prefix": "原神（已更新4.8）/甘雨",
+      "gpt": "甘雨-e10.ckpt",
+      "sovits": "甘雨_e10_s170.pth",
+      "reference": "但只要最后落在具体的「人」身上，那，我可以想办法。.wav",
+      "prompt": "但只要最后落在具体的「人」身上，那，我可以想办法。"
+    },
+    {
+      "id": "keqing",
+      "label": "刻晴",
+      "key": "gpt-sovits-keqing",
+      "prefix": "原神（已更新4.8）/刻晴",
+      "gpt": "刻晴-e10.ckpt",
+      "sovits": "刻晴_e10_s190.pth",
+      "reference": "这「七圣召唤」虽说是游戏，但对局之中也隐隐有策算谋略之理。.wav",
+      "prompt": "这「七圣召唤」虽说是游戏，但对局之中也隐隐有策算谋略之理。"
+    }
+  ],
+  "models": [
+    {
+      "key": "gpt-sovits",
+      "repo": "lj1995/GPT-SoVITS",
+      "revision": "336b2ec4e8d4ac74740798dd40af44e74659ecaf",
+      "files": [
+        [
+          "s1v3.ckpt",
+          155284856,
+          "sha256",
+          "87133414860ea14ff6620c483a3db5ed07b44be42e2c3fcdad65523a729a745a"
+        ],
+        [
+          "v2Pro/s2Gv2ProPlus.pth",
+          200125741,
+          "sha256",
+          "d42a22bbbf65fb2bbdd45ad6a66841156977db45c7aabe0a6992ff378d9c7d3b"
+        ],
+        [
+          "sv/pretrained_eres2netv2w24s4ep4.ckpt",
+          107528697,
+          "sha256",
+          "4f5a0bf73c61eb41b174e1bb54e7ee3c83233892be8e0af1f187024e8e581a35"
+        ],
+        [
+          "chinese-hubert-base/config.json",
+          1449,
+          "git",
+          "0bb839d4b0cd2ad41cb13c6500fd660800aaefdf"
+        ],
+        [
+          "chinese-hubert-base/preprocessor_config.json",
+          212,
+          "git",
+          "409547bbb99588f69a603019a707505610fa38d3"
+        ],
+        [
+          "chinese-hubert-base/pytorch_model.bin",
+          188811417,
+          "sha256",
+          "24164f129c66499d1346e2aa55f183250c223161ec2770c0da3d3b08cf432d3c"
+        ],
+        [
+          "chinese-roberta-wwm-ext-large/config.json",
+          963,
+          "git",
+          "3ae58d7f0734373bb28d3b6b9d6858b34f600b4a"
+        ],
+        [
+          "chinese-roberta-wwm-ext-large/tokenizer.json",
+          268962,
+          "git",
+          "9e77beb20869ea3b7850166fbc8cc7734662a017"
+        ],
+        [
+          "chinese-roberta-wwm-ext-large/pytorch_model.bin",
+          651225145,
+          "sha256",
+          "e53a693acc59ace251d143d068096ae0d7b79e4b1b503fa84c9dcf576448c1d8"
+        ]
+      ]
+    },
+    {
+      "key": "gpt-sovits-g2pw",
+      "repo": "spaces/lj1995/GPT-SoVITS-ProPlus",
+      "revision": "ff04190dad5756e473c831ddad14f95c0c087669",
+      "files": [
+        [
+          "text/G2PWModel/MONOPHONIC_CHARS.txt",
+          120744,
+          "git",
+          "0078464f8690b46ab0021750aafa4bfb845654e8"
+        ],
+        [
+          "text/G2PWModel/POLYPHONIC_CHARS.txt",
+          102444,
+          "git",
+          "8f81544ff792a8e50270787955eea5c3d2af2045"
+        ],
+        [
+          "text/G2PWModel/bopomofo_to_pinyin_wo_tune_dict.json",
+          7739,
+          "git",
+          "7d52bb851d2508f7f6faec06bdf4baadb1e49cab"
+        ],
+        [
+          "text/G2PWModel/char_bopomofo_dict.json",
+          1851143,
+          "git",
+          "998febb6dd9e8d8faf62e5f985b40b2dbbe772d3"
+        ],
+        [
+          "text/G2PWModel/config.py",
+          347,
+          "git",
+          "59321e5803442fa4563c5162c492e4e4e9cf8df7"
+        ],
+        [
+          "text/G2PWModel/g2pW.onnx",
+          635212732,
+          "sha256",
+          "2eb3c71fd95117b2e1abef8d2d0cd78aae894bbe7f0fac105ddc9c32ce63cbd0"
+        ],
+        [
+          "text/G2PWModel/version",
+          5,
+          "git",
+          "c0ec837a4402cbea882d273a1aa347f111f37a56"
+        ]
+      ]
+    },
+    {
+      "key": "voice-reference-cosyvoice",
+      "url": "https://raw.githubusercontent.com/QwenAudio/CosyVoice/074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc/asset/zero_shot_prompt.wav",
+      "files": [
+        [
+          "zero_shot_prompt.wav",
+          334138,
+          "git",
+          "a7b9d954289ddf5c90a4dc4f0a912edaea10945a"
+        ]
+      ]
+    },
+    {
+      "key": "gpt-sovits-ningguang",
+      "repo": "UnlimitedBurst/GPT-SoVITS",
+      "revision": "48b739fe577b022c60f08da75aecfa52c7d367ac",
+      "files": [
+        [
+          "原神（已更新4.8）/凝光/凝光-e10.ckpt",
+          155312205,
+          "sha256",
+          "e3b26c2b51cd4810aba0ef01295a40f62949cc9fb1a0780eec23f070c46bc0cc"
+        ],
+        [
+          "原神（已更新4.8）/凝光/凝光_e10_s230.pth",
+          85006525,
+          "sha256",
+          "c2d7ce923ea227824942e16b4b715679f9edfaac256818a8a60351094057a2c9"
+        ],
+        [
+          "原神（已更新4.8）/凝光/我的话…偶尔迎迎潮流无妨，但还是对棋戏更感兴趣。.wav",
+          597420,
+          "git",
+          "42ff1eb14262bc43b4bd416a5fc3d09eea027c31"
+        ]
+      ]
+    },
+    {
+      "key": "gpt-sovits-ganyu",
+      "repo": "UnlimitedBurst/GPT-SoVITS",
+      "revision": "48b739fe577b022c60f08da75aecfa52c7d367ac",
+      "files": [
+        [
+          "原神（已更新4.8）/甘雨/甘雨-e10.ckpt",
+          155312957,
+          "sha256",
+          "662f2eb5b8e6fed2329895b42cdc56336497030bb280af30ca4e2a4cf2f880b6"
+        ],
+        [
+          "原神（已更新4.8）/甘雨/甘雨_e10_s170.pth",
+          85007202,
+          "sha256",
+          "b175113ddbb6cce33eb87c827a42db066e7a4a2608badb8c6cbb17624f37a56b"
+        ],
+        [
+          "原神（已更新4.8）/甘雨/但只要最后落在具体的「人」身上，那，我可以想办法。.wav",
+          524460,
+          "git",
+          "d07e3b2713e93735b25fee767b777cb501236ddc"
+        ]
+      ]
+    },
+    {
+      "key": "gpt-sovits-keqing",
+      "repo": "UnlimitedBurst/GPT-SoVITS",
+      "revision": "48b739fe577b022c60f08da75aecfa52c7d367ac",
+      "files": [
+        [
+          "原神（已更新4.8）/刻晴/刻晴-e10.ckpt",
+          155312957,
+          "sha256",
+          "ee7670daa40492bb58c4c21d9f78cd65dc4d7efd7c34996116c3fe18233f4829"
+        ],
+        [
+          "原神（已更新4.8）/刻晴/刻晴_e10_s190.pth",
+          85007202,
+          "sha256",
+          "0304ebde0a175ca6e9699afa8f887fd46a5b9c104b9941d5ed4ae9b1b1549398"
+        ],
+        [
+          "原神（已更新4.8）/刻晴/这「七圣召唤」虽说是游戏，但对局之中也隐隐有策算谋略之理。.wav",
+          554668,
+          "git",
+          "b8bb4ff30cdd7cb075f6a7e33600bdb2111102a7"
+        ]
+      ]
+    }
+  ]
+}

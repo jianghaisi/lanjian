@@ -1,0 +1,24 @@
+# Audition-only environment. Torch/torchaudio 2.7.1+cu128 installed from the existing
+# verified local uv cache separately; never install this into the product venv.
+numpy==1.26.4
+scipy==1.16.3
+librosa==0.10.2.post1
+numba==0.61.2
+pytorch-lightning==2.5.1
+matplotlib==3.10.7
+torchmetrics==1.5.2
+transformers==4.57.3
+peft==0.17.1
+onnxruntime==1.23.2
+ffmpeg-python==0.2.0
+soundfile==0.13.1
+psutil==7.2.2
+PyYAML==6.0.3
+cn2an==0.5.23
+pypinyin==0.55.0
+jieba==0.42.1
+opencc-python-reimplemented==0.1.7
+fast-langdetect==0.3.2
+split-lang==2.1.0
+rotary-embedding-torch==0.8.9
+x-transformers==2.1.6

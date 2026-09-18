@@ -1,0 +1,11 @@
+# Isolated Python 3.12. Install torch/torchaudio 2.7.1 from the official cu128 index first.
+# The inference-only package is installed with --no-deps; no Gradio/HTTP server.
+transformers==4.57.3
+accelerate==1.12.0
+librosa==0.11.0
+soundfile==0.13.1
+sox==1.5.0
+onnxruntime==1.23.2
+einops==0.8.1
+sherpa-onnx==1.13.8
+psutil==7.2.2

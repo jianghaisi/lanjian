@@ -1,0 +1,24 @@
+/* Original narrative archive palette. Asset-free, offline, and theme-aware. */
+:root {
+  --color-paper:#F3F0E8; --color-surface:#FAF9F5; --color-ink:#1D2220;
+  --color-muted:#676E69; --color-line:#D8D6CF; --color-jade:#287A68;
+  --color-orange:#E99A35; --color-danger:#B4473E; --color-rail:#E5E5DF;
+  --space-1:.5rem; --space-2:1rem; --space-3:1.5rem; --space-4:2rem; --space-5:2.5rem;
+  --radius-panel:.125rem; --duration-fast:140ms; --duration-panel:220ms;
+  --archive-header-size:3rem;
+  --archive-toolbar-size:clamp(3.5rem, 7.4vh, 4.75rem);
+  --archive-control-size:2.5em;
+  --archive-text-control:var(--type-control, .875rem);
+  --archive-text-small:calc(var(--archive-text-control) * .86);
+  --archive-heading-size:clamp(1.375rem, 1.65vw, 1.875rem);
+  --archive-icon-size:1.25em;
+  --archive-gutter:clamp(.75rem, 1.25vw, 1.5rem);
+  --form-text: .875rem;
+  --form-help: .75rem;
+  --form-heading: 1rem;
+  --form-control-height: 2.375rem;
+  --form-control-compact: 2rem;
+}
+:root[data-theme=xuanzhi]{--color-paper:#EDE7DB;--color-surface:#F9F5EB;--color-line:#D3C9B9;--color-rail:#E4DED1}
+:root[data-theme=moye]{--color-paper:#202522;--color-surface:#282E2A;--color-ink:#EEEFE7;--color-muted:#B0B8B1;--color-line:#49534B;--color-jade:#83C4AE;--color-orange:#E9AB59;--color-danger:#E7978C;--color-rail:#303832}
+@media(prefers-reduced-motion:reduce){:root{--duration-fast:0ms;--duration-panel:0ms}}

@@ -1,0 +1,96 @@
+/* Keep status text distinct from actions; reuse the existing ink/jade palette. */
+.workflow-next-step { padding: 12px 14px; border-bottom: 1px solid var(--line); font-family: var(--sans); }
+.guidance-caption { color: var(--jade-deep); font: 600 12px/1.5 var(--sans); }
+.workflow-next-step p, .consistency-next-step p { margin: 6px 0 10px; color: var(--ink-2); font: 400 12px/1.65 var(--sans); overflow-wrap: anywhere; }
+.workflow-next-step > button { width: 100%; justify-content: space-between; }
+.workflow-next-step details { margin-top: 10px; }
+.workflow-next-step summary, .conflict-other-actions summary { width: fit-content; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; color: var(--ink-2); cursor: pointer; font: 500 12px/1.5 var(--sans); }
+.workflow-next-step ol { list-style: none; padding: 0; margin: 8px 0 0; }
+.workflow-next-step li { display: flex; align-items: center; gap: 8px; padding-block: 4px; }
+.workflow-next-step li > span { color: var(--muted); font-size: 11px; }
+.workflow-next-step li > button { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 4px 7px; color: var(--ink); font: 500 12px/1.5 var(--sans); cursor: pointer; }
+.consistency-next-step { display: grid; justify-items: start; padding: 14px; border-bottom: 1px solid var(--line); background: var(--jade-wash); }
+.consistency-next-step > .guidance-caption { letter-spacing: 0; }
+.consistency-next-step > small { margin-top: 8px; color: var(--muted); font: 400 11px/1.55 var(--sans); }
+.consistency-state-label { display: inline-block; margin-left: 7px; color: var(--muted); font: 400 11px/1.5 var(--sans); }
+.consistency-layers button:not(.status-ready) > span > small { display: block; margin-block: 5px 8px; color: var(--ink-2); font: 400 12px/1.65 var(--sans); overflow-wrap: anywhere; }
+.consistency-layers button { cursor: pointer; }
+.consistency-layers button:disabled { opacity: .55; cursor: not-allowed; }
+.consistency-action-label { display: block; width: fit-content; margin-top: 5px; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--jade-deep); font: 600 11px/1.4 var(--sans); }
+.writing-guidance-entry { display: flex; align-items: center; justify-content: space-between; gap: 6px; width: calc(100% - 28px); margin: 0 14px 10px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--jade-deep); font: 500 12px/1.5 var(--sans); text-align: left; cursor: pointer; }
+.writing-guidance-entry:disabled { opacity: .5; cursor: not-allowed; }
+.writing-guidance-entry svg { flex: none; }
+.conflict-help { padding: 12px 16px; border-left: 3px solid var(--jade); background: var(--jade-wash); font: 400 13px/1.7 var(--sans); }
+.conflict-help p { margin: 4px 0 0; }
+.conflict-resolution-actions { padding: 14px 18px; border-top: 1px solid var(--line); }
+.conflict-resolution-actions > p { margin: 0 0 10px; color: var(--ink-2); font: 400 12px/1.65 var(--sans); }
+.conflict-main-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.conflict-other-actions { margin-top: 10px; }
+.conflict-other-actions[open] { display: grid; gap: 8px; }
+.conflict-other-actions > button { display: grid; gap: 3px; width: 100%; padding: 10px 12px; text-align: left; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.conflict-other-actions > button b { font: 600 12px/1.5 var(--sans); }
+.conflict-other-actions > button small { font: 400 11px/1.5 var(--sans); color: var(--muted); }
+.workflow-next-step button:hover:not(:disabled), .writing-guidance-entry:hover:not(:disabled), .conflict-other-actions > button:hover:not(:disabled) { border-color: var(--jade); }
+.conflict-other-actions > button:disabled { opacity: .5; cursor: not-allowed; }
+.conflict-exception-form { display: grid; gap: 8px; margin-block: 8px; padding: 12px; border: 1px solid var(--line); background: var(--jade-wash); font: 400 12px/1.6 var(--sans); }
+.conflict-exception-form label { display: grid; gap: 6px; }
+.conflict-exception-form textarea { box-sizing: border-box; width: 100%; resize: vertical; border: 1px solid var(--line-strong); padding: 8px; background: var(--surface); color: var(--ink); font: inherit; }
+.workflow-next-step :is(button, summary):focus-visible, .conflict-resolution-actions :is(button, summary):focus-visible, .writing-guidance-entry:focus-visible { outline: 2px solid var(--jade); outline-offset: 3px; }
+.character-conflict-footer { flex-wrap: wrap; gap: 12px; }
+.character-conflict-scroll { grid-auto-rows: max-content; }
+.character-conflict-docket > header { padding: 20px 24px; }
+.character-conflict-docket > header h2 { font-size: 22px; }
+.character-conflict-scroll { padding: 16px 24px; gap: 12px; }
+.conflict-help { padding: 8px 12px; }
+.conflict-resolution-actions { padding: 10px 0 0; margin-top: 12px; }
+.character-conflict-card, .continuity-finding-card { padding: 14px 16px; }
+.continuity-finding-card > p { margin: 10px 0; font: 400 13px/1.65 var(--sans); }
+.writing-toolbar button:not(:disabled) { border: 1px solid var(--line-strong); border-radius: 4px; cursor: pointer; }
+
+.fact-review-instructions { padding: 12px 14px; background: var(--jade-wash); font: 400 12px/1.65 var(--sans); }
+.fact-review-instructions b { color: var(--jade-deep); font-weight: 600; }
+.fact-review-instructions p { margin: 5px 0 0; color: var(--ink-2); }
+.fact-review-bulk { display: block; }
+.fact-review-bulk summary, .fact-review-more summary { width: fit-content; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--ink-2); cursor: pointer; font: 500 12px/1.5 var(--sans); }
+.fact-review-bulk > span { margin-block: 8px; }
+.fact-review-bulk > span small { font: 400 11px/1.6 var(--sans); }
+.fact-review-bulk > nav { display: flex; flex-wrap: wrap; }
+.fact-review-bulk button { white-space: normal; padding: 7px 8px; line-height: 1.5; cursor: pointer; }
+.fact-review-decisions { display: flex; flex-wrap: wrap; gap: 6px; align-items: start; padding: 8px; }
+.fact-review-decisions button, .fact-review-decisions button:last-child { padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--ink); font: 500 12px/1.5 var(--sans); cursor: pointer; }
+.fact-review-decisions button.selected { background: var(--jade); border-color: var(--jade); color: #fff; }
+.fact-review-more[open] { flex-basis: 100%; }
+.fact-review-more[open] summary { margin-bottom: 8px; }
+.fact-review-more > button { margin: 0 6px 4px 0; }
+.fact-review-unsaved-choice { margin: 0; padding: 8px 10px; color: var(--jade-deep); background: var(--jade-wash); font: 500 11px/1.6 var(--sans); }
+.fact-review-actions span { font: 400 12px/1.6 var(--sans); }
+.fact-review-actions { position: sticky; bottom: 0; z-index: 2; background: var(--surface-raised); box-shadow: 0 -3px 10px rgb(0 0 0 / .04); }
+.fact-review-actions button { padding: 8px 12px; border-radius: 4px; font: 600 12px/1.5 var(--sans); cursor: pointer; }
+.fact-review-actions .fact-review-secondary { background: var(--surface); color: var(--ink-2); border-color: var(--line-strong); font-weight: 500; }
+.fact-review-panel button:disabled { opacity: .6; cursor: not-allowed; }
+.fact-review-panel :is(button, summary):focus-visible { outline: 2px solid var(--jade); outline-offset: 2px; }
+.fact-review-summary { flex-wrap: wrap; }
+.fact-review-empty p { margin: 0 0 10px; }
+
+.agent-diff-bulk > summary { width: fit-content; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--ink-2); font: 500 12px/1.5 var(--sans); cursor: pointer; }
+.agent-diff-bulk > p { margin: 8px 0; color: var(--muted); font: 400 11px/1.6 var(--sans); }
+.agent-diff-bulk-actions { flex-wrap: wrap; padding: 0; border: 0; }
+.agent-diff-bulk-actions button { min-height: 32px; font-size: 11px; }
+.agent-result-actions { flex-wrap: wrap; padding: 10px 0 0; border-top: 1px solid var(--line); }
+.agent-result-actions .agent-candidate-guidance { flex-basis: 100%; margin: 0 0 6px; color: var(--ink-2); font: 400 12px/1.65 var(--sans); }
+.agent-result-actions .control-button { min-height: 36px; white-space: normal; font: 500 12px/1.5 var(--sans); }
+.agent-candidate-check { display: grid; gap: 7px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--jade) 22%, var(--line)); background: color-mix(in srgb, var(--jade) 5%, var(--paper)); }
+.agent-candidate-check.attention { border-color: color-mix(in srgb, var(--cinnabar) 34%, var(--line)); background: color-mix(in srgb, var(--cinnabar) 5%, var(--paper)); }
+.agent-candidate-check > header, .agent-candidate-check > footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.agent-candidate-check > header span { color: var(--jade); font: 650 12px/1.4 var(--sans); }
+.agent-candidate-check.attention > header span { color: var(--cinnabar); }
+.agent-candidate-check > header b, .agent-candidate-check > footer span { color: var(--ink-3); font: 500 10px/1.4 var(--sans); }
+.agent-candidate-check > p { margin: 0; color: var(--ink-2); font: 400 11px/1.6 var(--sans); }
+.agent-candidate-check > ul { display: grid; gap: 4px; margin: 0; padding-left: 17px; color: var(--ink-2); font: 400 11px/1.55 var(--sans); }
+.agent-candidate-check > footer button { min-height: 32px; padding: 0 11px; border: 1px solid color-mix(in srgb, var(--cinnabar) 32%, var(--line)); background: var(--paper); color: var(--cinnabar); font: 600 11px/1 var(--sans); cursor: pointer; }
+.agent-candidate-check > footer button:hover, .agent-candidate-check > footer button:focus-visible { border-color: var(--cinnabar); background: color-mix(in srgb, var(--cinnabar) 8%, var(--paper)); }
+.agent-candidate > header { flex-wrap: wrap; }
+.agent-candidate > header small { line-height: 1.6; }
+.agent-diff-block > header { flex-wrap: wrap; gap: 6px; }
+.agent-diff-block footer button { min-height: 34px; font-size: 12px; cursor: pointer; }
+.agent-diff-block footer button:focus-visible, .agent-diff-bulk summary:focus-visible { outline: 2px solid var(--jade); outline-offset: 2px; }
