@@ -218,6 +218,9 @@ docs/                       使用、开发、发布和素材说明
 
 欢迎可复现的缺陷报告、中文文档完善和经过测试的小范围改进。提交前阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。当前范围与后续方向见 [产品基线](docs/PRODUCT-BASELINE.md) 和 [路线](docs/PRODUCT-ROADMAP.md)。
 
+## 友情链接
+[LINUX DO](https://linux.do/) —— 一个有温度的社区，欢迎交流
+
 ## License
 
 项目原创**源码**使用 [MIT License](LICENSE)。第三方依赖及角色、音乐、视频等非代码资源保留各自条件，不能推定全部资源都获得 MIT 授权。参见 [资源许可边界](ASSETS.md)、[桌面第三方说明](desktop/licenses/THIRD-PARTY-NOTICES.md) 和 [网页第三方说明](web/THIRD-PARTY-NOTICES.md)。
