@@ -23,6 +23,9 @@ export function createLibraryWorkflowActions(ports) {
     }
     const request = existingRequest || ports.workspaceRequests.capture(ports.current.value)
     const requestedChapterId = ports.selectedId.value
+    const requestedContent = ports.chapterContent.value
+    const requestedTitle = ports.chapterTitle.value
+    const unchangedManuscript = () => ports.chapterContent.value === requestedContent && ports.chapterTitle.value === requestedTitle
     if (ports.chapterOrderIssue.value) {
       ports.workflowStatus.value = {
         creationPath: ports.foundation.value.creationPath,
@@ -200,7 +203,7 @@ export function createLibraryWorkflowActions(ports) {
       if (
         !ports.workspaceRequests.isCurrent(request, ports.current.value) ||
         refreshGeneration !== ports.workspaceRefreshGeneration ||
-        ports.selectedId.value !== requestedChapterId
+        ports.selectedId.value !== requestedChapterId || !unchangedManuscript()
       )
         return
       ports.workflowStatus.value = {
@@ -239,7 +242,7 @@ export function createLibraryWorkflowActions(ports) {
     if (
       !ports.workspaceRequests.isCurrent(request, ports.current.value) ||
       refreshGeneration !== ports.workspaceRefreshGeneration ||
-      ports.selectedId.value !== requestedChapterId
+      ports.selectedId.value !== requestedChapterId || !unchangedManuscript()
     )
       return
     const { workflow, planning, consistency } = projection
@@ -280,7 +283,7 @@ export function createLibraryWorkflowActions(ports) {
       if (
         ports.workspaceRequests.isCurrent(request, ports.current.value) &&
         refreshGeneration === ports.workspaceRefreshGeneration &&
-        ports.selectedId.value === requestedChapterId
+        ports.selectedId.value === requestedChapterId && unchangedManuscript()
       ) {
         ports.contextFactPack.value = factPack
         ports.contextFactPackKey = nextFactPackKey

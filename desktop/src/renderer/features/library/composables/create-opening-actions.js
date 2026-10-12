@@ -2,7 +2,7 @@ import { nextTick } from 'vue'
 
 // Explicit live ports preserve the existing book/request scope and draft ownership.
 export function createLibraryOpeningActions(ports) {
-  function beginWorkspaceOpening(project) {
+  function beginWorkspaceOpening(project, { replay = true, visible = true } = {}) {
     const generation = ++ports.workspaceOpeningGeneration
     stopWorkspaceOpeningPhasePlayback()
     if (ports.workspaceOpeningSlowTimer) window.clearTimeout(ports.workspaceOpeningSlowTimer)
@@ -13,11 +13,14 @@ export function createLibraryOpeningActions(ports) {
       phase: 'switch',
       targetPhase: 'switch',
       slow: false,
-      visible: true
+      visible,
+      replay
     }
-    ports.workspaceOpeningSlowTimer = window.setTimeout(() => {
-      if (ports.workspaceOpening.value?.generation === generation) ports.workspaceOpening.value.slow = true
-    }, 4000)
+    ports.workspaceOpeningSlowTimer = visible ? window.setTimeout(() => {
+      if (ports.workspaceOpening.value?.generation === generation) {
+        ports.workspaceOpening.value.slow = true
+      }
+    }, 4000) : 0
     return generation
   }
 
@@ -85,6 +88,7 @@ export function createLibraryOpeningActions(ports) {
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     if (
       !opening.visible ||
+      !opening.replay ||
       reducedMotion ||
       workspaceOpeningPhaseIndex(phase) < workspaceOpeningPhaseIndex(opening.phase)
     ) {

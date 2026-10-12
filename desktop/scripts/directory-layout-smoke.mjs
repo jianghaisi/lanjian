@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { _electron } from 'playwright'
 
 // Run from desktop after building. The optional argument selects isolated output.
 const output = resolve(process.argv[2] || 'out')
-const profile = await mkdtemp(join(tmpdir(), 'lanjian-directory-check-'))
+const profile = await realpath(await mkdtemp(join(tmpdir(), 'lanjian-directory-check-')))
 const evidence = resolve('artifacts/directory-layout')
 await mkdir(evidence, { recursive: true })
 const workers = [

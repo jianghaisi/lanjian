@@ -1,0 +1,365 @@
+/* V3 workspace folio. The library and creation flow are deliberately outside
+   this root. Keep editor content/CodeMirror geometry and author fonts intact. */
+.narrative-terminal.redesigned-studio.archive-workspace {
+  --radius-panel:0;
+  --folio-dark: #263b32;
+  --folio-dark-line: #526c5c;
+  --folio-light: #f5f3eb;
+  --folio-muted: #c0cebf;
+  --folio-action: var(--color-action);
+  --folio-action-ink: var(--color-action-ink);
+  --folio-grid: color-mix(in srgb, var(--line) 20%, transparent);
+  --folio-rule: var(--ink);
+  --folio-paper: var(--surface);
+  --folio-grid-image: linear-gradient(var(--folio-grid) 1px, transparent 1px), linear-gradient(90deg, var(--folio-grid) 1px, transparent 1px);
+}
+
+/* Page identity: library typography, registration rule, and paper grid. */
+.narrative-terminal.redesigned-studio.archive-workspace .workbench > :is(.archive-page, .settings-editor:not(.model-settings-page)) {
+  container-type: inline-size;
+  max-width: none;
+  padding: var(--gap-section) var(--page-gutter) 40px;
+  background-color: var(--canvas);
+  background-image: var(--folio-grid-image);
+  background-size: 28px 28px;
+}
+.narrative-terminal.redesigned-studio.archive-workspace .workbench > .world-map-workbench { padding: 0; }
+.narrative-terminal.redesigned-studio.archive-workspace :is(.archive-page, .settings-editor, .local-model-store) > .archive-page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  min-height: 0;
+  margin: 0 0 var(--gap-section);
+  padding: 0 0 24px;
+  border-bottom: 1px solid var(--line-strong);
+  position: relative;
+}
+.narrative-terminal.redesigned-studio.archive-workspace .archive-page-heading::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  right: 0;
+  width: 64px;
+  height: 4px;
+  background: repeating-linear-gradient(125deg, var(--folio-action) 0 3px, transparent 3px 7px);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .archive-page-heading > .archive-page-heading-copy {
+  border-left: 5px solid var(--folio-rule);
+  padding-left: 18px;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.narrative-terminal.redesigned-studio.archive-workspace .archive-page-heading .eyebrow {
+  margin: 0 0 8px;
+  font: 500 10px/1.5 var(--sans);
+  letter-spacing: .12em;
+  color: var(--muted);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .archive-page-heading h2 {
+  margin: 0;
+  color: var(--ink);
+  font: 600 var(--page-heading-size, var(--type-page-title))/1.3 var(--serif);
+  letter-spacing: .025em;
+}
+.narrative-terminal.redesigned-studio.archive-workspace .archive-page-heading .archive-page-description {
+  max-width: 66ch;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font: 400 var(--type-body)/1.6 var(--sans);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .archive-page-heading > .archive-page-heading-actions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+/* Explicit primary/secondary hierarchy. Model pages own their already-reviewed
+   action styling; this selector only reaches the other workspace surfaces. */
+.narrative-terminal.redesigned-studio.archive-workspace :is(.archive-page, .settings-editor:not(.model-settings-page), .assistant-panel, .planning-dialog) :is(.control-button, .text-action, .ink-action, .seal-action) {
+  min-height: var(--form-control-height);
+  border-radius: var(--radius-panel);
+  box-shadow: none;
+  font: 500 var(--type-control)/1.4 var(--sans);
+}
+.narrative-terminal.redesigned-studio.archive-workspace :is(.archive-page, .settings-editor:not(.model-settings-page), .assistant-panel, .planning-dialog) :is(.control-button.primary, .ink-action, .seal-action) {
+  color: var(--folio-action-ink);
+  background: var(--folio-action);
+  border: 1px solid var(--folio-action);
+}
+.narrative-terminal.redesigned-studio.archive-workspace :is(.archive-page, .settings-editor:not(.model-settings-page), .assistant-panel, .planning-dialog) :is(.control-button.primary, .ink-action, .seal-action):not(:disabled):hover {
+  color: var(--folio-action-ink);
+  background: var(--color-action-hover);
+  border-color: var(--color-action-hover);
+}
+.narrative-terminal.redesigned-studio.archive-workspace :is(.archive-page, .settings-editor:not(.model-settings-page)) :is(input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select) {
+  border-radius: 0;
+  background-color: var(--folio-paper);
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+.narrative-terminal.redesigned-studio.archive-workspace :is(.archive-page, .settings-editor) :is(input, textarea, select):focus-visible {
+  outline: 2px solid var(--jade);
+  outline-offset: 2px;
+}
+
+/* Definition: write the premise first, then register genre and scale. */
+.narrative-terminal.redesigned-studio.archive-workspace .profile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, .85fr);
+  align-items: stretch;
+  gap: 24px;
+  padding-block: 24px;
+}
+.narrative-terminal.redesigned-studio.archive-workspace .profile-grid > :is(fieldset, .profile-disclosure) {
+  min-width: 0;
+  margin: 0;
+  padding: 20px 24px 24px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--folio-paper);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .profile-grid > .profile-premise {
+  grid-column: 1;
+  display: grid;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid var(--folio-dark-line);
+  outline: 1px solid var(--folio-dark-line);
+  outline-offset: -7px;
+  background: var(--folio-dark);
+  color: var(--folio-light);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .profile-premise > span {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font: 600 22px/1.4 var(--serif);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .profile-premise > span i {
+  color: var(--folio-muted);
+  font: 400 10px/1.4 var(--sans);
+  letter-spacing: .15em;
+}
+.narrative-terminal.redesigned-studio.archive-workspace .profile-premise > textarea { min-height: 170px; }
+.narrative-terminal.redesigned-studio.archive-workspace .profile-premise > small { color: var(--folio-muted); }
+.narrative-terminal.redesigned-studio.archive-workspace .profile-grid > .profile-kind {
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 14px;
+}
+.narrative-terminal.redesigned-studio.archive-workspace .profile-grid legend {
+  padding: 0 10px;
+  color: var(--ink);
+  font: 600 19px/1.4 var(--serif);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .profile-grid legend span {
+  margin-right: 8px;
+  color: var(--jade-deep);
+  font: 500 11px/1.4 var(--sans);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .profile-grid > :is(.profile-length-plan, .profile-writing-brief, .profile-disclosure) { grid-column: 1 / -1; }
+.narrative-terminal.redesigned-studio.archive-workspace .profile-length-summary {
+  align-self: stretch;
+  padding: 16px 20px;
+  border: 0;
+  color: var(--folio-light);
+  background: var(--folio-dark);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .profile-length-summary :is(small, output, output span) { color: inherit; }
+.narrative-terminal.redesigned-studio.archive-workspace .profile-grid .profile-disclosure { padding: 0; }
+.narrative-terminal.redesigned-studio.archive-workspace .profile-disclosure > summary {
+  cursor: pointer;
+  padding: 16px 24px;
+  color: var(--ink);
+  font: 600 16px/1.5 var(--serif);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .profile-disclosure > summary small { margin-left: 12px; font: 400 12px/1.5 var(--sans); }
+.narrative-terminal.redesigned-studio.archive-workspace .profile-disclosure > fieldset { border: 0; border-top: 1px solid var(--line); padding: 20px 24px; }
+.narrative-terminal.redesigned-studio.archive-workspace .profile-disclosure > fieldset legend { font-size: 14px; }
+.narrative-terminal.redesigned-studio.archive-workspace :is(.new-project-guide, .profile-next-step) {
+  margin: 0;
+  padding: 16px 22px;
+  border: 1px solid var(--line-strong);
+  border-left: 4px solid var(--jade);
+  border-radius: 0;
+  background: var(--folio-paper);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .new-project-guide small { overflow-wrap: anywhere; }
+
+/* Material and worldbook catalogues: dark index masthead, quiet paper detail. */
+.narrative-terminal.redesigned-studio.archive-workspace :is(.material-catalog-view, .story-entity-grid) {
+  display: grid;
+  grid-template-columns: minmax(220px, .75fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 24px;
+}
+.narrative-terminal.redesigned-studio.archive-workspace .material-workbench > .material-section { padding: 0; background: transparent; }
+.narrative-terminal.redesigned-studio.archive-workspace .material-catalog { padding: 0; }
+.narrative-terminal.redesigned-studio.archive-workspace :is(.material-catalog, .story-entity-list) {
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--folio-paper);
+  overflow: hidden;
+}
+.narrative-terminal.redesigned-studio.archive-workspace :is(.material-catalog > header, .story-catalog-heading) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 18px;
+  color: var(--folio-light);
+  background: var(--folio-dark);
+  border-bottom: 3px solid var(--folio-action);
+}
+.narrative-terminal.redesigned-studio.archive-workspace :is(.material-catalog > header, .story-catalog-heading) :is(b, small) { color: inherit; }
+.narrative-terminal.redesigned-studio.archive-workspace .material-catalog > header .control-button.secondary { border-color: var(--folio-dark-line); background: transparent; color: var(--folio-light); }
+.narrative-terminal.redesigned-studio.archive-workspace .material-catalog > header .control-button.secondary:hover { background: var(--folio-dark-line); color: var(--folio-light); }
+.narrative-terminal.redesigned-studio.archive-workspace :is(.source-detail-editor, .material-detail-empty, .idea-detail-empty, .story-entity-form, .research-compose, .event-candidate-form) {
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--folio-paper);
+}
+.narrative-terminal.redesigned-studio.archive-workspace :is(.material-detail-empty, .idea-detail-empty) {
+  min-height: 290px;
+  align-content: center;
+  border-top: 4px solid var(--folio-dark);
+}
+.narrative-terminal.redesigned-studio.archive-workspace :is(.material-counts span, .candidate-safety-mark) {
+  padding: 7px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--folio-paper);
+  color: var(--ink-2);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .story-entity-list { padding: 0 0 12px; max-height: min(540px, 60vh); overflow-y: auto; }
+.narrative-terminal.redesigned-studio.archive-workspace .story-entity-list > label { display: grid; gap: 6px; padding: 0 14px; margin: 14px 0; }
+.narrative-terminal.redesigned-studio.archive-workspace .story-entity-list > p { margin: 0; padding: 14px; }
+.narrative-terminal.redesigned-studio.archive-workspace .story-catalog-count { color: var(--folio-muted); font: 400 12px/1.5 var(--sans); }
+.narrative-terminal.redesigned-studio.archive-workspace .story-entity-list > button { border-radius: 0; border-bottom: 1px solid var(--line); }
+.narrative-terminal.redesigned-studio.archive-workspace :is(.material-source-list, .story-entity-list) > button.selected {
+  box-shadow: inset 3px 0 var(--jade);
+  background: var(--jade-wash);
+  color: var(--ink);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .worldbook-editor > details {
+  padding: 0 14px 12px;
+  border: 1px solid var(--line);
+  background: var(--canvas);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .worldbook-editor > details:not([open]) { padding-bottom: 0; }
+.narrative-terminal.redesigned-studio.archive-workspace .worldbook-editor summary { padding-block: 12px; }
+.narrative-terminal.redesigned-studio.archive-workspace .power-system-overview { padding: 22px; border: 1px solid var(--line); border-left: 4px solid var(--jade); background: var(--folio-paper); border-radius: 0; }
+.narrative-terminal.redesigned-studio.archive-workspace .realm-row { background: var(--folio-paper); border: 1px solid var(--line); padding: 16px; }
+.narrative-terminal.redesigned-studio.archive-workspace .system-template-workbench { gap: 24px; }
+.narrative-terminal.redesigned-studio.archive-workspace .system-template-preview { border: 1px solid var(--line-strong); }
+.narrative-terminal.redesigned-studio.archive-workspace .system-template-preview > header { padding: 14px 18px; background: var(--folio-dark); color: var(--folio-light); }
+.narrative-terminal.redesigned-studio.archive-workspace .system-template-preview > header small { color: var(--folio-muted); }
+
+/* Planning and chronicle: candidates stay distinct from adopted records. */
+.narrative-terminal.redesigned-studio.archive-workspace .manuscript-view-nav { display: flex; gap: 0; margin: 12px; border: 1px solid var(--line-strong); }
+.narrative-terminal.redesigned-studio.archive-workspace .manuscript-view-nav > button { flex: 1; min-height: 36px; border: 0; background: var(--folio-paper); color: var(--ink); font: 500 13px/1.4 var(--sans); }
+.narrative-terminal.redesigned-studio.archive-workspace .manuscript-view-nav > button[aria-current=page] { background: var(--folio-dark); color: var(--folio-light); box-shadow: inset 0 -2px var(--folio-action); }
+.narrative-terminal.redesigned-studio.archive-workspace :is(.planning-run, .continuation-analysis, .planning-blueprint, .planning-outline-candidate, .planning-volume-list, .preparation-order-note) {
+  border-radius: 0;
+  border-color: var(--line-strong);
+  background: var(--folio-paper);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .planning-run { padding: 24px; border-top: 4px solid var(--folio-dark); }
+.narrative-terminal.redesigned-studio.archive-workspace .timeline-primary-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.narrative-terminal.redesigned-studio.archive-workspace .timeline-primary-actions > button { white-space: normal; }
+.narrative-terminal.redesigned-studio.archive-workspace .timeline-workbench > .chronicle-heading { margin: 0; padding: 24px 30px; background-color: var(--canvas); background-image: var(--folio-grid-image); background-size: 28px 28px; }
+.narrative-terminal.redesigned-studio.archive-workspace :is(.outline-writing-toolbar, .manuscript-head) {
+  background: var(--folio-paper);
+  border-bottom: 1px solid var(--line-strong);
+  box-shadow: inset 0 3px var(--folio-dark);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .outline-document-state > span { font: 600 15px/1.5 var(--serif); }
+.narrative-terminal.redesigned-studio.archive-workspace :is(.editor-foot, .outline-inspector) { border-color: var(--line-strong); background: var(--folio-paper); }
+.narrative-terminal.redesigned-studio.archive-workspace .annotation-panel { border-left-color: var(--line-strong); }
+
+/* Settings are folio sections, using the existing category/section navigation. */
+.narrative-terminal.redesigned-studio.archive-workspace .settings-editor:not(.model-settings-page) > .settings-category-navigation {
+  min-width: 0;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: -30px 0 28px;
+  padding: 0;
+  overflow: visible;
+}
+.narrative-terminal.redesigned-studio.archive-workspace .settings-editor:not(.model-settings-page) > .settings-category-navigation button { min-width: 0; padding-inline: 6px; }
+.narrative-terminal.redesigned-studio.archive-workspace .settings-editor:not(.model-settings-page) > .settings-category-navigation button.selected { border-bottom-color: var(--folio-action); color: var(--folio-light); background: var(--folio-dark); }
+.narrative-terminal.redesigned-studio.archive-workspace .settings-editor:not(.model-settings-page) > .settings-category-navigation button.selected i { color: var(--folio-light); background: transparent; border-color: var(--folio-dark-line); }
+.narrative-terminal.redesigned-studio.archive-workspace .settings-editor:not(.model-settings-page) > .settings-page-section {
+  padding: 24px;
+  margin: 0 0 24px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--folio-dark);
+  border-radius: 0;
+  background: var(--folio-paper);
+}
+.narrative-terminal.redesigned-studio.archive-workspace .settings-editor.story-content-page > .story-entity-section { padding: 0; background: transparent; border: 0; }
+.narrative-terminal.redesigned-studio.archive-workspace .settings-page-section > header { margin-bottom: 22px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.narrative-terminal.redesigned-studio.archive-workspace .settings-page-section > header b { font: 600 20px/1.4 var(--serif); }
+.narrative-terminal.redesigned-studio.archive-workspace .settings-editor:not(.model-settings-page) :is(.theme-settings, .loader-preferences, .companion-settings, .writing-plugin-settings, .local-model-store) { min-width: 0; border-radius: 0; }
+
+/* Assistant/task chrome: clear origin and state without decorating prose. */
+.narrative-terminal.redesigned-studio.archive-workspace .assistant-panel > header { gap: 8px; padding: 12px 16px 0; background: var(--folio-paper); color: var(--ink); border-color: var(--line); }
+.narrative-terminal.redesigned-studio.archive-workspace .assistant-panel > header > div { color: var(--ink); border: 0; padding: 0; font: 600 14px/1.5 var(--sans); }
+.narrative-terminal.redesigned-studio.archive-workspace .assistant-panel > header > div > svg { display: block; width: 16px; height: 16px; color: var(--jade); }
+.narrative-terminal.redesigned-studio.archive-workspace .assistant-panel > header > div > span { color: var(--ink); }
+.narrative-terminal.redesigned-studio.archive-workspace .assistant-panel > header button { color: var(--muted); background: transparent; }
+.narrative-terminal.redesigned-studio.archive-workspace .assistant-panel > header > button { width: 28px; height: 28px; border-color: transparent; }
+.narrative-terminal.redesigned-studio.archive-workspace .assistant-panel > header > button:hover { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.narrative-terminal.redesigned-studio.archive-workspace .assistant-panel > header .assistant-mode-switch { border: 0; gap: 16px; }
+.narrative-terminal.redesigned-studio.archive-workspace .assistant-panel > header .assistant-mode-switch button { min-height: 32px; padding: 6px 0; border: 0; border-bottom: 2px solid transparent; font: 500 12px/1.5 var(--sans); }
+.narrative-terminal.redesigned-studio.archive-workspace .assistant-panel > header .assistant-mode-switch button.active { background: transparent; color: var(--jade); border-bottom-color: var(--jade); }
+.narrative-terminal.redesigned-studio.archive-workspace .field-assistant-intro { border: 0; padding: 4px 0 16px; }
+.narrative-terminal.redesigned-studio.archive-workspace .field-assistant-intro h3 { margin: 6px 0; font: 600 16px/1.5 var(--sans); }
+.narrative-terminal.redesigned-studio.archive-workspace .field-assistant-composer { border-radius: 0; border-color: var(--line-strong); background: var(--folio-paper); }
+.narrative-terminal.redesigned-studio.archive-workspace .task-center-heading { padding: 16px; border: 1px solid var(--line); border-left: 3px solid var(--jade); background: var(--folio-paper); }
+.narrative-terminal.redesigned-studio.archive-workspace .task-center-heading b { font: 600 20px/1.4 var(--serif); }
+.narrative-terminal.redesigned-studio.archive-workspace .task-center-filters button { border-radius: 0; }
+.narrative-terminal.redesigned-studio.archive-workspace .task-center-filters button.active { background: var(--folio-dark); color: var(--folio-light); }
+.narrative-terminal.redesigned-studio.archive-workspace .task-card { border-radius: 0; border-color: var(--line); background: var(--folio-paper); }
+.narrative-terminal.redesigned-studio.archive-workspace .task-card-actions button.primary { background: var(--folio-action); color: var(--folio-action-ink); border-color: var(--folio-action); }
+.narrative-terminal.redesigned-studio.archive-workspace .review-empty { min-height: 180px; display: grid; align-content: center; gap: 10px; padding: 32px; border: 1px solid var(--line); border-left: 4px solid var(--jade); background: var(--folio-paper); }
+.narrative-terminal.redesigned-studio.archive-workspace .review-empty b { color: var(--ink); font: 600 23px/1.4 var(--serif); }
+.narrative-terminal.redesigned-studio.archive-workspace .review-workspace .consistency-layers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding-block: 16px; }
+.narrative-terminal.redesigned-studio.archive-workspace .review-workspace .consistency-layers > button { min-width: 0; border: 1px solid var(--line); background: var(--folio-paper); padding: 18px; }
+.narrative-terminal.redesigned-studio.archive-workspace .planning-dialog { border-radius: 0; border: 1px solid var(--line-strong); border-top: 5px solid var(--folio-dark); background: var(--folio-paper); color: var(--ink); }
+.narrative-terminal.redesigned-studio.archive-workspace .planning-dialog h2 { font-family: var(--serif); }
+
+@container (max-width: 760px) {
+  .narrative-terminal.redesigned-studio.archive-workspace .profile-grid { grid-template-columns: minmax(0, 1fr); }
+  .narrative-terminal.redesigned-studio.archive-workspace .profile-grid > :is(.profile-premise, .profile-kind) { grid-column: 1; }
+  .narrative-terminal.redesigned-studio.archive-workspace :is(.material-catalog-view, .story-entity-grid) { grid-template-columns: minmax(0, 1fr); }
+  .narrative-terminal.redesigned-studio.archive-workspace .material-source-list { max-height: 240px; overflow-y: auto; }
+  .narrative-terminal.redesigned-studio.archive-workspace .profile-length-plan { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .narrative-terminal.redesigned-studio.archive-workspace .profile-length-summary { grid-column: auto; }
+  .narrative-terminal.redesigned-studio.archive-workspace .system-template-workbench { grid-template-columns: minmax(0, 1fr); }
+  .narrative-terminal.redesigned-studio.archive-workspace .review-workspace .consistency-layers { grid-template-columns: minmax(0, 1fr); }
+}
+@container (max-width: 480px) {
+  .narrative-terminal.redesigned-studio.archive-workspace .profile-grid :is(.profile-length-plan, .profile-writing-brief, .profile-autosave-policy) { grid-template-columns: minmax(0, 1fr); }
+  .narrative-terminal.redesigned-studio.archive-workspace .profile-grid > :is(fieldset, .profile-premise) { padding: 18px; }
+  .narrative-terminal.redesigned-studio.archive-workspace .settings-editor > .settings-category-navigation button i { display: none; }
+}
+
+/* Shared form hierarchy; prose, assistant density and library artwork have their own owners. */
+.narrative-terminal.redesigned-studio.archive-workspace :is(.archive-page,.settings-editor,.planning-dialog) small {
+  font-size:var(--type-meta);line-height:1.5;letter-spacing:0;overflow-wrap:anywhere;
+}
+.narrative-terminal.redesigned-studio.archive-workspace :is(.archive-page,.settings-editor,.planning-dialog) :is(.control-button,.text-action,.ink-action,.seal-action).compact { min-height:var(--form-control-compact); }
+.narrative-terminal.redesigned-studio.archive-workspace :is(.profile-grid,.settings-page-section,.structured-editor) :is(legend,h3) { font-size:var(--type-section-title); }
+/* Preserve the established library's auxiliary text after retiring the global small override. */
+.narrative-terminal.redesigned-studio.library-mode small { font-size:var(--type-meta);line-height:1.5;letter-spacing:0; }

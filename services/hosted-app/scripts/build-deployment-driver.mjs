@@ -1,0 +1,3 @@
+import { build } from 'esbuild'
+import { fileURLToPath } from 'node:url'
+await build({ entryPoints: ['scripts/deployment-driver.ts'], outfile: '../../deploy/hosted/build/deployment-driver.mjs', bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'bundle', external: ['better-auth', 'better-auth/*', 'fastify', '@lanjian/hosted-contracts', 'mammoth', 'jszip'], alias: { '@lanjian/writing-plugin-contracts': fileURLToPath(new URL('../../../packages/writing-plugin-contracts/src/index.ts', import.meta.url)) }, banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" } })

@@ -239,7 +239,20 @@ test('candidate-only canonical identity and selected historical version survive 
   const claim = await f.claim(); persist(f, claim)
   const result = await f.service.read(); assert.equal(result?.mappingCount, 2)
   const changed = await f.factory.openExisting(f.root); assert.ok(changed)
-  changed.approveCanonicalEvent(canonical.id); changed.updateMaterialSource({ ...material, excerpt: '新的来源', contentHash: 'c'.repeat(64) }); changed.close()
+  try {
+    assert.throws(() => changed.approveCanonicalEvent(canonical.id), { code: 'CONFLICT' })
+    changed.updateMaterialSource({ ...material, excerpt: '新的来源', contentHash: 'c'.repeat(64) })
+  } finally { changed.close() }
+  // Historical evidence fixture: a later unified version must not rewrite the
+  // original receipt. The retired ID-only legacy approval is not that writer.
+  using(f, db => {
+    db.exec('BEGIN IMMEDIATE')
+    const versions = new CanonicalEventVersions(db, 'book-one', () => 'later-approved')
+    const previous = versions.list(canonical.id).at(-1)!
+    versions.append(canonical.id, previous.id, { ...previous, status: 'approved', creator: 'author' }, stamp)
+    db.prepare("UPDATE canonical_events SET status='approved',approved_at=? WHERE id=?").run(stamp, canonical.id)
+    db.exec('COMMIT')
+  })
   const before = await files(f.root)
   assert.deepEqual(await f.service.read(), result); assert.deepEqual(await files(f.root), before)
 })

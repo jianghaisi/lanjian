@@ -174,7 +174,7 @@ const modelProbeServer = createServer(async (request, response) => {
     if (process.env.LANJIAN_SMOKE_QUESTION_ONLY === '1' && instruction.includes('前情问答烟测')) {
       questionCalls += 1
       const scenario = process.env.LANJIAN_SMOKE_QUESTION_SCENARIO || 'positive'
-      const priorQuote = scenario === 'normalized' ? '班长把ＮＯＴＥ_１２递给李远明：“明天还我。”' : '班长把数学笔记递给李远明：“明天还我。”'
+      const priorQuote = scenario === 'normalized' ? '班长把ＮＯＴＥ_１２递给周文衡：“明天还我。”' : '班长把数学笔记递给周文衡：“明天还我。”'
       const priorEvidencePresent = instruction.includes('第 1 章｜课堂笔记｜正文版本')
         && instruction.includes(priorQuote)
       questionContextVerified = instruction.includes('正在执行“作品问答”') && !instruction.includes('海盐彗星')

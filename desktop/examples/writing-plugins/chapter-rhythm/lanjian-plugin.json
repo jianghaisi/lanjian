@@ -1,0 +1,49 @@
+{
+  "apiVersion": 1,
+  "id": "personal.chapter-rhythm",
+  "name": "章段节奏诊断",
+  "version": "1.0.0",
+  "description": "统计章段结构，询问作者偏好后给出节奏建议。",
+  "runtime": "quickjs-js",
+  "entry": "main.js",
+  "capabilities": [
+    "author.ask"
+  ],
+  "tools": [
+    {
+      "id": "review",
+      "description": "统计章段结构，询问作者偏好后给出节奏建议。",
+      "effect": "derive",
+      "capabilities": [
+        "author.ask"
+      ],
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 12000
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 100000
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    }
+  ]
+}

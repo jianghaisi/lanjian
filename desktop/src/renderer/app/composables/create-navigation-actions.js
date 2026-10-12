@@ -1,42 +1,78 @@
-import { nextTick } from 'vue'
+import { computed, nextTick, shallowRef } from 'vue'
 import { targetForLeaf, workspaceCreationNavigation } from '../../features/library/services/workspace-navigation'
 import { firstSettingsSection } from '../services/settings-navigation'
 
 // Explicit live ports preserve the existing book/request scope and draft ownership.
 export function createAppNavigationActions(ports) {
+  let connectionsRefreshGeneration = 0, assignmentsRefreshGeneration = 0
+  // Settings leave the editor's selected object and draft with their existing owner.
+  // Only remember the view and workspace generation; never copy manuscript or credentials.
+  const modelReturnTarget = shallowRef(null)
+  const currentReturnTarget = () => {
+    const target = modelReturnTarget.value
+    return target && ports.workspaceRequests.isCurrent(target.request, ports.current.value) ? target : null
+  }
+  const modelReturnLabel = computed(() => {
+    const target = currentReturnTarget()
+    return target?.section === 'story' ? '返回正式资料' : target ? `返回${({ desk: '正文', outline: '大纲', preparation: '创作准备', research: '采风', timeline: '时间线', materials: '资料', world: '世界设定', profile: '作品设定' })[target.activity] || '创作'}` : '返回书稿'
+  })
+  async function returnFromModelSettings() {
+    if (!ports.current.value) return
+    const target = currentReturnTarget()
+    if (target?.section) {
+      await selectSettingsSection(target.section)
+      if (ports.settingsSection.value === target.section) modelReturnTarget.value = null
+      return
+    }
+    await selectActivity(target?.activity || 'desk')
+    if (ports.active.value !== 'settings') modelReturnTarget.value = null
+  }
+
   async function refreshOneOffConnections() {
+    const generation = ++connectionsRefreshGeneration
+    const request = ports.current.value && ports.workspaceRequests.capture(ports.current.value)
     const id = ports.current.value?.id
+    const current = () => generation === connectionsRefreshGeneration && ports.current.value?.id === id
+      && (!request || ports.workspaceRequests.isCurrent(request, ports.current.value))
     try {
       const view = await ports.desktop.modelConnections.list()
-      if (ports.current.value?.id === id) ports.oneOffGlobalConnections.value = view.connections
+      if (current()) ports.oneOffGlobalConnections.value = view.connections
     } catch {
-      if (ports.current.value?.id === id) ports.oneOffGlobalConnections.value = []
+      if (current()) ports.oneOffGlobalConnections.value = []
     }
   }
 
   async function refreshModelAssignments() {
+    const generation = ++assignmentsRefreshGeneration
+    const id = ports.current.value?.id
+    const request = ports.current.value && ports.workspaceRequests.capture(ports.current.value)
+    const current = () => generation === assignmentsRefreshGeneration && ports.current.value?.id === id
+      && (!request || ports.workspaceRequests.isCurrent(request, ports.current.value))
     await refreshOneOffConnections()
-    if (!ports.current.value) return
-    const id = ports.current.value.id
+    if (!id || !current()) return
     try {
       const value = await ports.desktop.ai.getSettings()
-      if (ports.current.value?.id === id)
+      if (current()) {
         ports.ai.value = {
           ...value,
           connections: value.connections.map((c) => ({ ...c, apiKey: '', clearApiKey: false }))
         }
+        ports.clearModelLoadIssue?.()
+      }
     } catch (error) {
-      ports.notice(error?.message || '模型分配暂时无法读取，正文仍可编辑。')
+      if (current()) ports.notice(error?.message || '模型分配暂时无法读取，正文仍可编辑。')
     }
   }
 
   async function openLibraryModels() {
+    if (ports.desktop.app.platform === 'browser') return
+    ports.localAppearanceDialog.value?.close()
     ports.libraryModelsOpen.value = true
     await nextTick()
     ports.libraryModelsDialog.value?.showModal()
   }
 
-  function closeLibraryModels(event) {
+  function closeLibraryModels(event, returnToSettings = false) {
     if (ports.modelSettingsDirty.value) {
       event?.preventDefault()
       ports.notice('模型设置还有未保存的输入，请先保存或放弃修改。')
@@ -44,6 +80,7 @@ export function createAppNavigationActions(ports) {
     }
     ports.libraryModelsDialog.value?.close()
     ports.libraryModelsOpen.value = false
+    if (returnToSettings && !ports.current.value) ports.localAppearanceDialog.value?.showModal()
   }
 
   function handleActivitybarPointerDown() {
@@ -75,11 +112,12 @@ export function createAppNavigationActions(ports) {
   }
 
   async function selectWorkspaceParent(id) {
+    if (id === 'group') return ports.groupWorkspace.show()
     if (id === 'master-outline') id = 'planning'
     if (id === 'planning') {
       if (ports.lastPlanningLeaf.value === 'chapter-outline' && ports.outlineMode.value === 'stage') {
         const stage = ports.stageOutlines.value.find((item) => item.stage === ports.selectedStage.value)
-        if (stage) return ports.openStageOutline(stage)
+        if (stage) return openOutline(() => ports.openStageOutline(stage))
       }
       return selectWorkspaceLeaf(ports.lastPlanningLeaf.value)
     }
@@ -96,17 +134,18 @@ export function createAppNavigationActions(ports) {
   async function selectWorkspaceLeaf(id) {
     const target = targetForLeaf(id)
     if (!target) return
-    if (target.outlineMode === 'total') return ports.openTotalOutline()
+    if (target.active === 'group') return ports.groupWorkspace.show()
+    if (target.outlineMode === 'total') return openOutline(() => ports.openTotalOutline())
     if (target.outlineMode === 'volume') {
       const volume =
         ports.outlinePlanning.value.volumes.find((item) => item.volume === ports.selectedVolume.value) ||
         ports.outlinePlanning.value.volumes[0]
-      if (volume) return ports.openVolumeOutline(volume.volume)
-      return ports.runOutlineNavigation('卷纲', async () => () => {
+      if (volume) return openOutline(() => ports.openVolumeOutline(volume.volume))
+      return openOutline(() => ports.runOutlineNavigation('卷纲', async () => () => {
         ports.selectedVolume.value = null
         ports.volumeOutline.value = ''
         ports.outlineMode.value = 'volume'
-      })
+      }))
     }
     if (target.outlineMode === 'chapter') {
       const chapter =
@@ -117,10 +156,10 @@ export function createAppNavigationActions(ports) {
               ? ports.plannedChapter.value?.chapterId
               : ports.selectedId.value)
         ) || ports.outlineFullCatalog.value[0]
-      if (chapter) return ports.openChapterFromOutlineCatalog(chapter)
-      return ports.runOutlineNavigation('章纲', async () => () => {
+      if (chapter) return openOutline(() => ports.openChapterFromOutlineCatalog(chapter))
+      return openOutline(() => ports.runOutlineNavigation('章纲', async () => () => {
         ports.outlineMode.value = 'chapter'
-      })
+      }))
     }
     await selectActivity(target.active, { deferTimelineLoad: Boolean(target.timelineMode) })
     if (ports.active.value !== target.active) return
@@ -142,6 +181,10 @@ export function createAppNavigationActions(ports) {
       document
         .querySelector('[data-testid="chapter-skeleton-candidate"], [data-testid="planning-run"]')
         ?.scrollIntoView({ block: 'start' })
+  }
+
+  function openOutline(operation) {
+    return ports.groupWorkspace?.open.value ? ports.groupWorkspace.leaveAfter(operation) : operation()
   }
 
   function legacyParentActivity(id) {
@@ -196,10 +239,11 @@ export function createAppNavigationActions(ports) {
   async function openCompanionSettings() {
     if (!ports.current.value) {
       ports.localAppearanceDialog.value?.showModal()
+      ports.localAppearanceDialog.value?.querySelector('[data-testid="library-settings-sound"]')?.click()
       await nextTick()
-      const controls = ports.localAppearanceDialog.value?.querySelector('[data-testid="companion-settings"]')
+      const controls = ports.localAppearanceDialog.value?.querySelector('[data-testid="companion-voice-settings"]')
       controls?.scrollIntoView({ block: 'start' })
-      controls?.querySelector('[data-testid="companion-writing-select"]')?.focus()
+      controls?.querySelector('input, select, button')?.focus()
       return
     }
     await selectActivity('settings')
@@ -225,19 +269,28 @@ export function createAppNavigationActions(ports) {
   }
 
   async function selectActivity(id, { deferTimelineLoad = false } = {}) {
+    const request = ports.current.value && ports.workspaceRequests.capture(ports.current.value)
+    const isCurrent = () => !request || ports.workspaceRequests.isCurrent(request, ports.current.value)
+    const origin = ports.active.value
     if (id !== ports.active.value && !(await ports.prepareOutlineLeave())) return
+    if (!isCurrent()) return
     if (id !== ports.active.value && ports.modelSettingsDirty.value) {
       ports.notice('模型设置还有未保存的输入，请先保存或放弃修改。')
       return
     }
     if (id !== ports.active.value && !ports.worldMapWorkspace.canLeave()) return
     if (!(await ports.flushPlannedChapterSave())) return
+    if (!isCurrent()) return
     if (ports.active.value === 'desk' && id !== 'desk' && !(await ports.flushChapterSaveSafely())) return
+    if (!isCurrent()) return
     if (id !== 'desk') ports.editorFocusMode.value = false
     if (ports.active.value === 'timeline' && ports.timelineMode.value === 'map' && id !== 'timeline')
       ports.worldMapWorkspace.cancelRead()
     ports.invalidateOutlineRead()
+    if (id === 'settings' && origin !== 'settings' && request)
+      modelReturnTarget.value = { activity: origin, request }
     ports.active.value = id
+    ports.groupWorkspace?.hide()
     if (id === 'outline') {
       void ports.outlineStorageFeedback.refresh()
       try {
@@ -252,10 +305,13 @@ export function createAppNavigationActions(ports) {
   }
 
   async function selectSettingsSection(id) {
+    if (ports.desktop.app.platform === 'browser' && ['connection', 'routing', 'local-models'].includes(id)) id = 'context'
     if (id !== ports.settingsSection.value && ports.modelSettingsDirty.value) {
       ports.notice('模型设置还有未保存的输入，请先保存或放弃修改。')
       return
     }
+    if (ports.settingsSection.value === 'story' && id !== 'story' && ports.current.value)
+      modelReturnTarget.value = { activity: 'settings', section: 'story', request: ports.workspaceRequests.capture(ports.current.value) }
     const settingsLoadGeneration = ++ports.autoBackupSettingsLoadGeneration
     ports.settingsSection.value = id
     if (id !== 'project') {
@@ -309,6 +365,8 @@ export function createAppNavigationActions(ports) {
   }
 
   return {
+    modelReturnLabel,
+    returnFromModelSettings,
     refreshOneOffConnections,
     refreshModelAssignments,
     openLibraryModels,

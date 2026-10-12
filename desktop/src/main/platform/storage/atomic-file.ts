@@ -8,8 +8,8 @@ export async function atomicWriteText(path: string, content: string, beforeRepla
   return atomicWrite(path, content, 'utf8', beforeReplace, assertActive)
 }
 
-export async function atomicWriteBuffer(path: string, content: Uint8Array): Promise<void> {
-  return atomicWrite(path, content)
+export async function atomicWriteBuffer(path: string, content: Uint8Array, beforeReplace?: () => Promise<void>): Promise<void> {
+  return atomicWrite(path, content, undefined, beforeReplace)
 }
 
 async function atomicWrite(path: string, content: string | Uint8Array, encoding?: BufferEncoding, beforeReplace?: () => Promise<void>, assertActive?: () => void): Promise<void> {

@@ -6,12 +6,19 @@ import type { DesktopChaptersApi } from '../manuscript/chapters-api'
 import type { DesktopImportsApi } from '../library/imports-api'
 import type { DesktopOutlinesApi } from '../planning/outlines-api'
 import type { DesktopChapterOutlinesApi } from '../planning/chapter-outlines-api'
+import type { DocumentReviewApi } from '../document-review/api'
 import type { DesktopAiApi } from '../models/ai-api'
 import type { DesktopPlanningApi } from '../planning/planning-api'
 import type { DesktopResearchApi } from '../worldbuilding/research-api'
 import type { DesktopWorkspaceApi } from './workspace-api'
+import type { DesktopEventsApi } from '../timeline/event-contracts'
 
 export type DesktopApi = {
+  inspiration: import('../inspiration/types').InspirationApi
+  groupChat: import('../group-chat/group-chat').GroupChatApi
+  documentReview: DocumentReviewApi
+  writingPlugins: import('../writing-plugins/management-contracts').WritingPluginsApi
+  events: DesktopEventsApi
   modelConnections: ModelConnectionsApi
   companionVoice: import('../companion/companion-voice-contracts').CompanionVoiceApi
   fieldAssistant: import('../assistant/field-assistant-contracts').FieldAssistantApi

@@ -21,6 +21,11 @@ import { SettingsStore } from '../../../src/main/platform/settings/settings-stor
 import { SqliteManuscriptService } from '../../../src/main/modules/manuscript/application/sqlite-manuscript-service'
 import { WorkspaceBootstrapService } from '../../../src/main/modules/library/application/workspace-bootstrap-service'
 import { WorkspaceService } from '../../../src/main/modules/library/application/workspace-service'
+import { createEventRuntime } from '../../../src/main/modules/timeline/runtime/event-runtime'
+import { unwrapValidatedIpcResponse } from '../../../src/contracts/core/ipc-response'
+import { FileBookModelSource } from '../../../src/main/modules/models/adapters/book-model-source'
+import { BookModelsService } from '../../../src/main/modules/models/application/book-models-service'
+import { AppError } from '../../../src/main/core/errors/app-error'
 
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
 const stamp = '2026-09-11T12:00:00.000Z'
@@ -30,7 +35,7 @@ const event = { id: 'event-one', time: '第一夜', characters: ['和田'], loca
   evidenceRefs: [{ sourceId: source.id, excerpt: source.excerpt }], confidence: 1, status: 'candidate' as const, createdAt: stamp }
 const direct = { id: 'direct-one', title: '作者的标题', time: '第二夜', characters: '和田、林与舟', location: '旧城', event: '寻找回音', result: '' }
 
-async function fixture(context: TestContext, sqliteMode = true, warm = false) {
+async function fixture(context: TestContext, sqliteMode = true, warm = false, productionModels = false) {
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'novel-event-bootstrap-'))
   context.after(async () => {
     assert.ok(temporaryRoot.startsWith(join(tmpdir(), 'novel-event-bootstrap-')))
@@ -67,11 +72,17 @@ async function fixture(context: TestContext, sqliteMode = true, warm = false) {
   const characters = new CharacterStateService(projects, authority)
   const workspace = new WorkspaceService(projects, planning, library, documents, characters, undefined, authority)
   const projectAi = new ProjectAiService(projects, settings, authority)
+  const scope = { windowId: 'fixture', generation: 0, bookRoot: root }
+  const modelReads = new BookModelsService(new FileBookModelSource(), {
+    capture: async () => { throw new AppError('FEATURE_UNAVAILABLE', 'synthetic unconfigured key') }
+  }, {} as never, {} as never, {} as never, async () => scope, () => scope)
   const packages = new PlanningPackageService(projects, planning, documents, undefined, characters, workspace)
   const imports = new BookImportService(projects, documents, library)
   const continuation = new ContinuationAnalysisService({ complete: async () => assert.fail('no model calls') }, projects, imports, workspace, characters, planning)
+  const events = createEventRuntime(projects, databases, writes)
   const bootstrap = new WorkspaceBootstrapService({ projects, documents, workspace, researchLibrary: library,
-    aiSettings: () => projectAi.get(), researchSettings: () => settings.researchSettings(),
+    eventProjection: { read: () => events.projection.readForConsumer() as never },
+    aiSettings: () => productionModels ? modelReads.get() : projectAi.get(), researchSettings: () => settings.researchSettings(),
     outlinePlanning: planning, characterStates: characters, planningDraft: () => packages.get(),
     importRecoveries: () => imports.recoverableManifests(), continuation: () => continuation.state() })
   // Exercise both the first aggregate load and already-initialized modules.
@@ -116,8 +127,24 @@ async function fixture(context: TestContext, sqliteMode = true, warm = false) {
       db.importWorkspaceConfig('timeline', JSON.stringify({ events: [direct] }), hash(JSON.stringify({ events: [direct] })), hash(timelineBytes!))
     } finally { db.close() }
   }
-  return { root, databases, authority, projects, documents, workspace, library, bootstrap, eventFiles, eventDatabase, seedFiles, seedFormal, eventPaths }
+  return { root, databases, authority, projects, documents, workspace, library, events, bootstrap, eventFiles, eventDatabase, seedFiles, seedFormal, eventPaths }
 }
+
+test('production book-model snapshot reader survives real cold and warm bootstrap maintenance', async context => {
+  const f = await fixture(context, true, false, true)
+  for (let read = 0; read < 3; read++) {
+    const result = await f.bootstrap.load()
+    assert.deepEqual(result.issues, [])
+    assert.ok(result.aiSettings)
+    assert.equal(result.eventProjection, null) // explicit unmigrated compatibility, not corruption
+    assert.equal(result.chapters[0]?.content, '作者正文不能被读取操作修改。')
+  }
+  const before = await readFile(join(f.root, '.webnovel/workspace.sqlite'))
+  const check = await f.bootstrap.recheck({ workItem: { id: f.root, path: f.root }, issueIds: ['modelSettingsUnreadable', 'unifiedEventsUnreadable'] })
+  assert.deepEqual(check.issues, [])
+  assert.ok(check.aiSettings)
+  assert.deepEqual(await readFile(join(f.root, '.webnovel/workspace.sqlite')), before)
+})
 
 for (const warm of [false, true]) {
   test(`real ${warm ? 'warm' : 'cold'} bootstrap preserves pending event/source/timeline mirrors and immutable event state`, async (context) => {
@@ -131,6 +158,7 @@ for (const warm of [false, true]) {
     assert.deepEqual(result.events.events, [event])
     assert.deepEqual(result.sources.sources, [source])
     assert.deepEqual(result.timeline.events, [direct])
+    assert.equal(result.eventProjection, null)
     assert.deepEqual(result.issues, [])
     assert.deepEqual(result.chapters, chapters)
     assert.deepEqual(await f.eventFiles(), files)
@@ -140,6 +168,35 @@ for (const warm of [false, true]) {
     assert.deepEqual(await f.eventDatabase(), before)
   })
 }
+
+test('real bootstrap exposes one unified projection after reviewed migration', async (context) => {
+  const f = await fixture(context)
+  await f.seedFiles()
+  await writeFile(join(f.root, f.eventPaths[2]!), JSON.stringify({ events: [direct] }) + '\r\n')
+  const preview = await f.events.reviews.preview()
+  const inspection = await f.events.reviews.inspection(preview.previewId)
+  const rows = inspection.rowsPage(0).items
+  const groups = inspection.groupsPage(0).items
+  const findings = inspection.planningFindingsPage(0).items
+  const grant = await f.events.reviews.review(preview.previewId, {
+    fingerprint: preview.fingerprint,
+    rows: rows.map((row) => ({ rowIndex: row.index, disposition: row.ref.source === 'sources' ? 'retain-source' as const : 'keep-separate' as const })),
+    acknowledgedGroups: groups.filter((group) => group.severity === 'review').map((group) => group.id),
+    acknowledgedPlanningFindings: findings.flatMap((finding, index) => finding.severity === 'review' ? [index] : []),
+    acknowledgedMirrors: [...preview.requiredMirrorAcknowledgements]
+  })
+  await f.events.migrations.commit(grant.token)
+
+  const result = await f.bootstrap.load()
+  assert.deepEqual(unwrapValidatedIpcResponse('workspace:bootstrap', { ok: true, value: result }), result)
+
+  assert.ok(result.eventProjection)
+  assert.equal(result.eventProjection.workItemId, f.root)
+  assert.equal(result.eventProjection.approved.length, 1)
+  assert.equal(result.eventProjection.candidates.length, 1)
+  assert.equal(result.eventProjection.state.order.eventIds[0], event.id)
+  assert.equal(result.eventProjection.approved[0]?.content.event, direct.event)
+})
 
 test('real bootstrap never recreates missing event mirrors or acknowledges external event edits', async (context) => {
   const f = await fixture(context)

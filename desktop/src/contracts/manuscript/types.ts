@@ -2,6 +2,12 @@ import type { WorkflowStatus } from '../library/types'
 import type { OutlinePlanningStatus } from '../planning/types'
 import type { ConsistencyFindingHistory, ConsistencyOverview } from '../review/types'
 
+export type ManuscriptExportSelection = {
+  workItemId: string
+  workItemPath: string
+  chapterIds: number[]
+}
+
 export type ManuscriptExportResult = {
   format: 'txt' | 'markdown'
   filePath: string
@@ -137,6 +143,7 @@ export type ManuscriptDraftRecoveryResult = {
 export type ChapterRevisionReason = 'legacy_import' | 'manual' | 'autosave' | 'ai' | 'restore'
 
 export type ChapterRevision = {
+  reviewedSource?: { kind: 'inline-review'; application: import('../document-review/types').ReviewApplicationReceipt }
   id: string
   chapterId: number
   title: string

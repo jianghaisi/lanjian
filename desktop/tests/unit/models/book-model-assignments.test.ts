@@ -171,6 +171,26 @@ test('profile patches preserve copied default revision and allow local repair wi
   assert.deepEqual(await hashes(f.root), before)
 })
 
+test('private route repair retains an inactive custom profile offline but does not authorize editing or activating it', async t => {
+  const f = await fixture(t), doc = referenceBookModelSettings(legacy())
+  doc.version = 5
+  doc.references.push({ kind: 'global', id: 'missing', globalConnectionId: 'global-missing', lastKnownName: '原接口' })
+  doc.shared = { connectionId: 'missing', model: 'old-writer', parameterPolicy: { version: 1, mode: 'custom', overrides: { temperature: 0 } } }
+  await fs.writeFile(f.aiFile, JSON.stringify(doc))
+  const otherBefore = await hashes(f.other), appBefore = await hashes(f.app)
+  t.mock.method(f.globals, 'list', async () => assert.fail('untouched inactive custom parameters need no catalog access'))
+  const saved = await (await f.create().read()).save({ tasks: { prose: { model: 'repaired-private-writer' } } })
+  assert.deepEqual(saved.settings.shared, doc.shared)
+  assert.equal(saved.settings.tasks.prose.model, 'repaired-private-writer')
+  const before = await hashes(f.root), edit = await f.create().read()
+  await assert.rejects(edit.save({ routingMode: 'shared' }), code('VALIDATION_ERROR'))
+  await assert.rejects(edit.save({ shared: { model: 'changed-inactive' } }), code('VALIDATION_ERROR'))
+  await assert.rejects(edit.save({ globalReferences: [{ id: 'missing', globalConnectionId: 'global-gemini' }] }), code('VALIDATION_ERROR'))
+  assert.deepEqual(await hashes(f.root), before)
+  assert.deepEqual(await hashes(f.other), otherBefore)
+  assert.deepEqual(await hashes(f.app), appBefore)
+})
+
 for (const input of [
   { apiKey: 'secret-sentinel' }, { connections: [] }, { defaultRevision: 9 },
   { shared: { model: 'ok', extra: 'secret-sentinel' } }, { shared: { temperature: NaN } },

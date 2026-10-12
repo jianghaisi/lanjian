@@ -1,11 +1,11 @@
 import type { DocumentImportManifestRequest, TxtImportRequest } from '../index'
 import type { ArgsDecoder } from '../core/validation'
-import { boundedInteger, exactArgs, exactRecord, invalid, record, requiredString } from '../core/validation'
+import { boundedInteger, exactArgs, invalid, record, rejectUnknown, requiredString } from '../core/validation'
 
 export const decodeImportCommitArgs: ArgsDecoder<[TxtImportRequest]> = (args) => {
   exactArgs(args, 1)
   const value = record(args[0], 'import')
-  const allowed = new Set(['token', 'ownership', 'creationMethod', 'title', 'selectedChapterIndexes'])
+  const allowed = new Set(['token', 'ownership', 'creationMethod', 'title', 'selectedChapterIndexes', 'expectedWorkItemId'])
   if (Object.keys(value).some((key) => !allowed.has(key))) invalid('import', '包含未允许的字段')
   const token = requiredString(value.token, 'token', 64)
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(token))
@@ -40,6 +40,7 @@ export const decodeImportCommitArgs: ArgsDecoder<[TxtImportRequest]> = (args) =>
       ownership: value.ownership,
       ...(creationMethod === undefined ? {} : { creationMethod: creationMethod as TxtImportRequest['creationMethod'] }),
       title,
+      ...(value.expectedWorkItemId === undefined ? {} : { expectedWorkItemId: requiredString(value.expectedWorkItemId, 'expectedWorkItemId', 4096) }),
       ...(selectedChapterIndexes === undefined ? {} : { selectedChapterIndexes })
     }
   ]
@@ -47,13 +48,15 @@ export const decodeImportCommitArgs: ArgsDecoder<[TxtImportRequest]> = (args) =>
 
 export const decodeImportManifestCommitArgs: ArgsDecoder<[DocumentImportManifestRequest]> = (args) => {
   exactArgs(args, 1)
-  const value = exactRecord(args[0], 'manifest', ['id', 'files'])
+  const value = record(args[0], 'manifest')
+  rejectUnknown(value, 'manifest', ['id', 'files', 'expectedWorkItemId'])
   const id = requiredString(value.id, 'id', 64)
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) invalid('id', '格式无效')
   if (!Array.isArray(value.files) || value.files.length < 1 || value.files.length > 20)
     invalid('files', '必须包含 1 到 20 个文件')
   const files = value.files.map((file, index) => {
     const item = record(file, `files[${index}]`)
+    if ('expectedWorkItemId' in item) invalid(`files[${index}]`, '目标作品只能在清单顶层确认')
     if (item.ownership === 'skip') {
       const allowed = new Set(['token', 'ownership', 'title'])
       if (Object.keys(item).some((key) => !allowed.has(key))) invalid(`files[${index}]`, '暂不采用的文件包含多余字段')
@@ -65,7 +68,24 @@ export const decodeImportManifestCommitArgs: ArgsDecoder<[DocumentImportManifest
     return decodeImportCommitArgs([item])[0]
   })
   if (new Set(files.map((file) => file.token)).size !== files.length) invalid('files', '包含重复文件令牌')
-  return [{ id, files }]
+  return [{ id, files, ...(value.expectedWorkItemId === undefined ? {} : { expectedWorkItemId: requiredString(value.expectedWorkItemId, 'expectedWorkItemId', 4096) }) }]
+}
+
+// Only public mutation calls require a destination assertion; nested files
+// and trusted application callers reuse the ordinary request decoder.
+export const decodeConfirmedImportCommitArgs: ArgsDecoder<[TxtImportRequest]> = args => {
+  const [input] = decodeImportCommitArgs(args)
+  requiredString(input.expectedWorkItemId, 'expectedWorkItemId', 4096)
+  return [input]
+}
+export const decodeConfirmedImportManifestArgs: ArgsDecoder<[DocumentImportManifestRequest]> = args => {
+  const [input] = decodeImportManifestCommitArgs(args)
+  requiredString(input.expectedWorkItemId, 'expectedWorkItemId', 4096)
+  return [input]
+}
+export const decodeImportResumeArgs: ArgsDecoder<[string, string]> = args => {
+  exactArgs(args, 2)
+  return [decodeImportManifestIdArgs([args[0]])[0], requiredString(args[1], 'expectedWorkItemId', 4096)]
 }
 
 export const decodeImportManifestIdArgs: ArgsDecoder<[string]> = (args) => {

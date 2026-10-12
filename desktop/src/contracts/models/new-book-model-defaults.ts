@@ -1,9 +1,9 @@
 import { AppError } from '../core/app-error'
-import { BOOK_MODEL_TASKS, MAX_BOOK_MODEL_REFERENCES, decodeBookModelSettings, type BookModelRouting, type ReferencedBookModelSettings } from './book-model-settings'
+import { isReferencedBookSettings, BOOK_MODEL_TASKS, MAX_BOOK_MODEL_REFERENCES, decodeBookModelSettings, type BookModelRouting, type ReferencedBookModelSettings } from './book-model-settings'
 import { connectionRecord, connectionRevision, nextConnectionRevision } from './model-connection-values'
 
 export type ModelDefaultTemplate = BookModelRouting & {
-  version: 4; references: Array<{ kind: 'global'; id: string; globalConnectionId: string }>
+  version: 4 | 5; references: Array<{ kind: 'global'; id: string; globalConnectionId: string }>
 }
 export type StoredModelDefaults = { revision: number; template: ModelDefaultTemplate | null }
 export type ModelDefaultsSave = { expectedRevision: number; expectedCatalogRevision: number; template: ModelDefaultTemplate | null }
@@ -13,19 +13,19 @@ export type ModelDefaultBudgetValidator = (settings: ReferencedBookModelSettings
 export function decodeModelDefaultTemplate(value: unknown): ModelDefaultTemplate {
   try {
     const r = connectionRecord(value, ['version', 'references', 'routingMode', 'shared', 'tasks'])
-    if (r.version !== 4 || !Array.isArray(r.references) || r.references.length > MAX_BOOK_MODEL_REFERENCES) throw defaultsInvalid()
+    if ((r.version !== 4 && r.version !== 5) || !Array.isArray(r.references) || r.references.length > MAX_BOOK_MODEL_REFERENCES) throw defaultsInvalid()
     for (const item of r.references) {
       const ref = connectionRecord(item, ['kind', 'id', 'globalConnectionId'])
       if (ref.kind !== 'global') throw defaultsInvalid()
     }
     const settings = decodeBookModelSettings(r)
-    if (settings.version !== 4) throw defaultsInvalid()
+    if (!isReferencedBookSettings(settings)) throw defaultsInvalid()
     const used = new Set([settings.shared, ...BOOK_MODEL_TASKS.map(t => settings.tasks[t])].map(p => p.connectionId))
     const references = settings.references.map(ref => {
       if (ref.kind !== 'global' || !used.has(ref.id)) throw defaultsInvalid()
       return { kind: 'global' as const, id: ref.id, globalConnectionId: ref.globalConnectionId }
     })
-    return { version: 4, references, routingMode: settings.routingMode, shared: settings.shared, tasks: settings.tasks }
+    return { version: settings.version, references, routingMode: settings.routingMode, shared: settings.shared, tasks: settings.tasks }
   } catch { throw defaultsInvalid() }
 }
 

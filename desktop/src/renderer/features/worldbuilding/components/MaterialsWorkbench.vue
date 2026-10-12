@@ -1,4 +1,5 @@
 <script setup>
+import ArchivePageHeader from '../../../ui/ArchivePageHeader.vue'
 import StudioIcon from '../../../ui/StudioIcon.vue'
 import { toRefs } from 'vue'
 
@@ -69,13 +70,8 @@ const {
 </script>
 
 <template>
-  <div class="source-editor material-workbench">
-    <header>
-      <div>
-        <p class="eyebrow">素材</p>
-        <h2>{{ materialSectionInfo.title }}</h2>
-        <p>{{ materialSectionInfo.description }}</p>
-      </div>
+  <div class="source-editor material-workbench archive-page">
+    <ArchivePageHeader eyebrow="02 / SOURCE ARCHIVE · 创作素材" :title="materialSectionInfo.title" :description="materialSectionInfo.description">
       <div v-if="materialSection === 'notes'" class="material-counts" aria-label="灵感概况">
         <span>便签 {{ ideas.length }}</span
         ><span>候选 {{ candidateIdeaCount }}</span
@@ -91,7 +87,7 @@ const {
           }}</span
         >
       </div>
-    </header>
+    </ArchivePageHeader>
 
     <section
       v-if="materialSection === 'notes'"
@@ -893,7 +889,7 @@ const {
             ><small>{{ item.time }} · {{ item.characters.join('、') }} · {{ item.location }}</small
             ><span v-if="item.conflictGroupId">存在同槽位冲突，请人工核对</span>
           </div>
-          <button v-if="item.status === 'candidate'" type="button" @click="approveCanonicalEvent(item.id)">
+          <button v-if="item.status === 'candidate'" type="button" :disabled="busy" @click="approveCanonicalEvent(item.id)">
             确认入库</button
           ><em v-else>已确认</em>
         </article>

@@ -790,7 +790,7 @@ parseAdherenceReview(content: string, contract: ChapterContract, candidateConten
 - Base: 作者认定逐字证据为误报 -> 状态变为 `dismissed`，anchor 深相等；关闭案卷仍保留未处理项。
 - Base: 第 4 章开始生成 -> 快照最多重放第 1–3 章；第 4 章已有旧候选或第 5 章状态均不得注入。
 - Base: 同章报告“炼气二层”和“炼气三层”且均有逐字证据 -> 本章 `power` 保持未知，不任选其一。
-- Base: 林知夏持有错题本，后章由李远明持有且证据逐字写出双方和“递给” -> 不提示；若后章只写李远明翻开错题本 -> `POSSESSION_HANDOFF` attention，作者仍可继续写作。
+- Base: 陈景安持有错题本，后章由周文衡持有且证据逐字写出双方和“递给” -> 不提示；若后章只写周文衡翻开错题本 -> `POSSESSION_HANDOFF` attention，作者仍可继续写作。
 - Bad: 模型声称沈砚受伤但 evidence 不在正文 -> 丢弃该变化；renderer 猜测人物变化、跨书传 job、正文已被改写或 state 文件损坏 -> 一律阻断。
 - Bad: 每次自动保存读取全部章节，或直接删除 hash 不匹配事件，导致长篇卡顿且恢复旧稿无法重建状态。
 

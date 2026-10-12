@@ -1,0 +1,41 @@
+{
+  "apiVersion": 1,
+  "id": "lanjian.official.story-planning",
+  "name": "故事逐层展开",
+  "version": "1.0.0",
+  "description": "岚笺默认的分层创作方法。策略来自本包声明资产，可派生为个人插件替换；正式依据和作者确认仍由应用检查。",
+  "runtime": "quickjs-js",
+  "entry": "main.js",
+  "capabilities": [],
+  "tools": [],
+  "categoryIds": [
+    "workflow",
+    "worldbuilding",
+    "plot"
+  ],
+  "tags": [
+    "创作方法",
+    "分层大纲"
+  ],
+  "assets": [
+    "foundation.md"
+  ],
+  "contributions": [
+    {
+      "id": "foundation",
+      "name": "作品设定创作方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "worldbuilding"
+      ],
+      "kind": "creative-policy",
+      "slot": "foundation",
+      "mode": "replace",
+      "asset": "foundation.md"
+    }
+  ]
+}

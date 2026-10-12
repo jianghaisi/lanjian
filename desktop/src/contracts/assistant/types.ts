@@ -65,12 +65,14 @@ export type ContextMaterialEvidence = {
 
 export type ContextCanonicalEventView = {
   id: string
+  versionId?: string
+  phase: 'planned' | 'realized' | 'deviated' | 'legacy-unknown'
   time: string
   characters: string[]
   location: string
   event: string
   result?: string
-  provenance: '资料库正式事件' | '作者直接纪事'
+  provenance: '统一事件正式版本' | '资料库正式事件' | '作者直接纪事'
   evidenceRefs: EvidenceRef[]
 }
 
@@ -97,6 +99,7 @@ export type ContextFactPackView = {
   chapterId?: number
   queryTerms: string[]
   structured: {
+    eventApprovedRevision?: string
     canonicalEvents: ContextCanonicalEventView[]
     characterSnapshots: ContextCharacterStateView[]
     characterAliases: ContextCharacterAliasView[]
@@ -157,11 +160,14 @@ export const contextBudgetStartingSuggestions = {
 export type ChapterBeat = { id: string; order: number; requirement: string; eventRef?: string }
 
 export type ChapterContractVersionRef = {
+  storyConstraints?: import('../planning/chapter-story-contract').ChapterStoryConstraints
   fingerprint: string
   totalFingerprint: string
   volumeFingerprint?: string
   outlineHash: string
   eventIds: string[]
+  eventVersions?: Array<{ eventId: string; versionId: string; phase: 'planned' | 'realized' | 'deviated' | 'legacy-unknown' }>
+  eventApprovedRevision?: string
   confirmedAt: string
 }
 
@@ -222,6 +228,8 @@ export type WritingAgentRequest = {
   chapterId: number
   message: string
   currentDraft: string
+  /** Assertion only: main still selects the book and rejects a stale UI request. */
+  expectedWorkItemId?: string
   /** When supplied, the model may run only with the exact context package the author previewed. */
   expectedContextHash?: string
   model?: string

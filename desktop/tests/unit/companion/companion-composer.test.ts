@@ -31,22 +31,27 @@ test('voice preferences migrate existing values and reject unknown voice/setting
 })
 test('settings and conversation share one preference value; failed persistence preserves saved state', async () => {
   const original = Object.getOwnPropertyDescriptor(globalThis,'localStorage')
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis,'window')
+  Object.defineProperty(globalThis,'window',{configurable:true,value:{}})
   const values = new Map([['lanjian-companion-voice-v1',JSON.stringify({voice:'zf_002',volume:.4,mute:false})]])
   let failed = false
   Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:(key:string)=>values.get(key) ?? null,setItem:(key:string,value:string)=>{if(failed)throw Error('storage-full');values.set(key,value)}}})
   try {
     const { useCompanionVoicePreferences } = await import('../../../src/renderer/features/companion/composables/use-companion-voice-preferences')
     const settings = useCompanionVoicePreferences(), conversation = useCompanionVoicePreferences()
+    await settings.ready
     assert.equal(settings.preferences.value.voice,'ningguang')
-    settings.update({volume:.25,mute:true})
+    await settings.update({volume:.25,mute:true})
     assert.equal(conversation.preferences.value.volume,.25)
     assert.equal(conversation.preferences.value.mute,true)
     assert.deepEqual(JSON.parse(values.get('lanjian-companion-voice-v1')!),{voice:'ningguang',volume:.25,mute:true,proactive:true,subtitles:true,textModel:true,preload:true})
-    failed = true; settings.update({volume:.9})
+    failed = true; await settings.update({volume:.9})
     assert.equal(conversation.preferences.value.volume,.25)
-    assert.match(settings.error.value,/未保存/)
-    failed = false; settings.update({volume:.5}); assert.equal(settings.error.value,'')
+    assert.match(settings.error.value,/未能保存/)
+    failed = false; await settings.update({volume:.5}); assert.equal(settings.error.value,'')
   } finally {
+    if(originalWindow)Object.defineProperty(globalThis,'window',originalWindow)
+    else Reflect.deleteProperty(globalThis,'window')
     if(original)Object.defineProperty(globalThis,'localStorage',original)
     else Reflect.deleteProperty(globalThis,'localStorage')
   }

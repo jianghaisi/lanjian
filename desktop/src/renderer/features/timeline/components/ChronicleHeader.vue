@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import '../../../assets/chronicle.css'
+import ArchivePageHeader from '../../../ui/ArchivePageHeader.vue'
 </script>
 
 <template>
-  <header class="chronicle-heading">
-    <div class="chronicle-title"><span aria-hidden="true"></span><div><h2>事件纪事</h2><p>STORY CHRONICLE</p></div></div>
-    <div class="chronicle-heading-actions"><slot /></div>
-  </header>
+  <ArchivePageHeader class="chronicle-heading" eyebrow="04 / STORY CHRONICLE · 故事纪事" title="事件纪事" description="按时间、人物、地点与事件，串起故事的因果与变化。"><slot /></ArchivePageHeader>
 </template>

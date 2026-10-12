@@ -1,0 +1,58 @@
+name: Windows Release
+# Deliberately creates drafts only. Publish after testing the downloaded installer.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag, for example v0.1.1'
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: windows-release-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 50
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - name: Validate tag format
+        shell: pwsh
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Expected vMAJOR.MINOR.PATCH' }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Check version and immutable release
+        shell: pwsh
+        run: |
+          $version = (Get-Content desktop/package.json -Raw | ConvertFrom-Json).version
+          if ($env:RELEASE_TAG -ne "v$version") { throw 'Tag/package version mismatch' }
+          $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases" --paginate | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot verify existing releases' }
+          if ($releases.tag_name -contains $env:RELEASE_TAG) { throw 'Release already exists; assets will not be overwritten' }
+      - name: Install, test and build
+        run: node scripts/ci.mjs all
+      - name: Build Windows x64 installer
+        working-directory: desktop
+        run: npm exec electron-builder -- --win nsis --x64
+      - name: Create draft with installer and checksum
+        shell: pwsh
+        run: |
+          $version = (Get-Content desktop/package.json -Raw | ConvertFrom-Json).version
+          $installer = "desktop/release/Lanjian-$version-Setup-x64.exe"
+          $checksum = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$checksum  Lanjian-$version-Setup-x64.exe" | Set-Content desktop/release/SHA256SUMS.txt -Encoding utf8NoBOM
+          $notes = "docs/releases/$env:RELEASE_TAG.md"
+          if (-not (Test-Path $notes)) { throw 'Chinese release notes are required' }
+          gh release create $env:RELEASE_TAG $installer desktop/release/SHA256SUMS.txt --verify-tag --draft --prerelease --title "岚笺 $version · 开发预览" --notes-file $notes
+          if ($LASTEXITCODE -ne 0) { throw 'Draft creation failed' }

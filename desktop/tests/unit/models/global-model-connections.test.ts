@@ -305,12 +305,11 @@ test('external edit during staging is preserved and staging is cleaned', async t
   assert.deepEqual(await readdir(f.root), [GLOBAL_CONNECTIONS_FILE])
 })
 
-test('store refuses endpoint mutation, deletion and revision forgery even through private port', async t => {
+test('store refuses endpoint mutation and revision forgery even through private port', async t => {
   const f = await fixture(t)
   await f.service.create(createInput())
   const before = await f.store.read(), bytes = await readFile(f.file)
   const attempts: GlobalConnectionDocument[] = [
-    { ...before.document, revision: 2, connections: [] },
     { ...before.document, revision: 2, connections: [{ ...before.document.connections[0], baseUrl: 'https://other.example.test/v1', revision: 2 }] },
     { ...before.document, revision: 2, connections: [{ ...before.document.connections[0], protocol: 'gemini-native', revision: 2 }] },
     { ...before.document, revision: 2, connections: [{ ...before.document.connections[0], name: 'changed-without-revision' }] }
@@ -448,5 +447,65 @@ test('strict authority decoder rejects duplicates, secrets, sparse arrays and no
   const c = { id: 'global-one', name: '连接', baseUrl: endpoint, enabled: true, revision: 1 }
   for (const connections of [[c, c], [{ ...c, protocol: 'unknown' }], [{ ...c, apiKey: key }], [{ ...c, baseUrl: endpoint + '/' }], [{ ...c, encryptedApiKey: key }], [{ ...c, revision: 2 }], Array(1)]) {
     assert.throws(() => decodeGlobalConnectionDocument({ version: 1, revision: 1, connections }), errorCode('VALIDATION_ERROR'))
+  }
+})
+
+
+test('remove persists exact target deletion, erases ciphertext and revokes prepared send without decryption', async t => {
+  const f = await fixture(t)
+  await f.service.create(createInput())
+  await f.service.create({ ...createInput(), expectedRevision: 1 })
+  const before = await f.store.read(), retained = before.document.connections[1]
+  const prepared = await f.service.prepareCredential('global-fixture-1', 1)
+  f.state.available = false // Deleting a saved key must not require decryption support.
+  const result = await f.service.remove({ expectedRevision: 2, id: 'global-fixture-1', connectionRevision: 1 })
+  assert.equal(result.revision, 3)
+  assert.deepEqual(result.connections.map(c => c.id), ['global-fixture-2'])
+  const reopened = await new ModelConnectionsStore(f.root).read()
+  assert.deepEqual(reopened.document.connections, [retained])
+  assert.ok(!(await readFile(f.file, 'utf8')).includes(before.document.connections[0].encryptedApiKey!))
+  await assert.rejects(prepared.use(async () => assert.fail('removed sender invoked')), errorCode('CONFLICT'))
+  await assert.rejects(f.service.prepareCredential('global-fixture-1', 1), errorCode('NOT_FOUND'))
+  assert.equal(f.state.decrypts, 0)
+})
+
+for (const [label, patch, code] of [
+  ['stale catalog', { expectedRevision: 0 }, 'CONFLICT'],
+  ['stale entry', { connectionRevision: 2 }, 'CONFLICT'],
+  ['unknown id', { id: 'global-absent' }, 'NOT_FOUND'],
+  ['forged field', { apiKey: key }, 'VALIDATION_ERROR'],
+  ['invalid revision', { expectedRevision: -1 }, 'VALIDATION_ERROR']
+] as const) test(`remove rejects ${label} without changing stored bytes`, async t => {
+  const f = await fixture(t); await f.service.create(createInput()); const before = await readFile(f.file)
+  await assert.rejects(f.service.remove({ expectedRevision: 1, id: 'global-fixture-1', connectionRevision: 1, ...patch }), errorCode(code))
+  assert.deepEqual(await readFile(f.file), before); assert.equal(f.state.decrypts, 0)
+})
+
+test('remove publication failure preserves the original connection and key', async t => {
+  const f = await fixture(t); await f.service.create(createInput()); const before = await readFile(f.file)
+  const service = new ModelConnectionsService(new ModelConnectionsStore(f.root, async () => { throw Error('synthetic failure') }), f.secrets, () => 'global-unused')
+  await assert.rejects(service.remove({ expectedRevision: 1, id: 'global-fixture-1', connectionRevision: 1 }), errorCode('STORAGE_ERROR'))
+  assert.deepEqual(await readFile(f.file), before)
+})
+
+test('remove cannot bypass publication guard or race another writer', async t => {
+  const f = await fixture(t); await f.service.create(createInput()); const before = await readFile(f.file)
+  await assert.rejects(f.service.remove({ expectedRevision: 1, id: 'global-fixture-1', connectionRevision: 1 }, {
+    assertActive() {}, async recheck() { throw new AppError('CONFLICT', 'revoked', { recoverable: true }) }
+  }), errorCode('CONFLICT'))
+  assert.deepEqual(await readFile(f.file), before)
+  const input = { expectedRevision: 1, id: 'global-fixture-1', connectionRevision: 1 }
+  const results = await Promise.allSettled([f.service.remove(input), f.service.update({ ...input, name: 'changed' })])
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1)
+  assert.equal((await f.store.read()).document.revision, 2)
+})
+
+test('storage accepts only one isolated removal and rejects collateral edits', async t => {
+  const f = await fixture(t); await f.service.create(createInput()); await f.service.create({ ...createInput(), expectedRevision: 1 })
+  const before = await f.store.read(), bytes = await readFile(f.file)
+  for (const connections of [[], [{ ...before.document.connections[1], name: 'collateral', revision: 2 }],
+    [before.document.connections[1], { ...before.document.connections[0], id: 'global-new' }]]) {
+    await assert.rejects(f.store.commit(before, { ...before.document, revision: 3, connections }), errorCode('STORAGE_ERROR'))
+    assert.deepEqual(await readFile(f.file), bytes)
   }
 })

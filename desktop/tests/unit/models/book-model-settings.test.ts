@@ -145,7 +145,7 @@ test('malformed versions/envelopes/endpoints are not normalized into empty/defau
     Object.assign(Object.create({ apiKey: 'secret-sentinel' }), remote())]) {
     assert.throws(() => decodeBookModelSettings(value), safeCode('VALIDATION_ERROR'))
   }
-  for (const version of [0, 5, '3', null]) assert.throws(() => decodeBookModelSettings({ ...remote(), version }), safeCode('FEATURE_UNAVAILABLE'))
+  for (const version of [0, 6, '3', null]) assert.throws(() => decodeBookModelSettings({ ...remote(), version }), safeCode('FEATURE_UNAVAILABLE'))
   for (const baseUrl of ['ftp://example.test', 'https://secret-sentinel@example.test', 'https://example.test?', 'https://example.test#', 'https://example.test?key=secret-sentinel']) {
     assert.throws(() => decodeBookModelSettings({ ...remote(), connections: [{ ...remote().connections[0], baseUrl }] }), safeCode('VALIDATION_ERROR'))
   }

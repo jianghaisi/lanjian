@@ -31,7 +31,7 @@ function state(events: CharacterStateEvent[]): CharacterStateView {
   return {
     version: 1,
     workItemId: 'book-a',
-    anchors: characterIds.map((id) => ({ id, name: id === 'character-shenyan' ? '沈砚' : id === 'character-jiang' ? '林知夏' : '周轩', sourceRefs: ['event-1'] })),
+    anchors: characterIds.map((id) => ({ id, name: id === 'character-shenyan' ? '沈砚' : id === 'character-jiang' ? '陈景安' : '周轩', sourceRefs: ['event-1'] })),
     events,
     snapshots: [],
     pendingConflicts: []
@@ -111,25 +111,25 @@ test('keeps power and vitality continuity across an intervening unrelated charac
 
 test('flags an unexplained cross-character possession handoff but accepts explicit transfer evidence', () => {
   const unexplained = auditCharacterContinuity(state([
-    possessionEvent(1, 'character-jiang', '持有：黑色物理错题本', '林知夏把黑色物理错题本收进书包。'),
+    possessionEvent(1, 'character-jiang', '持有：黑色物理错题本', '陈景安把黑色物理错题本收进书包。'),
     possessionEvent(3, 'character-zhou', '持有黑色物理错题本', '周轩翻开黑色物理错题本。')
   ]), realms, 3)
   assert.equal(unexplained.length, 1)
   assert.equal(unexplained[0].code, 'POSSESSION_HANDOFF')
   assert.equal(unexplained[0].severity, 'attention')
-  assert.deepEqual(unexplained[0].evidence, ['林知夏把黑色物理错题本收进书包。', '周轩翻开黑色物理错题本。'])
+  assert.deepEqual(unexplained[0].evidence, ['陈景安把黑色物理错题本收进书包。', '周轩翻开黑色物理错题本。'])
 
   const explained = auditCharacterContinuity(state([
-    possessionEvent(1, 'character-jiang', '持有：黑色物理错题本', '林知夏保管着黑色物理错题本。'),
-    possessionEvent(2, 'character-shenyan', '持有：黑色物理错题本', '林知夏把黑色物理错题本递给沈砚。')
+    possessionEvent(1, 'character-jiang', '持有：黑色物理错题本', '陈景安保管着黑色物理错题本。'),
+    possessionEvent(2, 'character-shenyan', '持有：黑色物理错题本', '陈景安把黑色物理错题本递给沈砚。')
   ]), realms, 2)
   assert.equal(explained.some((finding) => finding.code === 'POSSESSION_HANDOFF'), false)
 })
 
 test('releases a tracked possession without reporting a later acquisition as an unexplained handoff', () => {
   const findings = auditCharacterContinuity(state([
-    possessionEvent(1, 'character-jiang', '持有：黑色物理错题本', '林知夏保管着黑色物理错题本。'),
-    possessionEvent(2, 'character-jiang', '不再持有：黑色物理错题本', '林知夏已经交出黑色物理错题本。'),
+    possessionEvent(1, 'character-jiang', '持有：黑色物理错题本', '陈景安保管着黑色物理错题本。'),
+    possessionEvent(2, 'character-jiang', '不再持有：黑色物理错题本', '陈景安已经交出黑色物理错题本。'),
     possessionEvent(3, 'character-zhou', '持有：黑色物理错题本', '周轩拿起黑色物理错题本。')
   ]), realms, 3)
   assert.equal(findings.some((finding) => finding.code === 'POSSESSION_HANDOFF'), false)

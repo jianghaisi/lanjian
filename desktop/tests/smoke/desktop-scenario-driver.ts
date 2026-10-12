@@ -1554,8 +1554,8 @@ export function runDesktopScenarios(window: BrowserWindow, runtime: DesktopRunti
                 for (let index = 0; index < 60 && !document.querySelector('[data-testid="manuscript-input"]'); index += 1) await wait(100)
                 const editor = document.querySelector('[data-testid="manuscript-input"]')
                 if (!editor) return { ok: false, step: 'editor-missing' }
-                const draft = '林知夏与 AI-2 在雨夜写作。'
-                const selectedText = '林知夏与 AI-2'
+                const draft = '陈景安与 AI-2 在雨夜写作。'
+                const selectedText = '陈景安与 AI-2'
                 editor.focus()
                 editor.setSelectionRange(0, 0)
                 editor.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, inputType: 'insertText', data: draft }))
@@ -4508,7 +4508,7 @@ export function runDesktopScenarios(window: BrowserWindow, runtime: DesktopRunti
           smokeDriverStage = 'long-manuscript'
           console.info('[desktop smoke] stage: long-manuscript')
           let longChapter = ''
-          for (let index = 1; longChapter.length < 22000; index += 1) longChapter += `第${index}段：林知夏核对书页上的每一行，输入、滚动与保存都不能丢字。\n\n`
+          for (let index = 1; longChapter.length < 22000; index += 1) longChapter += `第${index}段：陈景安核对书页上的每一行，输入、滚动与保存都不能丢字。\n\n`
           longChapter = longChapter.slice(0, 22000)
           const longEditorChapter = `　　${longChapter}`
           const longEditorReady = await window.webContents.executeJavaScript(`(() => { const editor = document.querySelector('[data-testid="manuscript-input"]'); if (!editor) return false; editor.focus(); return true })()`)

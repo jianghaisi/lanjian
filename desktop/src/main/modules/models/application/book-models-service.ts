@@ -10,7 +10,7 @@ import type { AiSettings, AiSettingsUpdate, AiTask, AiProviderConnection } from 
 /** Production safe projection and retained profile edits. No legacy bulk writer or credential export. */
 export class BookModelsService implements ModelSettingsResolver {
   constructor(private readonly books: BookModelSourceReader, private readonly keys: PrivateModelCredentialReader,
-    private readonly globals: ModelConnectionsService, private readonly assignments: BookModelAssignments,
+    private readonly globals: Pick<ModelConnectionsService, 'list'>, private readonly assignments: BookModelAssignments,
     private readonly resolver: ModelSettingsResolver, private readonly ensureScope: () => Promise<BookModelRequestScope>,
     private readonly currentScope: () => BookModelRequestScope | null,
     private readonly local?: Pick<LocalTextProvider, 'ready'>, private readonly credentialAvailable: () => boolean = () => true) {}

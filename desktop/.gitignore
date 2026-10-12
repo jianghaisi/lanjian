@@ -31,3 +31,6 @@ release
 *.njsproj
 *.sln
 *.sw?
+
+# Isolated local-model installation verification build
+out-local-installation/

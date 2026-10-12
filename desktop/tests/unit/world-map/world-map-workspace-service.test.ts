@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { AppError } from '../../../src/main/core/errors/app-error'
 import type { CanonicalEvent, OutlinePlanningStatus, TimelineEvent } from '../../../src/contracts/index'
 import type { WorldMapEvent, WorldMapLayoutView } from '../../../src/contracts/world-map/world-map'
+import type { UnifiedEventProjection } from '../../../src/main/modules/timeline/domain/event-projection'
 import type { ProjectService } from '../../../src/main/modules/library/application/project-service'
 import { WorkspaceService } from '../../../src/main/modules/library/application/workspace-service'
 import { WorldMapWorkspaceService } from '../../../src/main/modules/world-map/application/world-map-workspace-service'
@@ -33,11 +34,25 @@ const planning = (placements: OutlinePlanningStatus['eventChapterPlacements']): 
   totalApproval: { scope: 'total', status: 'confirmed', canConfirm: false, reason: '', fingerprint: '' },
   assignedEventIds: [], unplacedEventIds: [], volumes: [], chapterPlacements: [], eventChapterPlacements: placements
 })
-function workspace(port: ReturnType<typeof projectPort>, events: () => Promise<CanonicalEvent[]>, timeline: TimelineEvent[], placements: OutlinePlanningStatus['eventChapterPlacements'] = []) {
-  const service = new WorkspaceService(port as unknown as ProjectService, { status: async () => planning(placements) }, { listEvents: async () => ({ events: await events() }) })
+function workspace(port: ReturnType<typeof projectPort>, events: () => Promise<CanonicalEvent[]>, timeline: TimelineEvent[], placements: OutlinePlanningStatus['eventChapterPlacements'] = [], projection?: () => Promise<UnifiedEventProjection | null>) {
+  const service = new WorkspaceService(port as unknown as ProjectService, { status: async () => planning(placements) }, { listEvents: async () => ({ events: await events() }) }, undefined, undefined, undefined, undefined, projection ? { read: projection } : undefined)
   service.timeline = async () => ({ events: timeline })
   return service
 }
+const unified = (event = '统一正式事件', candidate = '统一待审事件'): UnifiedEventProjection => ({
+  version: 1, workItemId: 'book-a', revision: 'a'.repeat(64), approvedRevision: 'b'.repeat(64), candidateRevision: 'c'.repeat(64),
+  operationId: '00000000-0000-4000-8000-000000000001:1', committedAt: '2026-09-20T00:00:00Z', ordering: 'author-display',
+  state: {
+    order: { id: 'order-1', revision: 1, eventIds: ['unified', 'candidate'], contentHash: 'd'.repeat(64), createdAt: '2026-09-20T00:00:00Z' },
+    lifecycles: [
+      { id: 'life-1', eventId: 'unified', revision: 1, expectedEventVersionId: 'version-1', state: 'active', createdAt: '2026-09-20T00:00:00Z' },
+      { id: 'life-2', eventId: 'candidate', revision: 1, expectedEventVersionId: 'version-2', state: 'active', createdAt: '2026-09-20T00:00:00Z' }
+    ]
+  },
+  approved: [{ eventId: 'unified', versionId: 'version-1', version: 1, content: { time: '第二幕', characters: ['沈砚'], location: '新塔', event, evidenceRefs: [], confidence: 1, title: '统一标题' }, granularity: 'macro', phase: 'planned', creator: 'author', sources: [], createdAt: '2026-09-20T00:00:00Z' }],
+  candidates: [{ eventId: 'candidate', versionId: 'version-2', version: 1, content: { time: '第三幕', characters: ['林照'], location: '河口', event: candidate, evidenceRefs: [], confidence: 0.7 }, granularity: 'macro', phase: 'planned', creator: 'model-candidate', sources: [], createdAt: '2026-09-20T00:00:00Z' }],
+  archived: [], mirror: null
+})
 const layout = (): WorldMapLayoutView => ({ workItemId: 'book-a', document: { version: 1, markers: [{ location: '旧塔', x: 25, y: 75 }] }, revision: 'a'.repeat(64), mirrorStatus: 'synced' })
 const mapEvent = (patch: Partial<WorldMapEvent> = {}): WorldMapEvent => ({
   id: 'canonical:same', source: 'canonical', sourceId: 'same', title: '找到一封信', time: '三日后，黄昏', characters: ['沈砚'],
@@ -65,6 +80,71 @@ test('map uses approved effective timeline, suppresses direct duplicates, and pr
 test('map does not infer unplaced canonical chapter from numbers in text', () => fixture(async root => {
   const result = await workspace(projectPort(root), async () => [canonical({ time: '第91章，三天后' })], []).worldMapEvents()
   assert.equal(result[0]!.chapterId, null)
+}))
+
+test('map reads one unified approved projection and never falls back to legacy or candidate rows', () => fixture(async root => {
+  let legacyReads = 0
+  const result = await workspace(projectPort(root), async () => { legacyReads++; return [canonical()] }, [direct()],
+    [{ eventId: 'unified', chapterId: 91 }], async () => unified()).worldMapEvents()
+  assert.equal(legacyReads, 0)
+  assert.deepEqual(result.map(item => item.id), ['canonical:unified'])
+  assert.equal(result[0]!.title, '统一正式事件')
+  assert.equal(result[0]!.versionId, 'version-1')
+  assert.equal(result[0]!.phase, 'planned')
+  assert.equal(result[0]!.chapterId, 91)
+}))
+
+test('unified projection failure blocks the map instead of reading a second formal timeline', () => fixture(async root => {
+  let legacyReads = 0
+  const service = workspace(projectPort(root), async () => { legacyReads++; return [canonical()] }, [direct()], [], async () => {
+    throw new AppError('DATABASE_INTEGRITY_FAILED', '统一事件损坏', { recoverable: false })
+  })
+  await assert.rejects(service.worldMapEvents(), { code: 'DATABASE_INTEGRITY_FAILED' })
+  assert.equal(legacyReads, 0)
+}))
+
+test('chapter event consumers use the same unified approved version and reject dangling placements', () => fixture(async root => {
+  const service = workspace(projectPort(root), async () => [canonical({ event: '旧事件不得读取' })], [direct()],
+    [{ eventId: 'unified', chapterId: 91 }], async () => unified('本章统一事件', '候选不得读取'))
+  const events = await service.chapterEvents(91)
+  assert.equal(events.length, 1)
+  assert.equal(events[0]!.id, 'unified')
+  assert.equal(events[0]!.versionId, 'version-1')
+  assert.equal(events[0]!.phase, 'planned')
+  assert.equal(events[0]!.event, '本章统一事件')
+
+  const dangling = workspace(projectPort(root), async () => [canonical()], [],
+    [{ eventId: 'missing-approved-event', chapterId: 91 }], async () => unified())
+  await assert.rejects(dangling.chapterEvents(91), { code: 'INVALID_PROJECT_STATE' })
+}))
+
+test('planning materials label unified phase and version while excluding candidates and compatibility copies', () => fixture(async root => {
+  const service = workspace(projectPort(root), async () => [canonical({ event: '旧资料事件不得回退' })],
+    [direct({ event: '旧作者纪事不得回退' })], [], async () => unified('规划正式事件', '规划候选不得进入'))
+  const methods = service as unknown as Record<string, unknown>
+  methods.foundation = async () => ({ sourceNotes: '' })
+  methods.materialSources = async () => []
+  methods.approvedIdeas = async () => []
+  methods.formalStoryEntities = async () => ({ entities: [], relations: [] })
+  methods.totalOutlineText = async () => ''
+  const materials = await service.planningMaterials()
+  assert.match(materials, /规划正式事件/)
+  assert.match(materials, /"phase": "planned"/)
+  assert.match(materials, /"versionId": "version-1"/)
+  assert.match(materials, /"approvedRevision": "b{64}"/)
+  assert.doesNotMatch(materials, /规划候选不得进入|旧资料事件不得回退|旧作者纪事不得回退/)
+}))
+
+test('writing context labels planned unified events and excludes candidates and compatibility copies', () => fixture(async root => {
+  const service = workspace(projectPort(root), async () => [canonical({ event: '旧正式上下文不得回退' })],
+    [direct({ event: '旧直接上下文不得回退' })], [], async () => unified('后续规划约束', '候选上下文不得进入'))
+  const context = await service.promptContext(undefined, 'prose')
+  assert.match(context, /phase=planned 是后续约束，不能作为前文已知事实/)
+  assert.match(context, /后续规划约束/)
+  assert.match(context, /"phase": "planned"/)
+  assert.match(context, /"versionId": "version-1"/)
+  assert.match(context, /"approvedRevision": "b{64}"/)
+  assert.doesNotMatch(context, /候选上下文不得进入|旧正式上下文不得回退|旧直接上下文不得回退/)
 }))
 
 test('conflicting explicit event placements fail rather than arbitrarily selecting a chapter', () => fixture(async root => {

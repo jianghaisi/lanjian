@@ -1,0 +1,56 @@
+V3 private inspiration library and optional video acquisition
+Recorded 2026-10-11. Source revisions are fixed; platform availability is a
+separate acceptance gate. No upstream application, credentials or cookies are
+copied. No model weights are bundled or automatically downloaded.
+
+BiliNote: Jeffery Huang, MIT
+https://github.com/JefferyHcool/BiliNote
+Commit 90940fde4d224d0f69ad99674f4af0a1ea52d3c4
+Reference: backend/app/downloaders/bilibili_subtitle.py
+Adaptation: desktop/src/main/modules/inspiration/adapters/bilibili-subtitles.ts
+BV/cid/selected-part/subtitle-language/timestamp acquisition is adapted to the
+existing TypeScript network boundary. The ABogus downloader is not copied.
+Full terms: inspiration-BiliNote-MIT.txt
+
+LightRAG: HKUDS, MIT
+https://github.com/HKUDS/LightRAG
+Commit 453dce83d6d0354a06e46c8d4029a0895c4e054b
+Reference: lightrag/operate.py
+Design reference for chunk extraction, evidence association and bounded merge.
+No LightRAG code, dependency, server or embedding model is bundled. The private
+SQLite text/tag index and hierarchical story-card merge are application code.
+Retained reference terms: inspiration-LightRAG-MIT.txt
+
+yt-dlp core: Unlicense
+https://github.com/yt-dlp/yt-dlp
+Commit 897341241f2bfb2439fe0367f4c7c9ccd29a3828
+Optional worker loads the verified source archive on explicit preparation.
+Archive SHA256 1947679cb3e6e1d1477c15d9fdd3564ff7483b892013ad8bd6c9b61dbf65d940
+Reference: yt_dlp/extractor/tiktok.py, networking/_urllib.py
+No bundled yt-dlp executable or ffmpeg distribution. The worker subclasses the
+original urllib RedirectHandler to validate every redirect before fetching.
+Full terms: inspiration-yt-dlp-Unlicense.txt
+
+faster-whisper: Guillaume Klein, MIT
+https://github.com/SYSTRAN/faster-whisper
+Optional dependency pinned to 1.2.1, obtained only on explicit preparation.
+Full terms: inspiration-faster-whisper-MIT.txt
+Model: Systran/faster-whisper-small
+https://huggingface.co/Systran/faster-whisper-small
+Revision 536b0662742c02347bc0e980a01041f333bce120, upstream MIT metadata.
+Weights are optional private downloads. runtime-lock.json records file sizes
+and LFS SHA256 / Git-blob SHA1 and worker verifies bytes before use.
+
+Optional Python runtime uses the already reviewed portable-Python archive
+recipe, verified receipt and runtime license files. The worker is application
+code. requirements.lock and runtime-lock.json pin 24 Python dependencies with
+hashes and upstream license metadata. Installed wheels retain their dist-info
+license files under the private runtime. Redistribution of a prepared runtime
+must carry its full package/runtime/model license files; this source build does
+not redistribute those packages or weights. Hosted builds do not include or
+install this native Python/ASR runtime.
+
+Existing Mammoth/JSZip/Vue/SQLite/model transport dependencies retain their
+original package and application notices. Full reference text is retained next
+to this notice. Source provenance and implementation decisions are recorded in
+.trellis/tasks/10-11-v3-inspiration-library-video/research/reference-selection.md.

@@ -1,0 +1,291 @@
+{
+  "idle": {
+    "file": "idle.webm",
+    "fps": 24,
+    "frames": 110,
+    "durationMs": 4583.333333333333,
+    "loop": true,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 3109649,
+    "sha256": "3299511f59d6c201ec392d995910a25a8057d809bbe62f43054d83a29354b0eb",
+    "source": "idle-edge-v2-alpha.webm",
+    "sourceSha256": "a3bf018f98eb3a8bad17ac5c7ca0f8853a944f1d644f6fbfefd35da23046789f",
+    "provider": "Dola",
+    "maxDetachedPixelsRemoved": 0
+  },
+  "greet": {
+    "file": "greet.webm",
+    "fps": 24,
+    "frames": 95,
+    "durationMs": 3958.3333333333335,
+    "loop": false,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 3277667,
+    "sha256": "1f9096b9ca909011e3e6815db98a0d3c0c974b7db03598b9aae90ff267d29bd5",
+    "source": "greet-edge-v2-alpha.webm",
+    "sourceSha256": "8eaf1c7f00b1c1a536c8913b945849eb73e1a01ea9aceb3bbb7299ffc2a93ba3",
+    "provider": "Dola",
+    "maxDetachedPixelsRemoved": 0
+  },
+  "pat": {
+    "file": "pat.webm",
+    "fps": 24,
+    "frames": 95,
+    "durationMs": 3958.3333333333335,
+    "loop": false,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 3036135,
+    "sha256": "4284324836599586dbaded25b74a4607b18dc2c5f98aa4236c70b2fc3e9fc1a5",
+    "source": "pat-edge-v2-alpha.webm",
+    "sourceSha256": "2e17c73b112e72517d1d4f1cd394c8b1c65166d91526f2cf999358b83e353597",
+    "provider": "Dola",
+    "maxDetachedPixelsRemoved": 0
+  },
+  "drag": {
+    "file": "drag.webm",
+    "fps": 24,
+    "frames": 75,
+    "durationMs": 3125.0,
+    "loop": true,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 2336574,
+    "sha256": "68faeb5571d7193cae353035ed3566d0ebd47b3ec0170a4f93ccb8d0f8183b5d",
+    "source": "drag-edge-v2-alpha.webm",
+    "sourceSha256": "787f8109d8c129c82f65948a69471e36f08d9f00f900c9185db6a15a79763244",
+    "provider": "Dola",
+    "maxDetachedPixelsRemoved": 0
+  },
+  "land": {
+    "file": "land.webm",
+    "fps": 24,
+    "frames": 67,
+    "durationMs": 2791.6666666666665,
+    "loop": false,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 2951244,
+    "sha256": "44dcd21a5cbc986818dd1702377f7adec5de64ad7bf1dd1ffedce95457541765",
+    "source": "land-edge-v2-alpha.webm",
+    "sourceSha256": "fbd35d1a7b7a0fa6a0792fec2544871585f82c8c6f988030e42232839229f172",
+    "provider": "Dola",
+    "maxDetachedPixelsRemoved": 0
+  },
+  "thinking": {
+    "file": "thinking.webm",
+    "fps": 24,
+    "frames": 53,
+    "durationMs": 2208.3333333333335,
+    "loop": true,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 1687819,
+    "sha256": "cf144f836c14f7c39455f588538c8bb35cf4d008deadd6000c5d11b6e41a4085",
+    "source": "thinking-edge-v2-alpha.webm",
+    "sourceSha256": "086425a953c585f5b401e754b7cb4c48ec0f188e95106dc382962e58fee981d6",
+    "provider": "Dola",
+    "maxDetachedPixelsRemoved": 23
+  },
+  "speaking": {
+    "file": "speaking.webm",
+    "fps": 24,
+    "frames": 91,
+    "durationMs": 3791.6666666666665,
+    "loop": true,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 2098135,
+    "sha256": "e7ba2c64d60e5d42c8f996c9913b5b4a397ba0bec64e3b99914ed37b90288de8",
+    "source": "speaking-edge-v2-alpha.webm",
+    "sourceSha256": "3a7be00c5a317339ac0376478e0db82cef9835081d608c779e40654e2311af85",
+    "provider": "Dola",
+    "maxDetachedPixelsRemoved": 0
+  },
+  "sleeping": {
+    "file": "sleeping.webm",
+    "fps": 24,
+    "frames": 49,
+    "durationMs": 2041.6666666666665,
+    "loop": true,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 1390928,
+    "sha256": "1e12ece9d742b5f7af2c3dbbfb82ff99f5ea5175f41e2be26bf5a5e685683d3f",
+    "source": "sleeping-edge-v2-alpha.webm",
+    "sourceSha256": "b73fc6d1b0d8ccb89db3cbf74d02132261cf5a539e0172d72adece673f70e5a5",
+    "provider": "Dola",
+    "maxDetachedPixelsRemoved": 0
+  },
+  "writing": {
+    "file": "writing.webm",
+    "fps": 24,
+    "frames": 54,
+    "durationMs": 2250.0,
+    "loop": true,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 1702988,
+    "sha256": "79f938dc9efa7c613c7286bc907e771af3b91fb4360a90430a42bc9312418f9c",
+    "source": "writing-edge-v2-alpha.webm",
+    "sourceSha256": "41b005f4ed82c934d085f1be12f6c25860a280052e9311e634020ce83498e5ec",
+    "provider": "Dola",
+    "maxDetachedPixelsRemoved": 0
+  },
+  "success": {
+    "file": "success.webm",
+    "fps": 24,
+    "frames": 91,
+    "durationMs": 3791.6666666666665,
+    "loop": false,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 2896029,
+    "sha256": "3869b2f4aecc71b071c52eef8b202a77d6dc4e2016a57b48d6e1612d16e21884",
+    "source": "success-edge-v2-alpha.webm",
+    "sourceSha256": "b49e8cbd10a4dfc208c19c4d965bbd6310fc529ef9fa8105caf47cb98501865a",
+    "provider": "Dola",
+    "maxDetachedPixelsRemoved": 0
+  },
+  "warning": {
+    "file": "warning.webm",
+    "fps": 24,
+    "frames": 96,
+    "durationMs": 4000.0,
+    "loop": false,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 2534084,
+    "sha256": "ecbaf16a76c405193a44c6e1d3768267f14387bf5bd8a1907159339ca8fb21b6",
+    "source": "warning-edge-v2-alpha.webm",
+    "sourceSha256": "fb2d7d2ffafc7f834f20fb4c3ec0ebbe51c2b39f611e4ffdce74f7d3ddac6ad9",
+    "provider": "Dola",
+    "maxDetachedPixelsRemoved": 0
+  },
+  "stretch": {
+    "file": "stretch.webm",
+    "fps": 24,
+    "frames": 187,
+    "durationMs": 7791.666666666667,
+    "loop": false,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 9928298,
+    "sha256": "f0421a3e182be75662d65926f7b519ae0d394cf4acb9d53c8dd49ad945422fa1",
+    "source": "stretch-edge-v2-alpha.webm",
+    "sourceSha256": "5152de48795fb3dabf4bbabe1fa6d170897c102dde247a6da3e5a1700833dad0",
+    "provider": "user_supplied",
+    "maxDetachedPixelsRemoved": 0
+  },
+  "playing": {
+    "file": "playing.webm",
+    "fps": 24,
+    "frames": 99,
+    "durationMs": 4125.0,
+    "loop": false,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 4727482,
+    "sha256": "c017cc10d2c3db2720c6b496518cdfb56c4deb3ca91ed41b53a59831113e5152",
+    "source": "playing-edge-v2-alpha.webm",
+    "sourceSha256": "890b94f299e84bce2b27af3b2cdafd88ddf3ad0fbc4cea0bd3628ae138a6b553",
+    "provider": "Dola",
+    "maxDetachedPixelsRemoved": 0
+  },
+  "listening": {
+    "file": "listening.webm",
+    "fps": 24,
+    "frames": 129,
+    "durationMs": 5375.0,
+    "loop": true,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 6294662,
+    "sha256": "4c39581a53955c66eb85731485909f71d08c63c262fbff09405f604166e84ccb",
+    "source": "listening-edge-v2-alpha.webm",
+    "sourceSha256": "ae1538c4404adfb593885ceca3268d0a3b2479e11ce3ec406b5fe7c91a85a471",
+    "provider": "user_supplied",
+    "maxDetachedPixelsRemoved": 0
+  },
+  "blink": {
+    "file": "blink.webm",
+    "fps": 24,
+    "frames": 20,
+    "durationMs": 833.3333333333334,
+    "loop": false,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 660451,
+    "sha256": "6c4d451f608a68dd9d834329f9e504ddf770c0c370282f7efe5d6d0cf2c11580",
+    "source": "blink-edge-v2-alpha.webm",
+    "sourceSha256": "0b8c83e1a95fd54c19f42fb3411acd4ab445afd5adc1811d03b029269bae424b",
+    "provider": "Dola",
+    "maxDetachedPixelsRemoved": 0
+  },
+  "eating": {
+    "file": "eating.webm",
+    "fps": 24,
+    "frames": 94,
+    "durationMs": 3916.6666666666665,
+    "loop": false,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 3551099,
+    "sha256": "681cc3be14600bf6e2784f1bb2b6e1d111eae9c12f79de3c386f51691522920a",
+    "source": "eating-edge-v2-alpha.webm",
+    "sourceSha256": "711203f4fdc8b26e006a46b5d962c11d1352bd27808a0dbebf445bf9ef528bf7",
+    "provider": "Dola",
+    "maxDetachedPixelsRemoved": 0
+  },
+  "drinking": {
+    "file": "drinking.webm",
+    "fps": 24,
+    "frames": 165,
+    "durationMs": 6875.0,
+    "loop": false,
+    "size": [
+      960,
+      960
+    ],
+    "bytes": 7327156,
+    "sha256": "9ace37e9c03c76793c8ed8b8e92a634831a73eea4fb1eeaa2dcb2a7b5a8d559f",
+    "source": "drinking-edge-v2-alpha.webm",
+    "sourceSha256": "d826e3f0770d7efcec950d2ae0ae1fa0c04865d3150af58b6292a96a98824fc2",
+    "provider": "user_supplied",
+    "maxDetachedPixelsRemoved": 0
+  }
+}

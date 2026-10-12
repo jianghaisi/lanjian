@@ -168,6 +168,8 @@ export class ConsistencyEvaluationJobService {
     return structured(job.state)
   }
 
+  cancelAll(): void { for (const job of this.jobs.values()) if (job.state.status === 'running') job.controller.abort() }
+
   private async execute(id: string): Promise<void> {
     const job = this.jobs.get(id)
     if (!job) return

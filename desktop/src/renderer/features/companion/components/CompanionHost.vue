@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import CompanionIllustration from './CompanionIllustration.vue'
+import DesktopPetArtwork from './DesktopPetArtwork.vue'
+import type { PetAnimation } from '../services/pet-action-motion'
 import Live2DCompanion from './Live2DCompanion.vue'
 import { CompanionController, nextBlinkDelay, springStep, type CompanionMode, type CompanionOptions, type CompanionState } from '../services/companion-controller'
 const props = withDefaults(defineProps<{
   options: CompanionOptions; mode: CompanionMode; scope?: string; taskId?: string; taskStatus?: string;
-  quiet?: boolean; focus?: boolean; scene?: 'library' | 'writing'; greeting?: string; pet?: boolean; action?: number
+  quiet?: boolean; focus?: boolean; scene?: 'library' | 'writing'; greeting?: string; pet?: boolean; action?: number; speaking?: boolean; intent?: PetAnimation; desktopMotion?: boolean; tilt?: number; settling?: boolean
 }>(), { scope: '', taskId: '', taskStatus: '', quiet: false, focus: false, scene: 'writing', greeting: '', action: 0 })
-const emit = defineEmits<{ mode: [mode: CompanionMode] }>()
+const emit = defineEmits<{ mode: [mode: CompanionMode]; started: [intent: PetAnimation, action: number] }>()
+const illustrationIntent = computed(() => ['listening','thinking','eating','playing','sleeping','success'].includes(props.intent ?? '') ? props.intent as 'listening'|'thinking'|'eating'|'playing'|'sleeping'|'success' : 'idle')
 const controller = new CompanionController()
 const host = ref<HTMLElement>()
 const state = ref<CompanionState>('idle')
@@ -40,9 +43,10 @@ function tick(time: number) {
 function restart() {
   stop(); sampleState(); gaze.value = { x: 0, y: 0 }; lift.value = 0; velocityX = 0; velocityY = 0
   if (isHidden.value || documentHidden.value) return
-  if (animationPaused.value || props.focus) {
-    const update = () => { sampleState(); timer = window.setTimeout(update, 2500) }
-    timer = window.setTimeout(update, 2500); return
+  if (animationPaused.value || props.focus || props.desktopMotion) {
+    const interval = props.desktopMotion ? 250 : 2500
+    const update = () => { sampleState(); timer = window.setTimeout(update, interval) }
+    timer = window.setTimeout(update, interval); return
   }
   lastFrame = now(); blinkAt = lastFrame + nextBlinkDelay(); frame = requestAnimationFrame(tick)
 }
@@ -76,9 +80,10 @@ onBeforeUnmount(() => {
 <template>
   <div v-if="isHidden" class="companion-restore" data-testid="companion-hidden"><button v-if="!focus" type="button" @click="emit('mode', 'chibi')">显示写作伙伴</button></div>
   <section v-else ref="host" class="companion-host" :class="[scene, mode, { pet }]" :data-state="state" :data-motion="animationPaused || focus ? 'quiet' : 'active'" data-testid="companion-host" aria-label="写作伙伴" @pointerenter="hovered = true" @pointerleave="center">
-    <div class="companion-art" :style="{ transform: `translateY(${lift}px) rotate(${gaze.x * .3}deg)` }">
+    <div class="companion-art" :style="desktopMotion ? undefined : { transform: `translateY(${lift}px) rotate(${gaze.x * .3}deg)` }">
       <slot v-if="mode === 'detailed'" name="detailed" :state="state" :gaze="gaze"><Live2DCompanion :state="state" :blink="blink" :gaze-x="gaze.x" :gaze-y="gaze.y" :intensity="options.intensity" :action="action"/></slot>
-      <CompanionIllustration v-else :state="state" :blink="blink" :gaze-x="gaze.x" :gaze-y="gaze.y"/>
+      <DesktopPetArtwork v-else-if="desktopMotion" :state="state" :intent="intent" :paused="animationPaused" :hidden="focus || documentHidden" :tilt="tilt ?? 0" :action="action" :settling="settling ?? false" :speaking="speaking ?? false" :auto-blink="options.autoBlink" @started="(intent, action) => emit('started', intent, action)" />
+      <CompanionIllustration v-else :state="intent === 'sleeping' ? 'sleeping' : intent === 'thinking' ? 'thinking' : intent === 'success' ? 'success' : state" :intent="illustrationIntent" :blink="blink" :speaking="speaking" :paused="animationPaused || focus || documentHidden" :gaze-x="gaze.x" :gaze-y="gaze.y"/>
     </div>
     <div v-if="!pet" class="companion-copy"><span class="companion-code">LJ / ARCHIVIST</span><b>{{ label }}</b><small>{{ mode === 'detailed' ? '岚笺档案员 · 写作陪伴' : '你的故事，由你决定。' }}</small></div>
     <div v-if="!pet" class="companion-modes" role="group" aria-label="看板娘模式">

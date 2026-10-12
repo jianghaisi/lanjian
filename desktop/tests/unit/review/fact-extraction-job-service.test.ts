@@ -2,6 +2,32 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { FactExtractionJobService } from '../../../src/main/modules/review/application/fact-extraction-job-service'
 
+test('cancellation whose original terminal state cannot save stays interrupted in memory, reports the write failure and accepts no late result', async () => {
+  let release!: () => void, transitions = 0
+  const held = new Promise<void>(r => { release = r }), initial = { id: 'cancel-task', workItemId: 'book-a', chapterId: 1, status: 'running' as const, startedAt: '2026-10-12T00:00:00.000Z' }
+  const jobs = new FactExtractionJobService({ extract: async () => { await held; return null } }, {
+    initialize: async () => {}, create: async () => structuredClone(initial), read: async () => structuredClone(initial), find: async () => structuredClone(initial), list: async () => [structuredClone(initial)],
+    transition: async () => { transitions++; throw Error('original unavailable') }
+  })
+  await jobs.start('book-a', 1)
+  await assert.rejects(jobs.cancel(initial.id), /original unavailable/); assert.equal((await jobs.status(initial.id)).status, 'interrupted')
+  release(); await new Promise(r => setTimeout(r, 10)); await jobs.cancelAll(); assert.equal(transitions, 1); assert.equal(initial.status, 'running')
+})
+
+test('unavailable original persistence interrupts memory state without claiming a saved terminal result or replay', async () => {
+  let transitions = 0, requests = 0
+  const initial = { id: 'original-task', workItemId: 'book-a', chapterId: 1, status: 'running' as const, startedAt: '2026-10-12T00:00:00.000Z' }
+  const jobs = new FactExtractionJobService({ extract: async () => { requests++; throw Error('provider failed') } }, {
+    initialize: async () => {}, create: async () => structuredClone(initial), read: async () => structuredClone(initial), find: async () => structuredClone(initial), list: async () => [structuredClone(initial)],
+    transition: async () => { transitions++; throw Error('original database unavailable') }
+  })
+  await jobs.start('book-a', 1)
+  let done = await jobs.status(initial.id)
+  for (let i = 0; done.status === 'running' && i < 50; i++) { await new Promise(r => setTimeout(r, 2)); done = await jobs.status(initial.id) }
+  assert.equal(done.status, 'interrupted'); assert.equal(done.error?.code, 'STATUS_PERSISTENCE_FAILED'); assert.match(done.error!.message, /终态未保存/)
+  await jobs.cancelAll(); assert.equal(transitions, 1); assert.equal(requests, 1); assert.equal(initial.status, 'running')
+})
+
 test('keeps one extraction job per chapter and exposes its completed review batch', async () => {
   const jobId = '11111111-1111-4111-8111-111111111111'
   let release: (() => void) | undefined

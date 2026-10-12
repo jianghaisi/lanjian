@@ -1,3 +1,5 @@
+import { isReferencedBookSettings } from '../../../../contracts/models/book-model-settings'
+import { validateBookParameters, type CatalogMetadataReader } from '../domain/validate-book-parameters'
 import { AppError, isAppError } from '../../../core/errors/app-error'
 import { decodeBookModelSettings, type ReferencedBookModelSettings } from '../domain/book-model-settings'
 import { connectionRevision, nextConnectionRevision, type GlobalConnectionDocument, type GlobalConnectionRepository,
@@ -7,7 +9,7 @@ import { decodeModelDefaultTemplate, decodeModelDefaultsSave, defaultsConflict, 
 
 /** App-scoped template authority. No current book, filesystem, key codec or provider access. */
 export class NewBookModelDefaults {
-  constructor(private readonly repository: GlobalConnectionRepository, private readonly validateBudgets: ModelDefaultBudgetValidator) {}
+  constructor(private readonly repository: GlobalConnectionRepository, private readonly validateBudgets: ModelDefaultBudgetValidator, private readonly metadata?: CatalogMetadataReader) {}
 
   async get() { return this.view((await this.repository.read()).document) }
 
@@ -60,7 +62,7 @@ export class NewBookModelDefaults {
         await recheck()
         if (!template) return null // Explicit unconfigured result, never a manufactured cloud profile.
         const settings = decodeBookModelSettings({ ...template, defaultRevision: revision })
-        if (settings.version !== 4) throw defaultsConflict()
+        if (!isReferencedBookSettings(settings)) throw defaultsConflict()
         return settings
       }
     })
@@ -73,6 +75,7 @@ export class NewBookModelDefaults {
   }
 
   private selected(document: GlobalConnectionDocument, template: ModelDefaultTemplate | null): string {
+    if (template) validateBookParameters(template, document.connections, this.metadata)
     const ids = [...new Set(template?.references.map(r => r.globalConnectionId) ?? [])].sort()
     return JSON.stringify(ids.map(id => {
       const c = document.connections.find(c => c.id === id)

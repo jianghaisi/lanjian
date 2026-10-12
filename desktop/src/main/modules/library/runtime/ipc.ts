@@ -8,6 +8,7 @@ import { registerModelConnections } from '../../models/runtime/model-connections
 import { SettingsStore } from '../../../platform/settings/settings-store'
 import { WorkspaceService } from '../application/workspace-service'
 import { WorkspaceBootstrapService } from '../application/workspace-bootstrap-service'
+import { decodeWorkspaceLoadCheckArgs } from '../../../../contracts/library/ipc'
 import { ShadowMigrationSessionService } from '../application/shadow-migration-session-service'
 import { SqliteManuscriptService } from '../../manuscript/application/sqlite-manuscript-service'
 import { SqliteCutoverSessionService } from '../application/sqlite-cutover-session-service'
@@ -66,6 +67,7 @@ export function registerLibraryIpc(dependencies: Dependencies): void {
     workspace
   } = dependencies
   let smokeWorkspaceBackupPath = ''
+  registerValidatedIpc(ipcMain, 'workspace:recheck-load-issues', decodeWorkspaceLoadCheckArgs, input => workspaceBootstrap.recheck(input))
   registerValidatedIpc(ipcMain, 'projects:list', decodeNoArgs, async () => {
     const result = await projects.list()
     companionVoice?.updateLibrary(result.projects, result.continueProjectId)
@@ -236,6 +238,7 @@ export function registerLibraryIpc(dependencies: Dependencies): void {
           promptProfileUnreadable: '.webnovel/config/prompt-profile.json',
           researchSourcesUnreadable: '.webnovel/research/sources.json',
           researchEventsUnreadable: '.webnovel/research/events.json',
+          unifiedEventsUnreadable: '.webnovel/workspace.sqlite',
           outlinePlanningUnreadable: '.webnovel/planning/outline-state.json',
           characterStateUnreadable: '.webnovel/story-state/characters.json',
           chapterOrderUnreadable: '.webnovel/manuscript/chapter-order.json'

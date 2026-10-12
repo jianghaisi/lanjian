@@ -34,9 +34,9 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   compose: [message:string]
-  send: [input: { message: string; expectedContextHash?: string; model?: string; modelConnectionId?: string; maxTokensOverride?: number; preferredSkill?: WritingAgentSkillId; contextSelection: WritingAgentContextSelection }]
+  send: [input: { message: string; operationId?: string; expectedContextHash?: string; model?: string; modelConnectionId?: string; maxTokensOverride?: number; preferredSkill?: WritingAgentSkillId; contextSelection: WritingAgentContextSelection }]
   previewContext: [input: { message?: string; model?: string; modelConnectionId?: string; maxTokensOverride?: number; preferredSkill?: WritingAgentSkillId; contextSelection: WritingAgentContextSelection }]
-  apply: [turnId: string, acceptedChangeIds?: string[]]
+  apply: [turnId: string, acceptedChangeIds?: string[], mode?: 'inline']
   discard: [turnId: string]
   pause: []
   cancel: []
@@ -49,6 +49,7 @@ const emit = defineEmits<{
 }>()
 
 const message = ref('')
+const handoffOperationId = ref<string | undefined>()
 const maxTokensOverride = ref(2048)
 const selectedModel = ref<ModelCatalogChoice | null>(null)
 const preferredSkill = ref<WritingAgentSkillId | undefined>()
@@ -130,8 +131,9 @@ watch(() => props.quickAction?.id, async (id) => {
   composerInput.value?.focus()
 }, { immediate: true })
 
-function sendMessage(input:{message:string;model?:string;connectionId?:string;maxTokensOverride?:number}) {
+function sendMessage(input:{message:string;operationId?:string;model?:string;connectionId?:string;maxTokensOverride?:number}) {
   if(props.disabled||props.busy)throw new Error('当前章节的写作依据尚未就绪，请先核对章纲与人物状态。')
+  handoffOperationId.value=input.operationId
   maxTokensOverride.value=input.maxTokensOverride ?? 2048
   message.value=input.message
   preferredSkill.value=undefined
@@ -155,11 +157,13 @@ function sendCurrentRequest() {
   const previewMatches = Boolean(props.contextPreview && resolvedPreviewSignature.value === currentPreviewSignature.value)
   emit('send', {
     message: message.value.trim(),
+    ...(handoffOperationId.value ? { operationId: handoffOperationId.value } : {}),
     ...(previewMatches && props.contextPreview ? { expectedContextHash: props.contextPreview.contentHash } : {}),
     ...(modelChoice ? { model: modelChoice.model, modelConnectionId: modelChoice.connectionId, ...(modelChoice.connectionId === 'local:llama-cpp' ? {maxTokensOverride:maxTokensOverride.value} : {}) } : {}),
     preferredSkill: preferredSkill.value,
     contextSelection: currentContextSelection()
   })
+  handoffOperationId.value = undefined
   message.value = ''
   skillMenuOpen.value = false
   confirmingSend.value = false
@@ -439,11 +443,22 @@ function candidateLabel(turn: AgentConversationTurn) {
               </div>
             </div>
             <template v-else><details v-if="turn.result.candidate.selection" class="agent-before"><summary>修改前原文</summary><p>{{ turn.result.candidate.selection.text }}</p></details><div class="agent-after"><p>{{ turn.result.candidate.content }}</p></div></template>
+            <button type="button" class="control-button" :disabled="turn.stale || disabled" :data-testid="`review-agent-candidate-${turn.id}`" @click="emit('apply', turn.id, undefined, 'inline')">在原文下方逐处核对</button>
             <p v-if="turn.stale" class="agent-stale-note">本章规划依据已经变化，请重新核对章卡；候选内容仍保留。</p>
             <p v-else-if="turn.draftChanged" class="agent-stale-note">正文已有新内容，候选已保留。核对合并后仍可采用。</p>
             <section v-if="turn.result.proposal" class="agent-candidate-check" :class="turn.result.proposal.report.passed ? 'passed' : 'attention'" :data-testid="`agent-candidate-check-${turn.id}`">
-              <header><span>{{ turn.result.proposal.report.passed ? '检查通过' : '需要处理' }}</span><b>{{ turn.result.proposal.report.reviewMode === 'fast' ? '本地完整性检查' : '章纲与事实检查' }}</b></header>
+              <header><span>{{ turn.result.proposal.report.passed ? '检查通过' : '需要处理' }}</span><b>{{ turn.result.proposal.report.reviewMode === 'fast' ? '本地完整性检查' : turn.result.proposal.report.literaryFindings === undefined ? '章纲与事实检查' : '章纲、事实与文学检查' }}</b></header>
               <p>{{ turn.result.proposal.report.summary }}</p>
+              <p v-if="turn.result.proposal.report.literaryFindings === undefined && turn.result.proposal.report.reviewMode !== 'fast'">这份历史报告未包含人物与场景专项检查。</p>
+              <details v-if="turn.result.proposal.report.literaryFindings?.length">
+                <summary>人物与场景问题 · {{ turn.result.proposal.report.literaryFindings.length }} 项</summary>
+                <div v-for="(finding, index) in turn.result.proposal.report.literaryFindings" :key="index">
+                  <p>{{ finding.severity === 'blocking' ? '需要修正' : '表达建议' }}：{{ finding.reason }}</p>
+                  <blockquote>{{ finding.candidateQuote }}</blockquote>
+                  <p v-if="finding.sourceQuote">依据：{{ finding.sourceQuote }}</p>
+                  <p>修改方向：{{ finding.correction }}</p>
+                </div>
+              </details>
               <ul v-if="candidateReviewIssues(turn).length"><li v-for="issue in candidateReviewIssues(turn)" :key="issue">{{ issue }}</li></ul>
               <footer v-if="!turn.result.proposal.report.passed"><span>正文尚未改变</span><button type="button" :data-testid="`prepare-agent-candidate-retry-${turn.id}`" :disabled="busy || disabled" @click="prepareCandidateRetry(turn)">修改要求后重试</button></footer>
             </section>

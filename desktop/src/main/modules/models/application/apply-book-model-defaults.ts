@@ -39,7 +39,7 @@ export class ApplyBookModelDefaults {
       return { ...r, id }
     })
     const remap = (p: typeof copied.shared) => ({ ...p, connectionId: aliases.get(p.connectionId) ?? p.connectionId })
-    const next = decodeBookModelSettings({ ...copied, references: [...privateReferences, ...references],
+    const next = decodeBookModelSettings({ ...copied, version: source.settings.version === 5 ? 5 : copied.version, references: [...privateReferences, ...references],
       shared: remap(copied.shared), tasks: Object.fromEntries(BOOK_MODEL_TASKS.map(t => [t, remap(copied.tasks[t])])) })
     const guard = { assertActive, recheck: async () => { assertActive(); await source.assertCurrent(); await prepared.guard.recheck(); assertActive() } }
     await guard.recheck()
@@ -75,8 +75,10 @@ function profileChanges(before: BookModelSettings, after: BookModelSettings) {
   if (before.routingMode !== after.routingMode) result.push({ field: 'routingMode', before: before.routingMode, after: after.routingMode })
   for (const slot of ['shared', ...BOOK_MODEL_TASKS] as const) {
     const a = slot === 'shared' ? before.shared : before.tasks[slot], b = slot === 'shared' ? after.shared : after.tasks[slot]
-    for (const key of ['connectionId', 'model', 'temperature', 'topP', 'maxTokens'] as const) {
-      if (a[key] !== b[key]) result.push({ field: `${slot}.${key}`, before: String(a[key]), after: String(b[key]) })
+    for (const key of ['connectionId', 'model', 'temperature', 'topP', 'maxTokens', 'thinkingLevel', 'parameterPolicy'] as const) {
+      const previous = key === 'thinkingLevel' ? a[key] ?? 'default' : a[key]
+      const next = key === 'thinkingLevel' ? b[key] ?? 'default' : b[key]
+      if (JSON.stringify(previous) !== JSON.stringify(next)) result.push({ field: `${slot}.${key}`, before: previous === undefined ? '自动 / 未设置' : typeof previous === 'object' ? JSON.stringify(previous) : String(previous), after: next === undefined ? '自动 / 未设置' : typeof next === 'object' ? JSON.stringify(next) : String(next) })
     }
   }
   return result

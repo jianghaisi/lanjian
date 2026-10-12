@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test, { type TestContext } from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
+import { WORKSPACE_DATABASE_SCHEMA_VERSION } from '../../../src/main/core/ports/workspace-database'
 import { createRequire } from 'node:module'
 import { SqliteWorkspaceDatabaseFactory } from '../../../src/main/platform/storage/workspace-database'
 import { previewLegacyTextMigration, exportLegacyTextMigration } from '../../../src/main/modules/manuscript/adapters/manuscript-text-export'
@@ -581,11 +582,15 @@ test('new-book creation initializes file text authority before registration; ope
 test('known intermediate schema 41 stays byte-identical on shelf reads and upgrades without rewriting its historical receipt', async t => {
   const { project, factory } = await fixture(t)
   const raw = new DatabaseSync(join(project.path, '.webnovel/workspace.sqlite'))
-  raw.exec(`DROP TRIGGER projects_schema_version_v42_after_insert;
+  removeEmptyReviewSchema(raw)
+  raw.exec(`DROP TABLE event_operation_receipts;
+    DROP TABLE event_display_order_versions;
+    DROP TABLE event_lifecycle_versions;
+    DROP TRIGGER projects_schema_version_v${WORKSPACE_DATABASE_SCHEMA_VERSION}_after_insert;
     CREATE TRIGGER projects_schema_version_v41_after_insert AFTER INSERT ON projects
     BEGIN UPDATE projects SET current_schema_version = 41 WHERE id = NEW.id; END;
     UPDATE projects SET current_schema_version = 41;
-    DELETE FROM schema_migrations WHERE version = 42;
+    DELETE FROM schema_migrations WHERE version > 41;
     PRAGMA user_version = 41;`)
   raw.prepare('UPDATE schema_migrations SET checksum = ? WHERE version = 41').run(intermediateManuscriptSchema41Checksum)
   raw.close()
@@ -614,3 +619,4 @@ test('intermediate schema checksum cannot bless a missing guard or unknown schem
   await assert.rejects(previewLegacyTextMigration(project.path), { code: 'DATABASE_INTEGRITY_FAILED' })
   assert.deepEqual(await fileHashes(project.path), before)
 })
+import { removeEmptyReviewSchema } from '../../fixtures/remove-empty-review-schema'

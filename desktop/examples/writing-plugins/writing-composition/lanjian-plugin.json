@@ -1,0 +1,429 @@
+{
+  "apiVersion": 1,
+  "id": "personal.writing-composition",
+  "name": "写作组合示例",
+  "version": "1.0.0",
+  "description": "将叙事参考、检查建议、候选模板和提问流程组合到本书。",
+  "runtime": "quickjs-js",
+  "entry": "main.js",
+  "capabilities": [
+    "author.ask",
+    "model.generate",
+    "planning.read",
+    "planning.candidate"
+  ],
+  "categoryIds": [
+    "style",
+    "review",
+    "workflow",
+    "plot"
+  ],
+  "tags": [
+    "组合示例",
+    "作者确认"
+  ],
+  "tools": [
+    {
+      "id": "reminder",
+      "description": "返回创作提醒",
+      "effect": "read",
+      "capabilities": [],
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 12000
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    }
+  ],
+  "contributions": [
+    {
+      "id": "style",
+      "name": "叙事声音",
+      "kind": "context-fragment",
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tone": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "叙事声音"
+          }
+        },
+        "required": [
+          "tone"
+        ]
+      },
+      "stages": [
+        "assistant",
+        "planning",
+        "writing",
+        "review"
+      ],
+      "text": "叙事声音：{{tone}}。尊重已保存设定和人物动机。",
+      "exclusiveGroup": "narrative-voice"
+    },
+    {
+      "id": "check",
+      "name": "因果与动机检查",
+      "kind": "checker",
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "focus": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "检查重点"
+          }
+        },
+        "required": [
+          "focus"
+        ]
+      },
+      "stages": [
+        "assistant",
+        "review"
+      ],
+      "tool": {
+        "id": "contribution__check",
+        "description": "按本书已保存事实处理；结果仍需作者核对。",
+        "effect": "derive",
+        "capabilities": [
+          "model.generate"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "focus": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 12000
+            }
+          },
+          "required": [
+            "focus",
+            "text"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 12000
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      },
+      "recipe": {
+        "format": 1,
+        "tools": [
+          {
+            "id": "contribution__check",
+            "steps": [
+              {
+                "id": "review",
+                "call": "model.generate",
+                "args": {
+                  "instruction": {
+                    "$join": [
+                      "只提出检查建议：",
+                      {
+                        "$ref": "input.focus"
+                      }
+                    ]
+                  },
+                  "draft": {
+                    "$ref": "input.text"
+                  }
+                }
+              }
+            ],
+            "result": {
+              "text": {
+                "$ref": "steps.review.text"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "workflow",
+      "name": "先确认方向，再审稿",
+      "kind": "workflow",
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "voice": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "审阅口吻"
+          }
+        },
+        "required": [
+          "voice"
+        ]
+      },
+      "stages": [
+        "assistant"
+      ],
+      "tool": {
+        "id": "contribution__workflow",
+        "description": "按本书已保存事实处理；结果仍需作者核对。",
+        "effect": "derive",
+        "capabilities": [
+          "author.ask",
+          "model.generate"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "voice": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 12000
+            }
+          },
+          "required": [
+            "voice",
+            "text"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 12000
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      },
+      "recipe": {
+        "format": 1,
+        "tools": [
+          {
+            "id": "contribution__workflow",
+            "steps": [
+              {
+                "id": "choice",
+                "call": "interaction.request",
+                "args": {
+                  "question": {
+                    "questions": [
+                      {
+                        "id": "focus",
+                        "prompt": "这次重点审阅什么？",
+                        "mode": "single",
+                        "required": true,
+                        "options": [
+                          {
+                            "id": "pace",
+                            "label": "节奏"
+                          },
+                          {
+                            "id": "cause",
+                            "label": "因果"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "id": "review",
+                "call": "model.generate",
+                "args": {
+                  "instruction": {
+                    "$join": [
+                      {
+                        "$ref": "input.voice"
+                      },
+                      "；检查：",
+                      {
+                        "$ref": "steps.choice.answers.0.chosenOptionIds.0"
+                      }
+                    ]
+                  },
+                  "draft": {
+                    "$ref": "input.text"
+                  }
+                }
+              }
+            ],
+            "result": {
+              "text": {
+                "$ref": "steps.review.text"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "outline",
+      "name": "三章因果拆解候选",
+      "kind": "setting-template",
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "instruction": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "拆解要求"
+          }
+        },
+        "required": [
+          "instruction"
+        ]
+      },
+      "stages": [
+        "assistant",
+        "planning"
+      ],
+      "tool": {
+        "id": "contribution__outline",
+        "description": "按本书已保存事实处理；结果仍需作者核对。",
+        "effect": "candidate",
+        "capabilities": [
+          "planning.read",
+          "planning.candidate"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "parentKey": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "instruction": {
+              "type": "string",
+              "maxLength": 2000
+            }
+          },
+          "required": [
+            "parentKey",
+            "instruction"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "taskId": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "notice": {
+              "type": "string",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "taskId",
+            "notice"
+          ]
+        }
+      },
+      "recipe": {
+        "format": 1,
+        "tools": [
+          {
+            "id": "contribution__outline",
+            "steps": [
+              {
+                "id": "parent",
+                "call": "book.read",
+                "args": {
+                  "kind": "outline",
+                  "key": {
+                    "$ref": "input.parentKey"
+                  }
+                }
+              },
+              {
+                "id": "candidate",
+                "call": "candidate.prepare",
+                "args": {
+                  "kind": "expand",
+                  "key": "outline",
+                  "input": {
+                    "parentKey": {
+                      "$ref": "input.parentKey"
+                    },
+                    "expectedRevision": {
+                      "$ref": "steps.parent.revision"
+                    },
+                    "count": 3,
+                    "instruction": {
+                      "$ref": "input.instruction"
+                    }
+                  }
+                }
+              }
+            ],
+            "result": {
+              "taskId": {
+                "$ref": "steps.candidate.taskId"
+              },
+              "notice": {
+                "$ref": "steps.candidate.notice"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "reference",
+      "name": "创作提醒",
+      "kind": "tool-reference",
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "stages": [
+        "assistant"
+      ],
+      "toolId": "reminder"
+    }
+  ]
+}

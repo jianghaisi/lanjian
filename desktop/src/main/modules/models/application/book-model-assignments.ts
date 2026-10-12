@@ -1,13 +1,15 @@
-import { BOOK_MODEL_TASKS, bookModelSource, decodeBookModelSettings } from '../domain/book-model-settings'
+import { isReferencedBookSettings } from '../../../../contracts/models/book-model-settings'
+import { bookModelSource, decodeBookModelSettings } from '../domain/book-model-settings'
 import { AppError, isAppError } from '../../../core/errors/app-error'
 import { applyBookModelAssignment, assignmentConflict, assignmentInvalid, type BookModelAssignmentWriter } from '../domain/book-model-assignments'
 import type { BookModelRequestScope, BookModelSourceReader, GlobalModelCredentialReader } from '../domain/book-model-resolution'
+import { bookParameterValidationSlots, validateBookParameters, type CatalogMetadataReader } from '../domain/validate-book-parameters'
 
 /** Retained main-only edit capability. No current-book setter, secret or provider dependency. */
 export class BookModelAssignments {
   constructor(private readonly books: BookModelSourceReader, private readonly writer: BookModelAssignmentWriter,
     private readonly globals: Pick<GlobalModelCredentialReader, 'list'>,
-    private readonly currentScope: () => BookModelRequestScope | null) {}
+    private readonly currentScope: () => BookModelRequestScope | null, private readonly metadata?: CatalogMetadataReader) {}
 
   async read() {
     const current = this.currentScope()
@@ -27,11 +29,12 @@ export class BookModelAssignments {
         assertActive()
         if (consumed) throw assignmentConflict()
         const { settings, globalRevisions } = applyBookModelAssignment(baseline, input)
-        const profiles = settings.routingMode === 'shared' ? [settings.shared] : BOOK_MODEL_TASKS.map(task => settings.tasks[task])
+        validateBookParameters(settings, [], this.metadata, baseline)
+        const profiles = bookParameterValidationSlots(settings, baseline).map(slot => slot === 'shared' ? settings.shared : settings.tasks[slot])
         const selected = new Set(profiles.map(p => bookModelSource(settings, p.connectionId)).flatMap(c => c.kind === 'global' ? [c.globalConnectionId] : []))
         // New attachments must be verified even if their profile is currently inactive.
-        if (settings.version === 4) for (const c of settings.references) {
-          if (c.kind === 'global' && (baseline.version !== 4 || !baseline.references.some(old => old.kind === 'global' && old.id === c.id && old.globalConnectionId === c.globalConnectionId))) selected.add(c.globalConnectionId)
+        if (isReferencedBookSettings(settings)) for (const c of settings.references) {
+          if (c.kind === 'global' && (!isReferencedBookSettings(baseline) || !baseline.references.some(old => old.kind === 'global' && old.id === c.id && old.globalConnectionId === c.globalConnectionId))) selected.add(c.globalConnectionId)
         }
         if (globalRevisions.size !== selected.size || [...selected].some(id => !globalRevisions.has(id))) throw assignmentInvalid()
         let initial: Map<string, string> | undefined
@@ -44,6 +47,7 @@ export class BookModelAssignments {
             if (!c || !c.enabled || c.revision !== globalRevisions.get(id)) throw assignmentConflict()
             signatures.set(id, JSON.stringify([c.id, c.name, c.baseUrl, c.revision, c.enabled]))
           }
+          validateBookParameters(settings, view.connections, this.metadata, baseline)
           if (initial && [...signatures].some(([id, value]) => initial!.get(id) !== value)) throw assignmentConflict()
           initial = signatures
         }

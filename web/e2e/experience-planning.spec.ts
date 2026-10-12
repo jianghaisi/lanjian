@@ -1,0 +1,22 @@
+import { test, expect } from '@playwright/test'
+test('metered planning produces a proposal and author-reviewed total adoption', async ({ page }) => {
+  const start = await page.request.get('/api/auth/linuxdo/start', { maxRedirects: 0 }); const callback = new URL(start.headers().location!); callback.searchParams.set('code', '888'); await page.goto(callback.href)
+  await page.getByLabel('新作品名称').fill('AI 谋篇验收'); await page.getByRole('button', { name: '＋ 新建作品', exact: true }).click()
+  const nav = page.getByRole('navigation', { name: '作品模块' })
+  await nav.getByRole('button', { name: /定书/ }).click()
+  await page.getByLabel('核心设想').fill('林舟因旧信落款不符而调查旧城，最终查明发信人身份。')
+  await page.getByLabel('小说题材').fill('悬疑'); await page.getByLabel('计划卷数').fill('1')
+  await page.getByRole('button', { name: '保存设定', exact: true }).first().click(); await expect(page.getByRole('status')).toContainText('已保存到当前作品')
+  await nav.getByRole('button', { name: /设定/ }).click(); await page.getByLabel('作者札记').fill('一封落款异常的旧信，让林舟踏上寻找证人的路。')
+  await page.getByRole('button', { name: '保存设定', exact: true }).first().click(); await expect(page.getByRole('status')).toContainText('已保存到当前作品')
+  await nav.getByRole('button', { name: /谋篇/ }).click()
+  await page.getByText('AI 谋篇 · 从蓝图到章纲', { exact: true }).click()
+  await page.getByRole('button', { name: '生成整书规划候选' }).click()
+  await expect(page.getByRole('heading', { name: '旧信之谜', exact: true })).toBeVisible({ timeout: 60000 })
+  await expect(page.getByRole('textbox', { name: '大纲正文' })).not.toContainText('落款不符')
+  for (const name of ['核对人物种子', '核对世界种子', '核对力量体系', '核对特殊优势']) { await page.getByRole('button', { name, exact: true }).click(); await page.getByRole('dialog', { name: '核对规划采用' }).getByRole('button', { name: '确认采用', exact: true }).click(); await expect(page.getByRole('dialog')).toHaveCount(0) }
+  await page.getByRole('button', { name: '预览采用总纲' }).click()
+  const preview = page.getByRole('dialog', { name: '核对规划采用' }); await expect(preview).toContainText('落款不符')
+  await preview.getByRole('button', { name: '确认采用', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: '大纲正文' })).toContainText('落款不符')
+})

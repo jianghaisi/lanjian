@@ -37,14 +37,21 @@ export type WorkspaceNavigationGroup = {
 
 export const workspaceNavigationTree: readonly WorkspaceNavigationGroup[] = [
   {
-    id: 'definition', sequence: '01', label: '定义', icon: 'definition',
+    id: 'group', sequence: 'CHAT', label: '群聊', icon: 'nav-group',
+    description: '本书创作团队：讨论灵感、采风与筹备成果',
+    children: [
+      { id: 'group-chat', label: '本书群聊', icon: 'message', description: '与本书预设成员协作，各自选择模型', target: { active: 'group' } }
+    ]
+  },
+  {
+    id: 'definition', sequence: '01', label: '定义', icon: 'nav-definition',
     description: '先定下作品方向、篇幅与写作约束',
     children: [
       { id: 'profile', label: '作品定义', icon: 'definition', description: '题材、篇幅与本书写作约束', target: { active: 'profile' } }
     ]
   },
   {
-    id: 'materials', sequence: '02', label: '素材', icon: 'research',
+    id: 'materials', sequence: '02', label: '素材', icon: 'nav-materials',
     description: '收集灵感与资料，再提炼为候选事实',
     children: [
       { id: 'ideas', label: '灵感便签', icon: 'spark', description: '随手记录尚未确认的想法', target: { active: 'research', materialSection: 'notes' } },
@@ -54,7 +61,7 @@ export const workspaceNavigationTree: readonly WorkspaceNavigationGroup[] = [
     ]
   },
   {
-    id: 'foundation', sequence: '03', label: '设定', icon: 'world',
+    id: 'foundation', sequence: '03', label: '设定', icon: 'nav-foundation',
     description: '维护人物、世界与力量规则',
     children: [
       { id: 'characters', label: '人物与关系', icon: 'folder', description: '正式人物、地点、物品、组织与关系', target: { active: 'settings', settingsSection: 'story' } },
@@ -64,7 +71,7 @@ export const workspaceNavigationTree: readonly WorkspaceNavigationGroup[] = [
     ]
   },
   {
-    id: 'chronicle', sequence: '04', label: '纪事', icon: 'events',
+    id: 'chronicle', sequence: '04', label: '纪事', icon: 'nav-chronicle',
     description: '记录故事发生的事，找到它们发生的地方',
     children: [
       { id: 'event-timeline', label: '事件', icon: 'events', description: '按顺序维护正式事件与直接纪事', target: { active: 'timeline', timelineMode: 'events' } },
@@ -74,7 +81,7 @@ export const workspaceNavigationTree: readonly WorkspaceNavigationGroup[] = [
     ]
   },
   {
-    id: 'planning', sequence: '05', label: '谋篇', icon: 'outline',
+    id: 'planning', sequence: '05', label: '谋篇', icon: 'nav-planning',
     description: '整理总纲、卷纲和章纲，安排故事如何展开',
     children: [
       { id: 'total-outline', label: '全书总纲', icon: 'outline', description: '全书主线、关键转折与最终结局', target: { active: 'outline', outlineMode: 'total' } },
@@ -86,7 +93,7 @@ export const workspaceNavigationTree: readonly WorkspaceNavigationGroup[] = [
     ]
   },
   {
-    id: 'manuscript', sequence: '06', label: '书稿', icon: 'manuscript',
+    id: 'manuscript', sequence: '06', label: '书稿', icon: 'nav-manuscript',
     description: '撰写章节正文并完成审校',
     children: [
       { id: 'chapters', label: '章节目录与正文', icon: 'manuscript', description: '管理章节并撰写正文', target: { active: 'desk' } },
@@ -138,5 +145,5 @@ export function groupForLocation(location: WorkspaceLocation): WorkspaceNavigati
   if (location.active === 'settings' && location.settingsSection !== 'story') {
     return workspaceNavigationTree.find((group) => group.id === 'settings')!
   }
-  return parentForLeaf(leafForLocation(location)?.id || '') || workspaceNavigationTree[0]
+  return parentForLeaf(leafForLocation(location)?.id || '') || workspaceNavigationTree.find(group => group.id === 'definition')!
 }

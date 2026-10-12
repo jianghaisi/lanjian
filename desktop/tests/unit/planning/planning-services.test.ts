@@ -44,12 +44,12 @@ const foundation: FoundationData = {
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 
-test('expands exactly one hierarchy layer with one call and preserves the parent snapshot', async () => {
+test('expands exactly one hierarchy layer with generation and content review and preserves the parent snapshot', async () => {
   for (const [kind, key, expected] of [['summary', 'total', 'volume'], ['volume', 'volume-1', 'stage'], ['stage', 'stage-1', 'chapter']] as const) {
     let revision = hash('parent')
     let calls = 0
     const source = () => ({ projectFingerprint: hash('book'), key, kind, title: '父级标题', content: '父稿保留原有冲突。', revision })
-    const service = new PlanningDraftService({ complete: async (instruction, draft, context) => {
+    const service = new PlanningDraftService({ complete: async (instruction, draft, context) => { if (instruction.startsWith('复核下方')) return { content: '{"issues":[]}' };
       calls++
       assert.match(instruction, /父稿保留原有冲突/)
       assert.match(instruction, /不重写父级/)
@@ -72,7 +72,8 @@ test('rejects invalid expansion counts, stale parents, cross-project results and
   let project = hash('first')
   let calls = 0
   const controller = new AbortController()
-  const service = new PlanningDraftService({ complete: async () => {
+  const service = new PlanningDraftService({ complete: async (instruction) => {
+    if (instruction.startsWith('复核下方')) return { content: '{"issues":[]}' };
     calls++
     project = hash('second')
     return { content: JSON.stringify({ children: [{ title: '卷', content: '内容', events: [{ time: '后来', characters: ['甲'], location: '城内', event: '发现线索。' }] }] }) }
@@ -118,8 +119,8 @@ const totalOutlineJson = JSON.stringify({
 })
 
 const volumesJson = JSON.stringify({ volumes: [
-  { order: 1, title: '无名之声', goal: '重新获得演出资格', summary: '救场、舆论发酵、签约博弈。', ending: '主角拒绝复制旧路线，决定做原创专辑。' },
-  { order: 2, title: '自己的歌', goal: '完成原创专辑', summary: '创作、发行与行业规则正面冲突。', ending: '作品被听见，但主角选择建立新的合作方式。' }
+  { order: 1, title: '无名之声', goal: '重新获得演出资格', summary: '救场、舆论发酵、签约博弈。', ending: '主角拒绝复制旧路线，决定做原创专辑。', storyContent: '主角替缺席歌手救场，观众的录音让他获得演出邀约。签约方要求复制走红曲目，他拒绝这份安排，决定制作自己的原创专辑。' },
+  { order: 2, title: '自己的歌', goal: '完成原创专辑', summary: '创作、发行与行业规则正面冲突。', ending: '作品被听见，但主角选择建立新的合作方式。', storyContent: '主角辞去旧合约，邀请同样受限制的乐手录制专辑。平台拒绝推荐，他们用现场演出寻找听众；专辑收益使团队能够共同制作下一张作品。' }
 ] })
 
 test('parses strict planning candidates and rejects incomplete output', () => {
@@ -135,7 +136,7 @@ test('uses the per-book repair count for malformed planning JSON', async () => {
   const prompts: string[] = []
   const responses = ['not-json', blueprintJson, totalOutlineJson, volumesJson]
   const service = new PlanningDraftService({
-    complete: async (instruction) => {
+    complete: async (instruction) => { if (instruction.startsWith('复核下方')) return { content: '{"issues":[]}' };
       prompts.push(instruction)
       return { content: responses[prompts.length - 1]! }
     }
@@ -169,7 +170,7 @@ test('generates a complete full-book chapter skeleton only after every volume is
   })) }))
   const status = confirmedPlanningStatus(candidate)
   const service = new ChapterSkeletonService({
-    complete: async (instruction, _draft, _context, task) => {
+    complete: async (instruction, _draft, _context, task) => { if (instruction.startsWith('复核下方')) return { content: '{"issues":[]}' };
       assert.equal(task, 'chapterOutline')
       calls.push(instruction)
       return { content: responses[calls.length - 1]! }
@@ -233,18 +234,18 @@ test('generates one volume of detailed chapter outlines atomically and keeps fut
     chapters: [1, 2].map((chapter) => ({ chapter, volume: 1, volumeChapter: chapter, title: `第${chapter}章`, coreEvent: `事件${chapter}`, characters: ['沈砚'], location: '舞台', result: `结果${chapter}` }))
   }
   const response = JSON.stringify({ chapters: proposal.chapterSkeleton.chapters.map((chapter) => ({
-    chapter: chapter.chapter, entryState: `进入${chapter.chapter}`, beats: [`动作${chapter.chapter}-1`, `动作${chapter.chapter}-2`], exitState: `退出${chapter.chapter}`,
+    storyContent: `人物承接前章结果来到舞台，完成动作${chapter.chapter}-1，其他人的回应使他继续动作${chapter.chapter}-2，场面改变后留下退出${chapter.chapter}的结果。`, chapter: chapter.chapter, entryState: `进入${chapter.chapter}`, beats: [`动作${chapter.chapter}-1`, `动作${chapter.chapter}-2`], exitState: `退出${chapter.chapter}`,
     allowedFacts: ['可扩写舞台细节'], forbiddenEvents: [`不得提前发生事件${chapter.chapter + 1}`], foreshadowActions: []
   })) })
   let stored = 0
-  const service = new ChapterDetailService({ complete: async (instruction) => { assert.match(instruction, /本批章节编号：1,2/); return { content: response } } }, {
+  const service = new ChapterDetailService({ complete: async (instruction) => { if (instruction.startsWith('复核下方')) return { content: '{"issues":[]}' }; assert.match(instruction, /本批章节编号：1,2/); return { content: response } } }, {
     get: async () => structuredClone(proposal),
     storeChapterDetail: async (_proposalId, detail) => { stored += 1; return { ...structuredClone(proposal), chapterDetails: [detail] } }
   }, { status: async () => confirmedPlanningStatus(proposal) }, { effectivePrompt: async () => '每个节拍都服从骨架。' }, () => new Date('2026-08-27T11:00:00.000Z'))
   const result = await service.generate(proposal.id, 1)
   assert.equal(stored, 1)
   assert.equal(result.chapterDetails?.[0]?.chapters.length, 2)
-  assert.match(renderPlanningChapterDetail(result.chapterDetails![0]!.chapters[0]!), /禁止：不得提前发生事件2/)
+  assert.match(renderPlanningChapterDetail(result.chapterDetails![0]!.chapters[0]!), /完成动作1-1/)
   assert.doesNotMatch(renderPlanningChapterDetail(result.chapterDetails![0]!.chapters[0]!), /伏笔：无/)
   assert.throws(() => parseChapterDetailBatch('{"chapters":[]}', proposal.chapterSkeleton!.chapters), /应返回 2 章/)
 })
@@ -305,7 +306,7 @@ test('generates blueprint, total outline and volume plan in stages without persi
   const stages: Array<[string, number]> = []
   const responses = [blueprintJson, totalOutlineJson, volumesJson]
   const service = new PlanningDraftService({
-    complete: async (instruction, _draft, systemContext, task, signal) => {
+    complete: async (instruction, _draft, systemContext, task, signal) => { if (instruction.startsWith('复核下方')) return { content: '{"issues":[]}' };
       assert.equal(task, 'outline')
       assert.equal(signal?.aborted, false)
       assert.match(systemContext || '', /社会关系、职业细节和利益交换要可信/)
@@ -333,7 +334,7 @@ test('sends the current book prompt override with non-editable consistency gates
   const responses = [blueprintJson, totalOutlineJson, volumesJson]
   let call = 0
   const service = new PlanningDraftService({
-    complete: async (_instruction, _draft, systemContext) => {
+    complete: async (_instruction, _draft, systemContext) => { if (_instruction.startsWith('复核下方')) return { content: '{"issues":[]}' };
       assert.match(systemContext || '', /本书谋篇策略：以舞台选择推动人物变化，不用偶然事件替代因果/)
       assert.match(systemContext || '', /ChapterContract/)
       assert.match(systemContext || '', /候选在作者采用前都不是正式事实/)
@@ -367,7 +368,7 @@ test('requires saved per-book materials before planning', async () => {
 test('uses the unified material library when the author note is empty', async () => {
   const prompts: string[] = []
   const responses = [blueprintJson, totalOutlineJson, volumesJson]
-  const service = new PlanningDraftService({ complete: async (instruction) => {
+  const service = new PlanningDraftService({ complete: async (instruction) => { if (instruction.startsWith('复核下方')) return { content: '{"issues":[]}' };
     prompts.push(instruction)
     return { content: responses[prompts.length - 1] }
   } }, {
@@ -809,3 +810,22 @@ function confirmedPlanningStatus(proposal: PlanningPackageProposal): OutlinePlan
     chapterPlacements: [], eventChapterPlacements: []
   }
 }
+
+
+test('total story review with upstream gap stops before volume generation and preserves evidence', async () => {
+  const calls: string[] = []
+  const service = new PlanningDraftService({ complete: async instruction => {
+    calls.push(instruction)
+    if (instruction.includes('生成创作蓝图')) return { content: blueprintJson }
+    if (instruction.startsWith('复核下方')) return { content: calls.length === 2 ? '{"issues":[]}' : JSON.stringify({ issues: [{ category: 'upstream-gap', quote: '', parentQuote: '', reason: '结局依赖尚未确定的人物身份，需作者先确定总纲依据。', needsAuthor: true }] }) }
+    assert.match(instruction, /覆盖全书的总纲/)
+    return { content: totalOutlineJson }
+  } }, { bookProfile: async () => profile, foundation: async () => foundation })
+  await assert.rejects(service.generate('book-a'), error => {
+    assert.match((error as Error).message, /需作者先确定/)
+    assert.equal((error as { originalContent: string }).originalContent, totalOutlineJson)
+    return true
+  })
+  assert.equal(calls.length, 4)
+  assert.ok(!calls.some(prompt => prompt.includes('把总纲拆成')))
+})

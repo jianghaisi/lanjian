@@ -1,8 +1,13 @@
 import { mkdir, readFile, rename, unlink } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { assertChapterEventAdoption, chapterEventOutputItems, type ChapterEventAdoption, type ChapterEventInput, type ChapterEventOutput } from '../domain/chapter-event-adoption'
+import type { ChapterStoryConstraints } from '../../../../contracts/planning/chapter-story-contract'
+import type { ChapterEventDraft, ChapterEventAdoptionPreview, ChapterEventAdoptionResult, ChapterEventReplacementImpact } from '../../../../contracts/planning/types'
+import { decodeChapterEventAdoptionArgs } from '../../../../contracts/planning/ipc'
+import type { ChapterEventPreview, ChapterEventReference, FormalSkeletonPreview, FormalSkeletonView, PlanningChapterSkeletonEntry } from '../../../../contracts/planning/types'
 import { join, relative } from 'node:path'
 import { AppError } from '../../../core/errors/app-error'
-import { renderPlanningChapterDetail } from '../domain/planning-chapter-detail'
+import { renderPlanningChapterDetail, chapterDetailFingerprint } from '../domain/planning-chapter-detail'
 import { projectDirectory } from '../../../platform/storage/project-path'
 import type { CharacterStateView, CheatSystemData, FoundationData, OutlineDocument, OutlinePlanningStatus, OutlineUpdateResult, PlanningChapterDetailAdoptionPreview, PlanningChapterDetailAdoptionResult, PlanningChapterDetailStatus, PlanningChapterDetailVolumeProposal, PlanningChapterSkeletonProposal, PlanningChapterSkeletonStatus, PlanningCharacterSeed, PlanningCharacterSeedPreview, PlanningCharacterSeedResult, PlanningCheatSystemPreview, PlanningCheatSystemResult, PlanningDraftRecoveryResult, PlanningPackageProposal, PlanningPowerSystemPreview, PlanningPowerSystemResult, PlanningTotalAdoptionPreview, PlanningTotalAdoptionResult, PlanningVolumeOutlinePreview, PlanningVolumeOutlineResult, PlanningVolumeProposal, PlanningVolumeStructurePreview, PlanningVolumeStructureResult, PlanningWorldSeedPreview, PlanningWorldSeedResult, PowerSystemData, ProjectSummary, RealmLevel } from '../../../../contracts/index'
 import { decodePlanningPackageArgs } from '../../../../contracts/ipc'
@@ -15,10 +20,16 @@ type CurrentProject = {
 
 type StoredPlanningDraft = { version: 1; proposal: PlanningPackageProposal; updatedAt: string }
 type OutlinePlanningPort = {
+  recoverChapterEvent?: (operationId: string) => Promise<{ output: ChapterEventOutput; mirrorsPending: boolean }>
+  prepareChapterEvent?: (chapterId: number, volume: number, title: string, content: string, event: ChapterEventInput | ChapterEventInput[], constraints?: ChapterStoryConstraints) => Promise<{ root: string; command: ChapterEventAdoption; replacementImpact?: ChapterEventReplacementImpact }>
+  commitChapterEvent?: (root: string, command: ChapterEventAdoption, guard?: () => Promise<void>) => Promise<{ output: ChapterEventOutput; mirrorsPending: boolean; planningMirrorsPending: boolean }>
+  inspectChapterEvents?: (chapterId: number) => Promise<ChapterEventReference[]>
+  inspectFormalSkeleton?: (entries: PlanningChapterSkeletonEntry[], volume: number) => Promise<FormalSkeletonView>
+  adoptFormalSkeleton?: (entries: PlanningChapterSkeletonEntry[], volume: number, fingerprint: string) => Promise<FormalSkeletonView>
   status: (chapterId?: number) => Promise<OutlinePlanningStatus>
   updateOutline: (volume: 'total' | number, content: string) => Promise<OutlineUpdateResult>
   initializeVolumeStructure: (input: Array<{ order: number; title: string }>) => Promise<OutlinePlanningStatus>
-  updateChapterOutline?: (chapterId: number, content: string, plannedVolume?: number) => Promise<{ chapterId: number; content: string }>
+  updateChapterOutline?: (chapterId: number, content: string, plannedVolume?: number, constraints?: ChapterStoryConstraints) => Promise<{ chapterId: number; content: string }>
 }
 type OutlineDocumentPort = {
   outline: (volume: 'total' | number) => Promise<OutlineDocument>
@@ -42,6 +53,8 @@ type FoundationPort = {
 
 export class PlanningPackageService {
   private mutation: Promise<void> = Promise.resolve()
+  private chapterEventPreviews = new Map<string, { root: string; proposalId: string; candidate: string; command: ChapterEventAdoption; expires: number }>()
+  private skeletonPreviews = new Map<string, { root: string; proposalId: string; volume: number; candidate: string; fingerprint: string; expires: number }>()
 
   constructor(
     private readonly projects: CurrentProject,
@@ -51,6 +64,70 @@ export class PlanningPackageService {
     private readonly characters?: CharacterStatePort,
     private readonly foundation?: FoundationPort
   ) {}
+
+  previewChapterEventAdoption(proposalId: string, chapterId: number, event: ChapterEventDraft | ChapterEventDraft[]): Promise<ChapterEventAdoptionPreview> {
+    return this.serialize(async () => {
+      ;[proposalId, chapterId, event] = decodeChapterEventAdoptionArgs([proposalId, chapterId, event])
+      const root = await this.projects.currentPath(), proposal = await this.requiredProposal(proposalId)
+      await this.chapterDetailAdoptionPreview(proposal, chapterId)
+      const detail = this.chapterDetailEntry(proposal, chapterId), planning = this.requirePlanning()
+      if (!planning.prepareChapterEvent || !planning.commitChapterEvent) throw new AppError('FEATURE_UNAVAILABLE', '联合采用暂不可用。', { recoverable: true })
+      const candidate = fingerprint(JSON.stringify(proposal))
+      const events = Array.isArray(event) ? event : [event]
+      const prepared = await planning.prepareChapterEvent(chapterId, detail.volume, detail.title, renderPlanningChapterDetail(detail), events.map(e => ({ ...e, evidenceRefs: [], confidence: 1 })), detail.storyContent !== undefined ? detailConstraints(detail) : undefined)
+      if (prepared.root !== root || await this.projects.currentPath() !== root
+        || fingerprint(JSON.stringify(await this.requiredProposal(proposalId))) !== candidate) throw new AppError('CONFLICT', '候选或作品在读取中变化，请重新核对。', { recoverable: true })
+      for (const [token, p] of this.chapterEventPreviews) if (p.expires <= this.now().getTime() || (p.root === root && p.command.chapterId === chapterId)) this.chapterEventPreviews.delete(token)
+      if (this.chapterEventPreviews.size >= 32) this.chapterEventPreviews.delete(this.chapterEventPreviews.keys().next().value!)
+      const token = randomUUID(), command = prepared.command
+      assertChapterEventAdoption(command)
+      this.chapterEventPreviews.set(token, { root, proposalId, candidate, command, expires: this.now().getTime() + 300_000 })
+      return { token, operationId: command.operationId, proposalId, chapterId, event: events[0], ...(events.length > 1 ? { events } : {}), chapterContent: command.content,
+        replacesChapter: command.expectedOutlineRevision !== null, existingEventCount: command.eventHeads.length,
+        ...(prepared.replacementImpact ? { replacementImpact: prepared.replacementImpact } : {}) }
+    })
+  }
+
+  adoptChapterEvent(token: string): Promise<ChapterEventAdoptionResult> {
+    const grant = this.chapterEventPreviews.get(token)
+    this.chapterEventPreviews.delete(token)
+    return this.serialize(async () => {
+      if (!grant) throw new AppError('CONFLICT', '核对已失效或已使用，请重新预览。', { recoverable: true })
+      const guard = async () => {
+        if (this.now().getTime() >= grant.expires || await this.projects.currentPath() !== grant.root
+          || fingerprint(JSON.stringify(await this.requiredProposal(grant.proposalId))) !== grant.candidate) throw new AppError('CONFLICT', '候选、作品或核对期限已变化，未执行采用。', { recoverable: true })
+      }
+      await guard()
+      const proposal = await this.requiredProposal(grant.proposalId)
+      await this.chapterDetailAdoptionPreview(proposal, grant.command.chapterId)
+      const planning = this.requirePlanning()
+      if (!planning.commitChapterEvent) throw new AppError('FEATURE_UNAVAILABLE', '联合采用暂不可用。', { recoverable: true })
+      const committed = await planning.commitChapterEvent(grant.root, grant.command, guard)
+      const chapterId = grant.command.chapterId, detail = this.chapterDetailEntry(proposal, chapterId)
+      let candidateReceiptPending = false
+      try {
+        await guard()
+        proposal.adoption = { ...(proposal.adoption || {}), chapterOutlines: [
+          ...(proposal.adoption?.chapterOutlines ?? []).filter(item => item.chapter !== chapterId),
+          { chapter: chapterId, candidateFingerprint: chapterDetailFingerprint(detail), adoptedAt: this.now().toISOString(),
+            totalFingerprint: fingerprint(renderPlanningTotalOutline(proposal)),
+            volumeFingerprint: fingerprint(renderPlanningVolumeOutline(proposal.volumes.find(v => v.order === detail.volume)!)) }
+        ].sort((a, b) => a.chapter - b.chapter) }
+        await this.writeStored(proposal)
+      } catch { candidateReceiptPending = true }
+      return { chapterId, eventId: committed.output.eventId, eventVersionId: committed.output.eventVersionId,
+        ...(committed.output.additionalEvents ? { events: chapterEventOutputItems(committed.output).map(({ eventId, eventVersionId }) => ({ eventId, eventVersionId })) } : {}),
+        mirrorsPending: committed.mirrorsPending, candidateReceiptPending }
+    })
+  }
+
+  async recoverChapterEvent(operationId: string): Promise<ChapterEventAdoptionResult> {
+    const planning = this.requirePlanning()
+    if (!planning.recoverChapterEvent) throw new AppError('FEATURE_UNAVAILABLE', '联合采用恢复暂不可用。', { recoverable: true })
+    const { output, mirrorsPending } = await planning.recoverChapterEvent(operationId)
+    return { chapterId: output.chapterId, eventId: output.eventId, eventVersionId: output.eventVersionId,
+      ...(output.additionalEvents ? { events: chapterEventOutputItems(output).map(({ eventId, eventVersionId }) => ({ eventId, eventVersionId })) } : {}), mirrorsPending, candidateReceiptPending: true }
+  }
 
   get(): Promise<PlanningPackageProposal | null> {
     return this.serialize(async () => {
@@ -89,7 +166,7 @@ export class PlanningPackageService {
         const detail = proposal.chapterDetails?.flatMap((item) => item.chapters).find((item) => item.chapter === claimed.chapter)
         const volume = detail && proposal.volumes.find((item) => item.order === detail.volume)
         if (!stored || !detail || !volume || JSON.stringify(claimed) !== JSON.stringify(stored)
-          || claimed.candidateFingerprint !== fingerprint(renderPlanningChapterDetail(detail))
+          || claimed.candidateFingerprint !== chapterDetailFingerprint(detail)
           || claimed.totalFingerprint !== fingerprint(renderPlanningTotalOutline(proposal))
           || claimed.volumeFingerprint !== fingerprint(renderPlanningVolumeOutline(volume))) {
           throw new AppError('CONFLICT', '章纲采用状态只能由正式逐章采用事务更新，已阻止候选伪造状态。', { recoverable: true })
@@ -171,6 +248,71 @@ export class PlanningPackageService {
     })
   }
 
+  previewFormalSkeleton(proposalId: string, volume: number): Promise<FormalSkeletonPreview> {
+    return this.serialize(async () => {
+      const root = await this.projects.currentPath()
+      const proposal = await this.requiredProposal(proposalId)
+      const entries = this.formalSkeletonCandidate(proposal, volume)
+      const planning = this.requirePlanning()
+      if (!planning.inspectFormalSkeleton) throw new AppError('FEATURE_UNAVAILABLE', '正式骨架服务不可用。', { recoverable: true })
+      const view = await planning.inspectFormalSkeleton(entries, volume)
+      if (root !== await this.projects.currentPath()) throw new AppError('CONFLICT', '作品已切换，请重新预览。', { recoverable: true })
+      for (const [key, value] of this.skeletonPreviews) if (value.expires <= Date.now() || (value.root === root && value.volume === volume)) this.skeletonPreviews.delete(key)
+      if (this.skeletonPreviews.size >= 32) this.skeletonPreviews.delete(this.skeletonPreviews.keys().next().value!)
+      const token = randomUUID()
+      this.skeletonPreviews.set(token, { root, proposalId, volume, candidate: fingerprint(JSON.stringify(entries)), fingerprint: view.fingerprint, expires: Date.now() + 300_000 })
+      return { ...view, proposalId, token }
+    })
+  }
+
+  adoptFormalSkeleton(token: string): Promise<FormalSkeletonView> {
+    return this.serialize(async () => {
+      const grant = this.skeletonPreviews.get(token)
+      this.skeletonPreviews.delete(token)
+      if (!grant || grant.expires <= Date.now() || grant.root !== await this.projects.currentPath()) throw new AppError('CONFLICT', '骨架预览已失效，请重新预览。', { recoverable: true })
+      const proposal = await this.requiredProposal(grant.proposalId)
+      const entries = this.formalSkeletonCandidate(proposal, grant.volume)
+      if (fingerprint(JSON.stringify(entries)) !== grant.candidate) throw new AppError('CONFLICT', '候选已修改，请重新预览后采用。', { recoverable: true })
+      const planning = this.requirePlanning()
+      if (!planning.adoptFormalSkeleton) throw new AppError('FEATURE_UNAVAILABLE', '正式骨架服务不可用。', { recoverable: true })
+      return planning.adoptFormalSkeleton(entries, grant.volume, grant.fingerprint)
+    })
+  }
+
+  assertFormalSkeletonForDetails(proposalId: string, volume: number): Promise<string> {
+    return this.serialize(async () => this.formalSkeletonForDetails(await this.requiredProposal(proposalId), volume))
+  }
+
+  private async formalSkeletonForDetails(proposal: PlanningPackageProposal, volume: number): Promise<string> {
+    const entries = this.formalSkeletonCandidate(proposal, volume)
+    const planning = this.requirePlanning()
+    if (!planning.inspectFormalSkeleton) throw new AppError('FEATURE_UNAVAILABLE', '正式骨架服务不可用。', { recoverable: true })
+    const view = await planning.inspectFormalSkeleton(entries, volume)
+    if (!view.canAdopt || view.entries.some(e => e.status !== 'current')) {
+      throw new AppError('CONFLICT', '请先在章节安排中核对并采用本卷骨架，再生成详细章纲。', { recoverable: true })
+    }
+    return fingerprint(JSON.stringify(view.entries.map(e => [e.chapter, e.revision])))
+  }
+
+  private async assertDetailSources(proposal: PlanningPackageProposal, detail: PlanningChapterDetailVolumeProposal): Promise<void> {
+    if (!this.planning?.inspectFormalSkeleton) return // Compatibility adapters; production always supplies the reader.
+    const current = await this.formalSkeletonForDetails(proposal, detail.volume)
+    if (current !== detail.basedOn.formalSkeletonFingerprint) {
+      throw new AppError('CONFLICT', '详细章纲未绑定当前正式骨架版本，请重新生成本卷候选。', { recoverable: true })
+    }
+  }
+
+  private formalSkeletonCandidate(proposal: PlanningPackageProposal, volume: number): PlanningChapterSkeletonEntry[] {
+    const skeleton = proposal.chapterSkeleton
+    if (!skeleton || skeleton.basedOn.totalOutlineFingerprint !== fingerprint(renderPlanningTotalOutline(proposal))
+      || skeleton.basedOn.volumePlanFingerprint !== fingerprint(renderPlanningVolumePlan(proposal))) {
+      throw new AppError('CONFLICT', '章节安排候选的上游已变化，请先重新生成并核对。', { recoverable: true })
+    }
+    const entries = skeleton.chapters.filter(entry => entry.volume === volume)
+    if (!entries.length) throw new AppError('NOT_FOUND', '当前卷没有章节安排候选。', { recoverable: true })
+    return entries
+  }
+
   storeChapterSkeleton(proposalId: string, skeleton: PlanningChapterSkeletonProposal): Promise<PlanningPackageProposal> {
     return this.serialize(async () => {
       const proposal = await this.requiredProposal(proposalId)
@@ -187,15 +329,19 @@ export class PlanningPackageService {
   chapterDetailStatuses(proposalId: string): Promise<PlanningChapterDetailStatus[]> {
     return this.serialize(async () => {
       const proposal = await this.requiredProposal(proposalId)
-      return proposal.volumes.map((volume) => {
+      return Promise.all(proposal.volumes.map(async (volume) => {
         const detail = proposal.chapterDetails?.find((item) => item.volume === volume.order)
         if (!detail) return { volume: volume.order, exists: false, stale: false, chapterCount: 0 }
-        const stale = !proposal.chapterSkeleton
+        let stale = !proposal.chapterSkeleton
           || detail.basedOn.totalOutlineFingerprint !== fingerprint(renderPlanningTotalOutline(proposal))
           || detail.basedOn.volumeOutlineFingerprint !== fingerprint(renderPlanningVolumeOutline(volume))
           || detail.basedOn.skeletonFingerprint !== fingerprint(renderPlanningChapterSkeletonVolume(proposal, volume.order))
-        return { volume: volume.order, exists: true, stale, chapterCount: detail.chapters.length, ...(stale ? { reason: '总纲、卷纲或章节骨架已变化，请重新生成本卷详细章纲。' } : {}) }
-      })
+        if (!stale) {
+          try { await this.assertDetailSources(proposal, detail) }
+          catch (error) { if (error instanceof AppError && error.code === 'CONFLICT') stale = true; else throw error }
+        }
+        return { volume: volume.order, exists: true, stale, chapterCount: detail.chapters.length, ...(stale ? { reason: '总纲、卷纲或正式骨架版本已变化，请重新生成本卷详细章纲。' } : {}) }
+      }))
     })
   }
 
@@ -209,6 +355,7 @@ export class PlanningPackageService {
         || detail.basedOn.skeletonFingerprint !== fingerprint(renderPlanningChapterSkeletonVolume(proposal, detail.volume))) {
         throw new AppError('CONFLICT', '总纲、卷纲或章节骨架在生成期间发生变化，本卷详细章纲没有保存。', { recoverable: true })
       }
+      await this.assertDetailSources(proposal, detail)
       const regeneratedChapters = new Set(detail.chapters.map((item) => item.chapter))
       const next = {
         ...proposal,
@@ -375,6 +522,50 @@ export class PlanningPackageService {
     return this.serialize(async () => this.chapterDetailAdoptionPreview(await this.requiredProposal(proposalId), chapterId))
   }
 
+  previewChapterEvents(proposalId: string, chapterId: number): Promise<ChapterEventPreview> {
+    return this.serialize(async () => {
+      const root = await this.projects.currentPath()
+      const planning = this.requirePlanning()
+      if (!planning.inspectChapterEvents || !planning.inspectFormalSkeleton) throw new AppError('FEATURE_UNAVAILABLE', '章纲事件核对服务不可用。', { recoverable: true })
+      const read = async () => {
+        const proposal = await this.requiredProposal(proposalId)
+        const detail = this.chapterDetailEntry(proposal, chapterId)
+        const volume = proposal.chapterDetails!.find(item => item.volume === detail.volume)!
+        const entries = proposal.chapterSkeleton!.chapters.filter(item => item.volume === detail.volume)
+        const skeleton = entries.find(item => item.chapter === chapterId)!
+        const formal = await planning.inspectFormalSkeleton!(entries, detail.volume)
+        const events = await planning.inspectChapterEvents!(chapterId)
+        return { proposal, detail, volume, skeleton, formal, events }
+      }
+      const first = await read()
+      const digest = fingerprint(JSON.stringify(first))
+      if (root !== await this.projects.currentPath() || digest !== fingerprint(JSON.stringify(await read())) || root !== await this.projects.currentPath()) {
+        throw new AppError('CONFLICT', '作品、候选或正式来源在读取中发生变化，请重新核对。', { recoverable: true })
+      }
+      const { proposal, detail, volume, skeleton, formal, events } = first
+      const heads = fingerprint(JSON.stringify(formal.entries.map(entry => [entry.chapter, entry.revision])))
+      const stale = !formal.canAdopt || formal.entries.some(entry => entry.status !== 'current')
+        || volume.basedOn.formalSkeletonFingerprint !== heads
+        || volume.basedOn.totalOutlineFingerprint !== fingerprint(renderPlanningTotalOutline(proposal))
+        || volume.basedOn.volumeOutlineFingerprint !== fingerprint(renderPlanningVolumeOutline(proposal.volumes[detail.volume - 1]))
+        || volume.basedOn.skeletonFingerprint !== fingerprint(renderPlanningChapterSkeletonVolume(proposal, detail.volume))
+        || proposal.chapterSkeleton!.basedOn.volumePlanFingerprint !== fingerprint(renderPlanningVolumePlan(proposal))
+        || proposal.chapterSkeleton!.basedOn.totalOutlineFingerprint !== fingerprint(renderPlanningTotalOutline(proposal))
+      const freshness = !volume.basedOn.formalSkeletonFingerprint ? 'untracked' : stale ? 'stale' : 'current'
+      const findings: ChapterEventPreview['findings'] = [
+        { code: 'TIME_UNSPECIFIED', message: '本章候选没有独立的时间字段；关联事件的时间不能自动当成本章新增事件的时间。' },
+        { code: 'SEMANTIC_REVIEW_REQUIRED', message: '请核对节拍与骨架、关联事件的因果和先后关系。来源版本有效不代表语义没有矛盾。' }
+      ]
+      if (freshness !== 'current') findings.unshift(freshness === 'untracked'
+        ? { code: 'UNTRACKED_CANDIDATE', message: '旧候选未绑定正式骨架版本，保留供核对；重新生成后才能建立可靠来源。' }
+        : { code: 'SOURCE_CHANGED', message: '候选依据已变化或上游尚未确认，请重新核对正式骨架并生成详细章纲。' })
+      return { workItemId: proposal.workItemId, proposalId, chapterId, fingerprint: digest, freshness,
+        candidate: { title: detail.title, time: null, characters: [...skeleton.characters], location: skeleton.location,
+          coreEvent: skeleton.coreEvent, plannedResult: skeleton.result, entryState: detail.entryState, beats: [...detail.beats], exitState: detail.exitState },
+        formalEvents: events, findings }
+    })
+  }
+
   adoptChapterDetail(input: { proposalId: string; chapterId: number; upstreamFingerprint: string; candidateFingerprint: string; currentFingerprint: string }): Promise<PlanningChapterDetailAdoptionResult> {
     return this.serialize(async () => {
       const proposal = await this.requiredProposal(input.proposalId)
@@ -385,7 +576,7 @@ export class PlanningPackageService {
       const detail = this.chapterDetailEntry(proposal, input.chapterId)
       const planning = this.requirePlanning()
       if (!planning.updateChapterOutline) throw new AppError('INVALID_PROJECT_STATE', '正式章纲写入服务尚未就绪。', { recoverable: true })
-      await planning.updateChapterOutline(input.chapterId, renderPlanningChapterDetail(detail), detail.volume)
+      await planning.updateChapterOutline(input.chapterId, renderPlanningChapterDetail(detail), detail.volume, detail.storyContent !== undefined ? detailConstraints(detail) : undefined)
       const status = await planning.status(input.chapterId)
       const previous = proposal.adoption?.chapterOutlines || []
       proposal.adoption = { ...(proposal.adoption || {}), chapterOutlines: [
@@ -603,6 +794,7 @@ export class PlanningPackageService {
       || detailVolume.basedOn.skeletonFingerprint !== fingerprint(renderPlanningChapterSkeletonVolume(proposal, detail.volume))) {
       throw new AppError('CONFLICT', '这章详细章纲的上游已经变化，请先重新生成本卷候选。', { recoverable: true })
     }
+    await this.assertDetailSources(proposal, detailVolume)
     const planning = this.requirePlanning()
     const documents = this.requireDocuments()
     if (!documents.chapterOutline) throw new AppError('INVALID_PROJECT_STATE', '正式章纲读取服务尚未就绪。', { recoverable: true })
@@ -625,7 +817,7 @@ export class PlanningPackageService {
       chapterId,
       volume: detail.volume,
       upstreamFingerprint,
-      candidateFingerprint: fingerprint(candidateContent),
+      candidateFingerprint: chapterDetailFingerprint(detail),
       currentFingerprint: fingerprint(currentContent),
       changes: candidateContent !== currentContent,
       current: { exists: Boolean(currentContent.trim()), excerpt: excerpt(currentContent), characterCount: currentContent.length, confirmed: status.chapter?.review.status === 'confirmed' },
@@ -706,11 +898,13 @@ export function renderPlanningVolumePlan(proposal: PlanningPackageProposal): str
     title: item.title.trim(),
     goal: item.goal.trim(),
     summary: item.summary.trim(),
-    ending: item.ending.trim()
+    ending: item.ending.trim(),
+    ...(item.storyContent !== undefined ? { storyContent: item.storyContent.trim() } : {})
   })))
 }
 
 export function renderPlanningVolumeOutline(volume: PlanningVolumeProposal): string {
+  if (volume.storyContent !== undefined) return `# 第 ${volume.order} 卷 · ${volume.title.trim()}\n\n${volume.storyContent.trim()}\n`
   return `# 第 ${volume.order} 卷 · ${volume.title.trim()}\n\n> 本卷目标：${volume.goal.trim()}\n\n## 事件链\n\n${volume.summary.trim()}\n\n## 卷末状态\n\n${volume.ending.trim()}\n`
 }
 
@@ -782,4 +976,9 @@ function excerpt(content: string): string { return content.trim().slice(0, 800) 
 
 function invalidState(): AppError {
   return new AppError('INVALID_PROJECT_STATE', '自动谋篇候选文件已损坏；为保护作品，应用不会覆盖它。', { recoverable: false })
+}
+
+function detailConstraints(detail: ChapterStoryConstraints): ChapterStoryConstraints {
+  const { entryState, beats, exitState, allowedFacts, forbiddenEvents, foreshadowActions } = detail
+  return { entryState, beats, exitState, allowedFacts, forbiddenEvents, foreshadowActions }
 }

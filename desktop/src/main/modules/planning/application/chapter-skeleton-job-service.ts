@@ -1,3 +1,4 @@
+import { StructuredResponseFailure } from '../../assistant/application/structured-response-repair'
 import { randomUUID } from 'node:crypto'
 import { AppError } from '../../../core/errors/app-error'
 import type { PlanningChapterSkeletonJob, PlanningPackageProposal } from '../../../../contracts/index'
@@ -64,11 +65,12 @@ export class ChapterSkeletonJobService {
         ...job.state, status: 'completed', completedAt: this.now().toISOString(), proposal,
         progress: { completed: proposal.volumes.length, total: proposal.volumes.length, message: '全书章节骨架候选已经完成' }
       }
-    } catch {
+    } catch (error) {
       if (job.state.status !== 'running' || job.controller.signal.aborted) return
       job.state = {
-        ...job.state, status: 'failed', completedAt: this.now().toISOString(),
-        error: { code: 'GENERATION_FAILED', message: '章节骨架未完成，请检查篇卷确认状态与模型连接后重试。', stage: 'chapterSkeleton' },
+        ...job.state, status: 'failed',
+        ...(error instanceof StructuredResponseFailure ? { rawResult: JSON.stringify({ original: error.originalContent, last: error.lastContent }) } : {}), completedAt: this.now().toISOString(),
+        error: { code: 'GENERATION_FAILED', message: error instanceof StructuredResponseFailure ? error.message.slice(0, 1000) : '章节骨架未完成，请检查篇卷确认状态与模型连接后重试。', stage: 'chapterSkeleton' },
         progress: { ...job.state.progress, message: '章节骨架未完成' }
       }
     }

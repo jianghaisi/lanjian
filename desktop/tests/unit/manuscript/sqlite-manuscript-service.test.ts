@@ -319,8 +319,8 @@ test('migrates outline workflow assignments and confirmations into SQLite while 
   assert.ok((await formal.status()).volumes.some((volume) => volume.title === '第二卷·钟楼回声'))
   let database = await databases.openExisting(project.path)
   assert.ok(database)
-  assert.equal(database.formalOutlinePlanningStateReady(), true)
-  assert.equal(database.outlinePlanningStateMirror()?.status, 'synced')
+  // Inspection never silently initializes the authority or publishes a mirror.
+  assert.equal(database.formalOutlinePlanningStateReady(), false)
   database.close()
 
   await formal.createVolume('第三卷·失踪名册')
@@ -328,7 +328,10 @@ test('migrates outline workflow assignments and confirmations into SQLite while 
   assert.ok(mirrored.volumes.some((volume) => volume.title === '第三卷·失踪名册'))
   const externallyEdited = (await readFile(ledgerPath, 'utf8')).replace('第三卷·失踪名册', '外部改写')
   await writeFile(ledgerPath, externallyEdited, 'utf8')
-  await assert.rejects(formal.status(), /外部修改/)
+  assert.ok((await formal.status()).volumes.some(v => v.title === '第三卷·失踪名册'))
+  assert.equal(await readFile(ledgerPath, 'utf8'), externallyEdited)
+  // Explicit mutation still detects and protects the externally edited mirror.
+  await assert.rejects(formal.createVolume('不可写入'), /外部修改/)
   database = await databases.openExisting(project.path)
   assert.ok(database)
   assert.match(database.outlinePlanningState().content, /第三卷·失踪名册/)
@@ -481,7 +484,7 @@ test('keeps timeline reads in compatibility until explicit save while retaining 
 
 test('question answer freezes current SQLite prior-body evidence with real display order and zero prose writes', async (context) => {
   const { project, projects, authority, documents } = await fixture(context)
-  const quote = '班长把数学笔记递给李远明：“明天还我。”'
+  const quote = '班长把数学笔记递给周文衡：“明天还我。”'
   // A normalized index is hundreds of characters ahead of the original here.
   // Exercise real persisted chunks -> question context, not only a stubbed port.
   await documents.updateChapter(20, { title: '课堂上的笔记', content: '甲…'.repeat(200) + quote + '乙'.repeat(900) })
@@ -1595,6 +1598,164 @@ test('chunks every formal body version and retrieves only chunks from the curren
   database.close()
 })
 
+test('isolated long-book context read stays within the full-source budget on repeated runs', {
+  skip: process.env.LANJIAN_LONG_CONTEXT_BENCH !== '1'
+}, async context => {
+  const { projects, project } = await fixture(context)
+  // The general fixture's fixed clock intentionally covers only a small number
+  // of writes; this load case uses a fresh isolated authority with a real clock.
+  const authority = new SqliteManuscriptService(new SqliteWorkspaceDatabaseFactory())
+  const documents = new DocumentService(projects, undefined, authority)
+  const terms = Array.from({ length: 96 }, (_, index) => `clue${String(index).padStart(3, '0')}`)
+  const chapterText = `沈砚核对线索：${terms.join('、')}。`.repeat(14)
+  for (let id = 1; id <= 112; id += 1) {
+    if (id === 10 || id === 20) continue
+    await documents.updateChapter(id, { title: `第 ${id} 章`, content: chapterText })
+  }
+  await documents.updateChapter(113, { title: '下一章', content: '' })
+  const library = new ResearchLibraryService(projects, authority)
+  const planning = new OutlinePlanningService(projects, documents, library, authority)
+  await planning.updateChapterOutline(113, `逐项核对：${terms.join('、')}`, 1)
+  const retrieval = new LocalRetrievalService(projects, documents, undefined, {
+    active: root => authority.active(root),
+    currentDocumentChunksBefore: (root, id, limit) => authority.currentDocumentChunksBefore(root, id, limit),
+    searchCurrentDocumentChunksBefore: (root, id, query, limit) => authority.searchCurrentDocumentChunksBefore(root, id, query, limit)
+  })
+  const workspace = new WorkspaceService(projects, planning, library, documents, undefined, retrieval, authority)
+  const durations: number[] = []
+  const summaryReads = { full: 0, metadata: 0 }
+  const summary = projects.currentSummary.bind(projects)
+  projects.currentSummary = ((options?: { includeManuscript?: boolean }) => {
+    if (options?.includeManuscript === false) { summaryReads.metadata++; return summary({ includeManuscript: false }) }
+    summaryReads.full++; return summary()
+  }) as typeof projects.currentSummary
+  const before = await documents.chapter(113)
+  for (let repeat = 0; repeat < 3; repeat += 1) {
+    const started = performance.now()
+    const sources = await workspace.promptContextCandidates(113, 'prose')
+    durations.push(Math.round(performance.now() - started))
+    assert.ok(sources.some(source => source.content.includes('clue000')))
+    assert.ok(sources.some(source => source.content.includes('clue095')))
+  }
+  const agent = new WritingAgentService({ modelFor: async () => 'synthetic-prose-model' } as unknown as AiClient,
+    projects, documents, workspace, { draft: async () => { throw new Error('context benchmark must not call a model') } } as unknown as ChapterDraftService)
+  const request = { chapterId: 113, message: '接着写本章', currentDraft: '', preferredSkill: 'continue' as const, expectedWorkItemId: project.id }
+  const preview = await agent.preview(request)
+  assert.equal(preview.status, 'ready')
+  const prepared = await agent.prepare({ ...request, expectedContextHash: preview.contentHash })
+  assert.equal(prepared.contextCompilation.contentHash, preview.contentHash)
+  assert.ok(prepared.contexts.some(source => source.content.includes('clue095')))
+  assert.ok(preview.items.filter(item => item.required).every(item => item.included && item.mode === 'full'))
+  assert.deepEqual(await documents.chapter(113), before)
+  console.info('isolated long-book full-source read milliseconds', durations)
+  console.info('isolated long-book summary reads', summaryReads)
+  assert.ok(durations.every(duration => duration < 60_000), `full-source budget exceeded: ${durations.join(', ')}`)
+  assert.equal(await projects.currentPath(), project.path)
+})
+
+test('writing context identity reads avoid whole-book statistics without changing sources or hashes', async context => {
+  const { projects, documents, authority, source } = await fixture(context)
+  const library = new ResearchLibraryService(projects, authority)
+  const planning = new OutlinePlanningService(projects, documents, library, authority)
+  const retrieval = new LocalRetrievalService(projects, documents, undefined, {
+    active: root => authority.active(root),
+    currentDocumentChunksBefore: (root, id, limit) => authority.currentDocumentChunksBefore(root, id, limit),
+    searchCurrentDocumentChunksBefore: (root, id, terms, limit) => authority.searchCurrentDocumentChunksBefore(root, id, terms, limit)
+  })
+  const workspace = new WorkspaceService(projects, planning, library, documents, undefined, retrieval, authority)
+  const agent = new WritingAgentService({ modelFor: async () => 'synthetic-prose-model' } as unknown as AiClient,
+    projects, documents, workspace, { draft: async () => { throw new Error('read-only check must not call a model') } } as unknown as ChapterDraftService)
+  const before = await source.snapshot()
+  const summary = projects.currentSummary.bind(projects)
+  const reads = { full: 0, metadata: 0 }
+  projects.currentSummary = ((options?: { includeManuscript?: boolean }) => {
+    if (options?.includeManuscript === false) { reads.metadata++; return summary({ includeManuscript: false }) }
+    reads.full++; return summary()
+  }) as typeof projects.currentSummary
+  const request = { chapterId: 10, message: '接着写本章', currentDraft: '', preferredSkill: 'continue' as const }
+  const preview = await agent.preview(request)
+  const prepared = await agent.prepare({ ...request, expectedContextHash: preview.contentHash })
+  const facts = await workspace.contextFactPack(10)
+  assert.equal(reads.full, 0, 'context identity checks must not rescan manuscripts for statistics')
+  assert.ok(reads.metadata > 0)
+  assert.equal(prepared.contextCompilation.contentHash, preview.contentHash)
+  assert.ok(preview.items.filter(item => item.required).every(item => item.included && item.mode === 'full'))
+  // Same physical book and actual readers, with the previous full-summary mode
+  // forced as a reference. Metadata-only lookup must not alter any context data.
+  projects.currentSummary = (() => summary()) as typeof projects.currentSummary
+  assert.deepEqual(await agent.preview(request), preview)
+  assert.deepEqual(await workspace.contextFactPack(10), facts)
+  assert.deepEqual(await source.snapshot(), before)
+  await planning.updateChapterOutline(10, '章纲在预览后已由作者修改。', 1)
+  await assert.rejects(agent.prepare({ ...request, expectedContextHash: preview.contentHash }), { code: 'CONFLICT' })
+})
+
+test('chapter card edits invalidate in-flight context and prepared runs with actual storage', async context => {
+  const { project, projects, documents, authority, source } = await fixture(context)
+  const library = new ResearchLibraryService(projects, authority)
+  const planning = new OutlinePlanningService(projects, documents, library, authority)
+  const workspace = new WorkspaceService(projects, planning, library, documents, undefined, undefined, authority)
+  const card = { status: 'draft' as const, goal: '核对来信', entryState: '收到来信', beats: ['核对邮戳'],
+    conflict: '日期不符', characters: ['沈砚'], pointOfView: '第三人称限知', narrativeDistance: '近距离',
+    exitChange: '发现信件被替换', hook: '追查寄件人' }
+  await authority.updateChapterPlanning(project.path, { legacyChapterId: 10, card })
+  const manuscript = await documents.chapter(10)
+  let modelCalls = 0
+  const agent = new WritingAgentService({ modelFor: async () => 'synthetic-review-model',
+    complete: async () => { modelCalls++; return { content: '只读回答' } } } as unknown as AiClient,
+    projects, documents, workspace, { draft: async () => { throw new Error('read-only check must not draft') } } as unknown as ChapterDraftService)
+  const request = { chapterId: 10, message: '核对来信', currentDraft: '', preferredSkill: 'query' as const }
+  const read = workspace.promptContextCandidates.bind(workspace)
+  workspace.promptContextCandidates = async (...args) => {
+    const candidates = await read(...args)
+    await authority.updateChapterPlanning(project.path, { legacyChapterId: 10, card: { ...card, goal: '追查旧邮局' } })
+    return candidates
+  }
+  const conflict = (error: unknown) => {
+    const failure = error as { code?: string; recoverable?: boolean; message?: string }
+    assert.equal(failure.code, 'CONFLICT')
+    assert.equal(failure.recoverable, true)
+    assert.ok(!failure.message?.includes(project.path))
+    assert.ok(!failure.message?.includes(manuscript.content))
+    return true
+  }
+  await assert.rejects(agent.preview(request), conflict)
+  workspace.promptContextCandidates = read
+  const preview = await agent.preview(request)
+  const prepared = await agent.prepare({ ...request, expectedContextHash: preview.contentHash })
+  await authority.updateChapterPlanning(project.path, { legacyChapterId: 10, card: { ...card, goal: '核对值班表' } })
+  await assert.rejects(agent.run(request, undefined, prepared), conflict)
+  assert.equal(modelCalls, 0)
+  const beforeRetry = await source.snapshot()
+  const fresh = await agent.prepare(request)
+  assert.notEqual(fresh.chapterCardFingerprint, prepared.chapterCardFingerprint)
+  assert.equal((await agent.run(request, undefined, fresh)).answer, '只读回答')
+  assert.equal(modelCalls, 1)
+  assert.deepEqual(await documents.chapter(10), manuscript)
+  assert.deepEqual(await source.snapshot(), beforeRetry)
+})
+
+test('full-source and fact-pack reads reuse the already resolved chapter planning status', async context => {
+  const { projects, documents } = await fixture(context)
+  const authority = new SqliteManuscriptService(new SqliteWorkspaceDatabaseFactory())
+  const library = new ResearchLibraryService(projects, authority)
+  const planning = new OutlinePlanningService(projects, documents, library, authority)
+  const retrieval = new LocalRetrievalService(projects, documents, undefined, {
+    active: root => authority.active(root),
+    currentDocumentChunksBefore: (root, id, limit) => authority.currentDocumentChunksBefore(root, id, limit),
+    searchCurrentDocumentChunksBefore: (root, id, terms, limit) => authority.searchCurrentDocumentChunksBefore(root, id, terms, limit)
+  })
+  const workspace = new WorkspaceService(projects, planning, library, documents, undefined, retrieval, authority)
+  const status = planning.status.bind(planning)
+  let calls = 0
+  planning.status = async chapterId => { calls += 1; return status(chapterId) }
+  await workspace.promptContextCandidates(10, 'prose')
+  assert.equal(calls, 1, 'full context must not recompute planning status for its volume')
+  calls = 0
+  await workspace.contextFactPack(10)
+  assert.equal(calls, 1, 'fact pack must not recompute planning status for its volume')
+})
+
 test('normalizes SQLite prior-chunk matching without changing original evidence, versions or mirrors', async (context) => {
   const { authority, project, projects, documents, source } = await fixture(context)
   const original = '口令ＡＢＣ_１２；编号１２３４；兼容连字ﬃ；咖啡店Cafe\u0301。'
@@ -1916,10 +2077,11 @@ test('starts planning from approved ideas alone and preserves promoted canon thr
   const outputs = [
     { premise: '寻找最后一句谎话', worldView: '钟楼之城', characters: [{ name: '沈砚', role: '追查者', arcSeed: '追索真相' }], powerSystem: '', cheatSystem: '', rationale: '围绕回声展开' },
     { title: '钟楼之谜', summary: '从回声发现秘密', content: '发现回声，追查来历，作出选择。' },
-    { volumes: [1, 2, 3].map((order) => ({ order, title: `第${order}卷`, goal: '追索线索', summary: '发现线索并行动', ending: '留下新的问题' })) }
+    { volumes: [1, 2, 3].map((order) => ({ order, title: `第${order}卷`, goal: '追索线索', summary: '发现线索并行动', storyContent:'沈砚循钟楼回声找到说谎者，听取解释后决定继续追索。', ending: '留下新的问题' })) }
   ]
   const requests: string[] = []
   const generator = new PlanningDraftService({ complete: async (instruction) => {
+    if(instruction.startsWith('复核下方完整候选'))return {content:'{"issues":[]}'}
     requests.push(instruction)
     return { content: JSON.stringify(outputs[calls++]) }
   } }, workspace)

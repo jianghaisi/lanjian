@@ -1,3 +1,4 @@
+import { isReferencedBookSettings } from './book-model-settings'
 import { AppError } from '../core/app-error'
 import { decodeBookModelSettings } from './book-model-settings'
 import { connectionRecord, connectionRevision, MAX_CONNECTION_REUSE_SELECTION, MAX_GLOBAL_CONNECTIONS,
@@ -39,9 +40,9 @@ export function decodeLegacyReusePreview(value: unknown): { selectedIds: string[
 
 /** Validates only connection metadata needed for reuse, not the book's routing profiles. */
 export function decodeLegacyConnections(value: unknown): LegacyConnection[] {
-  if (value && typeof value === 'object' && 'version' in value && value.version === 4) {
+  if (value && typeof value === 'object' && 'version' in value && (value.version === 4 || value.version === 5)) {
     const book = decodeBookModelSettings(value)
-    if (book.version !== 4) throw invalid()
+    if (!isReferencedBookSettings(book)) throw invalid()
     return book.references.flatMap(r => r.kind === 'legacy-private' ? [{ id: r.originalConnectionId, name: r.name, baseUrl: r.baseUrl }] : [])
   }
   const r = connectionRecord(value, ['version', 'baseUrl', 'connections', 'routingMode', 'shared', 'tasks'])

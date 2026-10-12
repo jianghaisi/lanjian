@@ -27,6 +27,8 @@ export class ProjectCreation {
     private readonly initializeStorage?: (root: string) => Promise<void>) {}
 
   async create(input: ProjectCreateInput, initialization?: ProjectModelInitialization) {
+    let allocated = false
+    try {
     input = { ...input }
     const title = (input.title || input.name || '').trim()
     const requested = input.path?.trim(), parent = input.parentPath?.trim()
@@ -44,6 +46,7 @@ export class ProjectCreation {
       if (fileErrorCode(error) === 'EEXIST') throw new AppError('CONFLICT', '已经存在同名文件夹；请更换书名，或使用“打开本地项目”。', { recoverable: true })
       throw new AppError('STORAGE_ERROR', '无法创建作品文件夹，请检查保存位置。', { recoverable: true })
     }
+    allocated = true
     const identity = await lstat(root, { bigint: true })
     const now = new Date().toISOString()
     const receipt: Receipt = { id: randomUUID(), root, identity, title, written: new Set(), busy: false, registered: false, storageInitialized: false,
@@ -57,6 +60,10 @@ export class ProjectCreation {
     if (models !== null) receipt.files.set(AI_FILE, models)
     this.receipts.set(receipt.id, receipt)
     return this.finish(receipt, initialization)
+    } catch (error) {
+      if (!allocated && isAppError(error)) throw new AppError(error.code, error.message, { recoverable: error.recoverable, details: { ...error.details, groupCreationAllocation: 'not-started' }, cause: error })
+      throw error
+    }
   }
 
   async retry(operationId: string, initialization?: ProjectModelInitialization) {
@@ -142,7 +149,7 @@ async function modelContent(initialization?: ProjectModelInitialization): Promis
   const copied = await initialization.copy()
   if (copied === null) return null
   const value = decodeBookModelSettings(copied)
-  if (value.version !== 4 || value.references.some(r => r.kind !== 'global')) throw creationConflict()
+  if ((value.version !== 4 && value.version !== 5) || value.references.some(r => r.kind !== 'global')) throw creationConflict()
   return json(value)
 }
 function json(value: unknown): string { return `${JSON.stringify(value, null, 2)}\n` }

@@ -1,15 +1,23 @@
+import type { ThinkingLevel } from './thinking-level'
+import type { ParameterPolicy } from './parameter-policy'
+
 export type AiTask = 'outline' | 'chapterOutline' | 'prose' | 'review'
 
-export type ModelProfile = {
+export type LegacyModelProfile = {
   connectionId: string
   model: string
   temperature: number
   topP: number
   maxTokens: number
+  thinkingLevel?: ThinkingLevel
+  parameterPolicy?: never
 }
+export type AdaptiveModelProfile = { connectionId: string; model: string; parameterPolicy: ParameterPolicy;
+  temperature?: never; topP?: never; maxTokens?: never; thinkingLevel?: never }
+export type ModelProfile = LegacyModelProfile | AdaptiveModelProfile
 
 export type RemoteAiProviderConnection = {
-  kind?: 'openai-compatible' | 'gemini-native'
+  kind?: 'openai-compatible' | 'gemini-native' | 'anthropic-native' | 'openai-responses'
   id: string
   name: string
   baseUrl: string
@@ -32,7 +40,7 @@ export type AiProviderConnectionUpdate = {
 }
 
 export type AiSettings = {
-  version: 2 | 3 | 4
+  version: 2 | 3 | 4 | 5
   modelConfigured?: boolean
   connections: AiProviderConnection[]
   apiKeyConfigured: boolean

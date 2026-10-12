@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
@@ -10,16 +10,18 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "check:architecture": "node --test scripts/check-architecture.test.mjs && node scripts/check-architecture.mjs",
-    "desktop:dev": "electron-vite dev",
+    "desktop:dev": "electron-vite dev --watch",
     "desktop:build": "npm run typecheck && electron-vite build",
     "desktop:dist": "npm run desktop:build && electron-builder",
     "test:desktop": "node scripts/test-desktop.mjs",
     "test:workspace-migration": "tsx --test scripts/rebind-migrated-workspace.test.ts tests/unit/platform/portable-python-runtime.test.ts",
     "migrate:workspace": "tsx scripts/rebind-migrated-workspace.ts",
     "evaluate:continuity": "tsx scripts/evaluate-character-continuity.ts --output artifacts/evaluations/consistency-fixed-v2.json",
+    "evaluate:writing-quality:offline": "tsx scripts/evaluate-writing-quality.ts --offline",
     "evaluate:live": "node scripts/evaluate-live-consistency.mjs",
     "test:live-evaluation-runner": "node scripts/evaluate-live-consistency.mjs --test-runner",
     "test:smoke": "npm run typecheck && electron-vite build --mode smoke && node scripts/electron-smoke.mjs",
+    "test:multi-book-writing": "node scripts/multi-book-writing-smoke.mjs",
     "audit:book": "node scripts/audit-book-preflight.cjs"
   },
   "dependencies": {
@@ -27,19 +29,31 @@
     "@codemirror/search": "^6.7.2",
     "@codemirror/state": "^6.7.3",
     "@codemirror/view": "^6.43.11",
+    "@copilotkit/vue": "1.75.1",
+    "@lanjian/writing-plugin-contracts": "file:../packages/writing-plugin-contracts",
+    "@lanjian/writing-plugin-package": "file:../packages/writing-plugin-package",
     "@lucide/vue": "^1.41.0",
+    "jszip": "3.10.1",
     "mammoth": "^1.11.0",
+    "markdown-it": "14.3.2",
+    "motion": "13.4.0",
+    "openid-client": "6.8.8",
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",
-    "vue": "^3.5.24"
+    "quickjs-emscripten": "0.32.0",
+    "three": "0.180.0",
+    "vue": "^3.5.24",
+    "yauzl": "3.4.0"
   },
   "devDependencies": {
+    "@types/markdown-it": "14.1.2",
     "@types/node": "^26.3.0",
+    "@types/three": "0.180.0",
+    "@types/yauzl": "3.4.0",
     "@vitejs/plugin-vue": "^6.0.1",
     "electron": "^44.0.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
-    "jszip": "^3.10.1",
     "playwright": "^1.63.0",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
@@ -62,8 +76,48 @@
       "out/**/*",
       "licenses/**/*"
     ],
+    "asarUnpack": [
+      "**/local-models/**/*",
+      "out/main/writing-plugins/**/*",
+      "out/main/chunks/**/*",
+      "out/main/inspiration/**/*"
+    ],
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "protocols": [
+      {
+        "name": "Plugin publisher login",
+        "schemes": [
+          "cn.zuolan.novelwriter"
+        ]
+      }
+    ],
+    "artifactName": "Lanjian-${version}-Setup-${arch}.${ext}",
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": false,
+      "shortcutName": "岚笺",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "license": "../LICENSE"
     }
-  }
+  },
+  "description": "岚笺：面向长篇小说创作的本地桌面工作台",
+  "author": {
+    "name": "jianghaisi",
+    "url": "https://github.com/jianghaisi"
+  },
+  "license": "MIT"
 }

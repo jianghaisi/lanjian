@@ -16,10 +16,15 @@ function place() {
   const rect = trigger.getBoundingClientRect()
   const width = Math.min(380, window.innerWidth - 24)
   const top = Math.min(rect.bottom + 8, window.innerHeight - 80)
-  style.value = { left: `${Math.max(12, Math.min(rect.left, window.innerWidth - width - 12))}px`, top: `${top}px`, width: `${width}px`, maxHeight: `${Math.max(64, window.innerHeight - top - 12)}px` }
+  const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12))
+  style.value = { left: `${left}px`, top: `${top}px`, width: `${width}px`, maxHeight: `${Math.max(64, window.innerHeight - top - 12)}px`, '--guidance-origin': `${Math.max(0, Math.min(width, rect.left + rect.width / 2 - left))}px 0` }
 }
 function close(restoreFocus = false) {
   open.value = false
+  if (panel.value) {
+    panel.value.inert = true
+    panel.value.setAttribute('aria-hidden', 'true')
+  }
   trigger?.setAttribute('aria-expanded', 'false')
   if (restoreFocus && trigger?.isConnected) trigger.focus()
   observer?.disconnect()
@@ -34,6 +39,11 @@ async function toggle(element: HTMLElement) {
   observer = new ResizeObserver(place)
   observer.observe(trigger)
   await nextTick()
+  if (!open.value || trigger !== element) return
+  if (panel.value) {
+    panel.value.inert = false
+    panel.value.removeAttribute('aria-hidden')
+  }
   panel.value?.focus({ preventScroll: true })
 }
 function outside(event: PointerEvent) {
@@ -41,7 +51,7 @@ function outside(event: PointerEvent) {
   close()
 }
 function escape(event: KeyboardEvent) {
-  if (open.value && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true) }
+  if (open.value && event.key === 'Escape' && !event.isComposing && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); close(true) }
 }
 watch(() => props.scope, () => close())
 onMounted(() => {
@@ -86,7 +96,12 @@ defineExpose({ toggle, close })
 .workspace-guidance-popover .workflow-next-step p { color:var(--color-ink);line-height:1.7; }
 .workspace-guidance-popover .workflow-next-step .control-button.primary { min-height:38px;color:var(--color-surface);background:var(--color-ink);border:1px solid var(--color-ink); }
 .workspace-guidance-popover button:focus-visible,.workspace-guidance-popover summary:focus-visible { outline:2px solid var(--color-jade);outline-offset:2px; }
-.workspace-guidance-popover-enter-active { transition:opacity var(--duration-panel) ease-out,transform var(--duration-panel) ease-out; }
-.workspace-guidance-popover-leave-active { transition:opacity var(--duration-fast) ease-in,transform var(--duration-fast) ease-in; }
-.workspace-guidance-popover-enter-from,.workspace-guidance-popover-leave-to { opacity:0;transform:translateY(-6px); }
+.workspace-guidance-popover { transform-origin:var(--guidance-origin, center top); }
+.workspace-guidance-popover-enter-active { transition:opacity 220ms ease-out,transform 220ms cubic-bezier(.2,.8,.2,1); }
+.workspace-guidance-popover-leave-active { pointer-events:none;transition:opacity 120ms ease-in,transform 120ms ease-in; }
+.workspace-guidance-popover-enter-from,.workspace-guidance-popover-leave-to { opacity:0;transform:translateY(-5px) scale(.985); }
+@media (prefers-reduced-motion:reduce) {
+  .workspace-guidance-popover-enter-active,.workspace-guidance-popover-leave-active { transition:none; }
+  .workspace-guidance-popover-enter-from,.workspace-guidance-popover-leave-to { transform:none; }
+}
 </style>

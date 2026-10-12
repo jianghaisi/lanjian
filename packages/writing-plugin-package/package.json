@@ -1,0 +1,29 @@
+{
+  "name": "@lanjian/writing-plugin-package",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./official": { "types": "./dist/official.d.ts", "default": "./dist/official.js" }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node scripts/build-official.mjs && tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lanjian/writing-plugin-contracts": "file:../writing-plugin-contracts",
+    "yauzl": "3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.3.0",
+    "@types/yauzl": "3.4.0",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,220 @@
+/*
+ * 动画角色组件的样式
+ *
+ * 和组件放在一起，组件自己 import。这样把整个 animated-characters 目录
+ * 拷到别的项目就能用，不依赖宿主的 App.css。
+ */
+
+.ac-scene {
+  position: relative;
+  width: 550px;
+  /*
+   * 450 而不是角色最高的 440：
+   * 紫色在「输入 / 回避」状态会从 400 长到 440，容器若按 400 算，
+   * 顶部会被 overflow 裁掉 40px——眼睛正好在这一段里，会被切掉半只。
+   * 多出来的是透明余量，角色贴底对齐，看不出差别。
+   * overflow 仍要保留：角色用 bottom:-2px 压出去 2px 消底边缝，靠它裁掉。
+   */
+  height: 450px;
+  overflow: hidden;
+}
+
+.ac-eyes {
+  position: absolute;
+  display: flex;
+}
+
+/* 紫色和黑色是主角，转头要有过程；橙黄在最前面，慢半拍会很明显 */
+.ac-eyes--slow {
+  transition: all 0.6s ease-out;
+}
+
+.ac-eyes--fast {
+  transition: all 0.2s ease-out;
+}
+
+.ac-eyeball {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 50%;
+  transition: height 0.15s ease, border-radius 0.3s ease, transform 0.3s ease;
+}
+
+.ac-pupil {
+  border-radius: 50%;
+  transition: transform 0.1s ease-out;
+}
+
+/* 半圆形的嘴：默认下弯（微笑），加 is-sad 翻成上弯（撇嘴） */
+.ac-mouth {
+  position: absolute;
+  background-color: #2d2d2d;
+  transition:
+    left 0.6s ease-out,
+    top 0.6s ease-out,
+    width 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+    height 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+    border-radius 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ac-mouth--purple {
+  width: 24px;
+  height: 8px;
+  border-radius: 0 0 12px 12px;
+}
+
+/* 抿成一竖，counter-skew 把身体的倾斜抵消掉 */
+.ac-mouth--purple.is-typing {
+  width: 7px;
+  height: 32px;
+  border-radius: 0;
+  transform: translateX(8.5px) translateY(-28px) var(--counter-skew, skewX(0deg));
+}
+
+.ac-mouth--purple.is-sad {
+  border-radius: 12px 12px 0 0;
+}
+
+.ac-mouth--purple.is-happy {
+  width: 30px;
+  height: 16px;
+  border-radius: 0 0 15px 15px;
+}
+
+.ac-mouth--orange {
+  width: 26px;
+  height: 13px;
+  border-radius: 0 0 13px 13px;
+  transition:
+    left 0.2s ease-out,
+    top 0.2s ease-out,
+    width 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+    height 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+    border-radius 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ac-mouth--orange.is-typing {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  transform: translateX(6px);
+}
+
+.ac-mouth--orange.is-sad {
+  border-radius: 13px 13px 0 0;
+}
+
+.ac-mouth--orange.is-happy {
+  width: 32px;
+  height: 18px;
+  border-radius: 0 0 16px 16px;
+}
+
+.ac-mouth-line {
+  position: absolute;
+  transition: all 0.2s ease-out;
+}
+
+/* 用 CSS 的 d 属性过渡路径形状，比换 path 字符串平滑 */
+.ac-mouth-line__path {
+  d: path("M0 10 Q10 10, 20 10 Q30 10, 40 10 Q50 10, 60 10 Q70 10, 80 10");
+  transition: d 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ac-mouth-line__path--wavy {
+  d: path("M0 10 Q10 2, 20 10 Q30 18, 40 10 Q50 2, 60 10 Q70 18, 80 10");
+}
+
+.ac-mouth-line__path--happy {
+  d: path("M0 2 Q10 10, 20 14 Q30 18, 40 18 Q50 18, 60 14 Q70 10, 80 2");
+}
+
+/*
+ * 摇头：幅度递减的左右摆动，模拟「不是这个密码」
+ *
+ * 为什么要两份一模一样的动画：
+ * 连续两次登录失败时，光是把 class 摘掉再挂上并不能重播动画——
+ * 浏览器会把同一帧里的增删合并，animation-name 没变就不重新开始。
+ * 所以准备两个名字不同、内容相同的动画，每次失败交替使用，
+ * animation-name 一变必然重播。用 rAF 延迟一帧也能绕过，
+ * 但后台标签页里 rAF 是暂停的，那样会整个失效。
+ */
+.ac-shake-a {
+  animation: ac-shake-head-a 0.8s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+.ac-shake-b {
+  animation: ac-shake-head-b 0.8s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@keyframes ac-shake-head-a {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  10% {
+    translate: -9px 0;
+  }
+  20% {
+    translate: 7px 0;
+  }
+  30% {
+    translate: -6px 0;
+  }
+  40% {
+    translate: 5px 0;
+  }
+  50% {
+    translate: -4px 0;
+  }
+  60% {
+    translate: 3px 0;
+  }
+  70% {
+    translate: -2px 0;
+  }
+  80% {
+    translate: 1px 0;
+  }
+  90% {
+    translate: -0.5px 0;
+  }
+}
+
+@keyframes ac-shake-head-b {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  10% {
+    translate: -9px 0;
+  }
+  20% {
+    translate: 7px 0;
+  }
+  30% {
+    translate: -6px 0;
+  }
+  40% {
+    translate: 5px 0;
+  }
+  50% {
+    translate: -4px 0;
+  }
+  60% {
+    translate: 3px 0;
+  }
+  70% {
+    translate: -2px 0;
+  }
+  80% {
+    translate: 1px 0;
+  }
+  90% {
+    translate: -0.5px 0;
+  }
+}

@@ -5,12 +5,22 @@ export class CompanionAudioPlayer {
   private sources = new Set<AudioBufferSourceNode>()
   private next = 0
   private bytes = 0
-  constructor(private readonly changed: (playing: boolean) => void) {}
-  async prepare(volume: number): Promise<void> {
-    this.context ||= new AudioContext({ sampleRate: 24000 })
+  constructor(private readonly changed: (playing: boolean) => void, private readonly observed?: (event: 'queued' | 'ended') => void,
+    private readonly contextChanged?: (state: AudioContextState) => void) {}
+  async prepare(volume: number): Promise<AudioContextState | 'unknown'> {
+    // A closed context cannot resume. Replace only the browser playback channel on explicit retry.
+    if (this.context?.state === 'closed') {
+      this.context.onstatechange = null; this.gain?.disconnect(); this.context = undefined; this.gain = undefined
+    }
+    if (!this.context) {
+      const context = new AudioContext({ sampleRate: 24000 })
+      this.context = context
+      context.onstatechange = () => { if (this.context === context) this.contextChanged?.(context.state) }
+    }
     if (!this.gain) { this.gain = this.context.createGain(); this.gain.connect(this.context.destination) }
     this.gain.gain.value = Math.max(0, Math.min(1, volume))
     await this.context.resume()
+    return this.context.state ?? 'unknown'
   }
   volume(value: number): void { if (this.gain) this.gain.gain.value = Math.max(0, Math.min(1, value)) }
   enqueue(pcm: Uint8Array): void {
@@ -21,14 +31,18 @@ export class CompanionAudioPlayer {
     for (let index = 0; index < samples.length; index++) samples[index] = view.getInt16(index * 2, true) / 32768
     const source = this.context.createBufferSource(); source.buffer = buffer; source.connect(this.gain)
     this.sources.add(source)
-    source.onended = () => { source.disconnect(); this.sources.delete(source); if (!this.sources.size) this.changed(false) }
+    source.onended = () => { source.disconnect(); this.sources.delete(source); this.observed?.('ended'); if (!this.sources.size) this.changed(false) }
     const when = Math.max(this.context.currentTime + .02, this.next)
     this.next = when + buffer.duration
-    source.start(when); this.changed(true)
+    source.start(when); this.changed(true); this.observed?.('queued')
   }
   stop(): void {
     for (const source of this.sources) { source.onended = null; source.stop(); source.disconnect() }
     this.sources.clear(); this.next = 0; this.bytes = 0; this.changed(false)
   }
-  dispose(): void { this.stop(); this.gain?.disconnect(); const context = this.context; this.context = undefined; this.gain = undefined; void context?.close() }
+  dispose(): void {
+    this.stop(); this.gain?.disconnect()
+    const context = this.context; this.context = undefined; this.gain = undefined
+    if (context) { context.onstatechange = null; if (context.state !== 'closed') void context.close() }
+  }
 }

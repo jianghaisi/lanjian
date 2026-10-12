@@ -1,10 +1,11 @@
 import type { ChapterLifecycleState } from '../../modules/manuscript/domain/chapter-lifecycle'
+import type { ReviewReadPort, ReviewWritePort } from '../../modules/document-review/domain/review-storage'
 import type { ChapterCard } from '../../modules/manuscript/domain/chapter-card'
 import type { WorkspaceTaskContractSnapshot } from '../../modules/assistant/domain/task-template-contract'
 import type { AppendStoryEventVersionInput, StoryEventVersion, StoryEventVersionHeads } from '../../modules/timeline/domain/story-event-version'
 
 export const WORKSPACE_DATABASE_RELATIVE_PATH = '.webnovel/workspace.sqlite' as const
-export const WORKSPACE_DATABASE_SCHEMA_VERSION = 42
+export const WORKSPACE_DATABASE_SCHEMA_VERSION = 48
 export const WORKSPACE_AUTOSAVE_CHECKPOINT_WINDOW_MS = 30_000
 
 export type LegacyWorkspaceChapter = {
@@ -81,6 +82,7 @@ export type WorkspaceArchivedChapterRecord = WorkspaceChapterRecord & {
 }
 
 export type WorkspaceBodyRevisionRecord = {
+  reviewedSource?: { kind: 'inline-review'; application: import('../../../contracts/document-review/types').ReviewApplicationReceipt }
   id: string
   versionId: string
   legacyChapterId: number
@@ -132,6 +134,8 @@ export type WorkspaceOutlineRecord = {
   planning: WorkspaceOutlinePlanningMetadata
 }
 
+export type WorkspaceOutlineFilter = { nodeType: WorkspaceOutlineRecord['nodeType']; seq?: number }
+
 export type WorkspaceOutlinePlanningMetadata = {
   goalText: string
   entryStateText: string
@@ -143,6 +147,7 @@ export type WorkspaceOutlinePlanningMetadata = {
 }
 
 export type WorkspaceOutlineWriteInput = {
+  reviewApplicationId?: string
   legacyKey: string
   parentLegacyKey?: string | null
   nodeType: WorkspaceOutlineRecord['nodeType']
@@ -245,6 +250,7 @@ export type WorkspaceChapterPlanningWriteResult = {
 }
 
 export type WorkspaceChapterWriteInput = {
+  reviewApplicationId?: string
   legacyChapterId: number
   title: string
   content: string
@@ -1050,7 +1056,7 @@ export interface LegacyWorkspaceSource {
   snapshot(): Promise<LegacyWorkspaceSnapshot>
 }
 
-export interface WorkspaceDatabasePort {
+export interface WorkspaceDatabasePort extends ReviewReadPort, ReviewWritePort {
   importSnapshot(snapshot: LegacyWorkspaceSnapshot): ShadowImportResult
   verifySnapshot(snapshot: LegacyWorkspaceSnapshot): void
   inspect(): WorkspaceDatabaseInspection
@@ -1070,7 +1076,9 @@ export interface WorkspaceDatabasePort {
   activateSqlite(snapshot: LegacyWorkspaceSnapshot): void
   activateEmptyFileTextAuthority(): void
   deactivateSqlite(sourceFingerprint: string): void
+  worldbookChapterOrder(): Array<{ id: number; position: number }>
   formalChapters(): WorkspaceChapterRecord[]
+  formalChaptersAsync?(): Promise<WorkspaceChapterRecord[]>
   /** Ordered active identities without loading manuscript bodies. */
   formalChapterIds(): number[]
   /** Point lookup for saves; must not materialize unrelated manuscript bodies. */
@@ -1079,7 +1087,11 @@ export interface WorkspaceDatabasePort {
   formalBodyVersion(legacyChapterId: number, versionId: string): WorkspaceChapterRecord
   formalManuscriptRevision(): string
   formalOutlineReady(): boolean
-  formalOutlines(): WorkspaceOutlineRecord[]
+  formalOutlines(filter?: WorkspaceOutlineFilter): WorkspaceOutlineRecord[]
+  formalOutlinesAsync?(): Promise<WorkspaceOutlineRecord[]>
+  chapterEventSnapshot(chapterId: number, volume: number): import('../../modules/planning/domain/chapter-event-adoption').ChapterEventStorageSnapshot
+  adoptChapterEvent(input: import('../../modules/planning/domain/chapter-event-adoption').ChapterEventAdoption): import('../../modules/planning/domain/chapter-event-adoption').ChapterEventOutput
+  recoverChapterEvent(operationId: string): import('../../modules/planning/domain/chapter-event-adoption').ChapterEventOutput
   writeFormalOutline(input: WorkspaceOutlineWriteInput): { outline: WorkspaceOutlineRecord; mirror: WorkspaceMirrorPlan; insertedVersion: boolean }
   appendFormalOutlineChildren(input: WorkspaceOutlineChildrenAppendInput): WorkspaceOutlineRecord[]
   reservedOutlineKeys(): string[]
@@ -1105,6 +1117,8 @@ export interface WorkspaceDatabasePort {
   restoreArchivedFormalChapter(legacyChapterId: number): WorkspaceChapterWriteResult
   pendingMirrorPlans(filter?: WorkspaceMirrorPlanFilter): WorkspaceMirrorPlan[]
   readableMirrorPlans(filter?: WorkspaceMirrorPlanFilter): WorkspaceMirrorPlan[]
+  /** Recheck held plans before filesystem publication; retired event plans fail closed. */
+  assertMirrorPlanCurrent(plan: WorkspaceMirrorPlan): void
   acknowledgeMirror(plan: WorkspaceMirrorPlan, status: WorkspaceMirrorStatus, observedHash?: string, errorCode?: string): void
   assertRollbackReady(): void
   backupTo(targetPath: string): void
@@ -1213,20 +1227,34 @@ export type WorkspaceEventReadPort = Pick<WorkspaceDatabasePort,
   | 'listCanonicalEventVersions' | 'canonicalEventVersionHeads' | 'canonicalEventsMirror'
   | 'formalOutlinePlanningStateReady' | 'outlinePlanningState' | 'outlinePlanningStateMirror'
   | 'formalWorkspaceConfigReady' | 'workspaceConfig' | 'workspaceConfigMirror' | 'close'> & {
+    /** Canonical root pinned by the read snapshot. Main-private scope evidence. */
+    readonly bookRoot: string
     readonly schemaVersion: number
     readonly projectId: string | null
+    settlements?(): import("../../modules/timeline/domain/prose-event-settlement").SettlementReadPort
     eventChapterCatalog(): WorkspaceEventChapterCatalog
+    chapterEventSnapshot(chapterId: number, volume: number): import('../../modules/planning/domain/chapter-event-adoption').ChapterEventStorageSnapshot
     /** Presence only, never a verified receipt or permission to replay migration. */
     hasEventMigrationEvidence(): boolean
     /** Verified historical receipt only; no migration retry or consumer transition. */
     eventMigrationReceipt(operationId?: string): import('../../modules/timeline/domain/event-migration-receipt').EventMigrationReceipt | null
+    /** Last persisted mirror outcome, read-only; never starts synchronization. */
+    eventMirrorStatus(operationId?: string): import('../../modules/timeline/domain/event-mirror').EventMirrorFeedback | null
+    /** Verified order/lifecycle only; null requires explicit reviewed initialization. */
+    eventState(): import('../../modules/timeline/domain/event-state').EventStateSnapshot | null
+    /** Exact recovery plan derived from the sealed receipt and immutable aliases. */
+    eventStateInitializationPlan(): import('../../modules/timeline/domain/event-state-initialization').EventStateInitializationPlan
+    eventOperationReceipt(operationId: string): import('../../modules/timeline/domain/event-operations').EventOperationReceipt | null
+    eventSourceAliases(): import('../../modules/timeline/domain/event-archive-guard').EventSourceAlias[]
+    eventManuscriptSource(chapterId: number, revision: string): { id: string; revision: string } | null
   }
 
 /** Recovery previews receive no writes and pin a private, verified read snapshot. */
 export type WorkspaceRecoveryReadPort = Pick<WorkspaceDatabasePort,
-  'storageMode' | 'textAuthority' | 'formalBodyVersion' | 'formalOutlineReady' | 'formalChapters' | 'formalOutlines' | 'readableMirrorPlans' | 'close'>
+  'storageMode' | 'textAuthority' | 'projectWritingConfig' | 'formalBodyVersion' | 'chapterPlanning' | 'formalOutlineReady' | 'formalChapters' | 'formalOutlines' | 'readableMirrorPlans' | 'close'>
 
 export interface WorkspaceDatabaseFactory {
+  openDocumentReviewReadOnly?(workItemId: string): Promise<ReviewReadPort | null>
   /** Shelf identity from a private snapshot; never creates or upgrades author data. */
   readProjectIdentity?(workItemId: string): Promise<{ title: string; genre: string } | null>
   open(workItemId: string): Promise<WorkspaceDatabasePort>
@@ -1235,6 +1263,13 @@ export interface WorkspaceDatabaseFactory {
   openModelSettingsWrite?(workItemId: string): Promise<WorkspaceDatabasePort>
   /** Optional for older injected adapters; callers must fail closed, never fall back to openExisting. */
   openEventReadOnly?(workItemId: string): Promise<WorkspaceEventReadPort | null>
+  /** Private post-commit event mirror state only; existing schema, no create/upgrade. */
+  openEventMirrorWrite?(workItemId: string): Promise<import('../../modules/timeline/domain/event-mirror').EventMirrorStoragePort>
+  /** Private reviewed event commit only; existing schema, no create/upgrade. */
+  openEventMigrationWrite?(workItemId: string): Promise<import('../../modules/timeline/domain/event-migration-commit').EventMigrationWritePort>
+  openEventStateInitializationWrite?(workItemId: string): Promise<import('../../modules/timeline/domain/event-state-initialization').EventStateInitializationWritePort>
+  openSettlementWrite?(workItemId: string): Promise<import("../../modules/timeline/domain/prose-event-settlement").SettlementWritePort>
+  openEventOperationWrite?(workItemId: string): Promise<import('../../modules/timeline/domain/event-operations').EventOperationWritePort>
   openRecoveryReadOnly?(workItemId: string): Promise<WorkspaceRecoveryReadPort | null>
 }
 

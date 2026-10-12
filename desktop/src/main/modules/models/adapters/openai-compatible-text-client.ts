@@ -1,3 +1,11 @@
+import { chatToolHistory } from './chat-tool-history'
+import { generationDiagnostics, providerScope, assertSuccessfulStop, consumeProviderResponse, readProviderJson } from './provider-transport'
+import type { GeneratedText } from '../../../../contracts/models/generation-diagnostics'
+import { providerInvalid } from '../../../../contracts/models/provider-tool-content'
+import { consumeToolStream } from './openai-tool-stream'
+import { compileRemoteConfig, type CompiledRemoteConfig } from '../domain/generation-config'
+import { decodeCatalogEntry, type ModelCatalogEntry } from '../../../../contracts/models/model-catalog-metadata'
+import { compileGeneration } from '../../../../contracts/models/generation-parameters'
 import type { AiConnectionDraft, AiConnectionTestResult, AiTask } from '../../../../contracts/index'
 import { AppError } from '../../../core/errors/app-error'
 import type { RemoteModelConnection, RemoteModelSettings, TextCompletionInput } from '../domain/model-provider'
@@ -6,21 +14,23 @@ import type { AiFunctionTool, AiToolCall, AiToolMessage, AiToolStep } from '../.
 export type PreparedAiCompletion = {
   readonly model: string
   readonly connectionId: string
-  complete: (instruction: string, draft?: string, systemContext?: string, signal?: AbortSignal) => Promise<{ content: string }>
-  completeMessages?: (messages: TextCompletionInput['messages'], signal?: AbortSignal) => Promise<{content:string}>
+  complete: (instruction: string, draft?: string, systemContext?: string, signal?: AbortSignal) => Promise<GeneratedText>
+  completeMessages?: (messages: TextCompletionInput['messages'], signal?: AbortSignal) => Promise<GeneratedText>
 }
 
 export class OpenAiCompatibleTextClient {
-  constructor(private readonly settings: RemoteModelSettings) {}
+  constructor(private readonly settings: RemoteModelSettings, private readonly transport?: typeof fetch) {}
 
-  async listModels(draft?: AiConnectionDraft, signal?: AbortSignal): Promise<{ models: string[] }> {
+  async listModels(draft?: AiConnectionDraft, signal?: AbortSignal): Promise<{ models: string[]; entries: ModelCatalogEntry[] }> {
     return this.queryModels(draft, undefined, signal)
   }
 
-  private async queryModels(draft?: AiConnectionDraft, frozenConfig?: RemoteModelConnection, signal?: AbortSignal): Promise<{ models: string[] }> {
+  private async queryModels(draft?: AiConnectionDraft, frozenConfig?: RemoteModelConnection, signal?: AbortSignal): Promise<{ models: string[]; entries: ModelCatalogEntry[] }> {
     const response = await this.request('/models', 'prose', {}, draft, signal, 30_000, frozenConfig)
-    const payload = await response.json() as { data?: Array<{ id?: string }> }
-    return { models: (payload.data ?? []).map((item) => item.id).filter((id): id is string => Boolean(id)) }
+    const payload = await readProviderJson(response, signal) as { data?: Array<{ id?: string }> }
+    if (!Array.isArray(payload.data) || payload.data.length > 2000) throw new AppError('AI_RESPONSE_INVALID', '接口返回的型号列表无效。', { recoverable: true })
+    const entries = [...new Map(payload.data.map(item => { const entry = decodeCatalogEntry({ id: item?.id }); return [entry.id, entry] as const })).values()]
+    return { models: entries.map(e => e.id), entries }
   }
 
   async testConnection(draft?: AiConnectionDraft): Promise<AiConnectionTestResult> {
@@ -51,11 +61,10 @@ export class OpenAiCompatibleTextClient {
         body: JSON.stringify({
           model,
           messages: [{ role: 'user', content: '这是连接测试。请只回复：连接正常' }],
-          temperature: 0,
-          max_tokens: 16
+          ...compileGeneration({ connectionId: connection?.connectionId ?? 'probe', model, parameterPolicy: { version: 1, mode: 'auto' } }, 'prose', { protocol: 'openai-compatible', baseUrl: draft?.baseUrl?.trim() || connection?.baseUrl, model }, 'probe').parameters
         })
       }, draft, undefined, 30_000, connection)
-      const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> }
+      const payload = await readProviderJson(response) as { choices?: Array<{ message?: { content?: string } }> }
       if (!payload.choices?.[0]?.message?.content?.trim()) throw new Error('接口响应成功，但没有返回可用文本')
       return {
         success: true,
@@ -74,7 +83,7 @@ export class OpenAiCompatibleTextClient {
     return override?.trim() || profile.model
   }
 
-  async complete(instruction: string, draft = '', systemContext = '', task: AiTask = 'prose', signal?: AbortSignal, modelOverride?: string, connectionIdOverride?: string): Promise<{ content: string }> {
+  async complete(instruction: string, draft = '', systemContext = '', task: AiTask = 'prose', signal?: AbortSignal, modelOverride?: string, connectionIdOverride?: string): Promise<GeneratedText> {
     const prepared = await this.prepareCompletion(task, modelOverride, connectionIdOverride)
     return prepared.complete(instruction, draft, systemContext, signal)
   }
@@ -82,9 +91,8 @@ export class OpenAiCompatibleTextClient {
   /** Credentials remain in this process-local closure, never in evaluation reports or IPC. */
   async prepareCompletion(task: AiTask, modelOverride?: string, connectionIdOverride?: string): Promise<PreparedAiCompletion> {
     const taskConfig = await this.settings.resolve(task, connectionIdOverride)
-    const profile = { ...taskConfig.profile }
-    const config = { ...taskConfig, profile }
-    const model = modelOverride?.trim() || profile.model
+    const config = compileRemoteConfig(taskConfig, task, modelOverride)
+    const model = config.profile.model
     return Object.freeze({
       model,
       connectionId: config.connectionId,
@@ -96,10 +104,12 @@ export class OpenAiCompatibleTextClient {
 
   /** Real function calling; tools execute only in the bounded application dispatcher. */
   async prepareToolConversation(task:AiTask,modelOverride?:string,connectionIdOverride?:string) {
-    const resolved=await this.settings.resolve(task,connectionIdOverride),config={...resolved,profile:{...resolved.profile}},model=modelOverride?.trim()||config.profile.model
-    return {model,connectionId:config.connectionId,step:async(messages:AiToolMessage[],tools:AiFunctionTool[],signal:AbortSignal):Promise<AiToolStep>=>{
-      const response=await this.request('/chat/completions',task,{method:'POST',body:JSON.stringify({model,messages,tools,tool_choice:'auto',parallel_tool_calls:false,temperature:config.profile.temperature,top_p:config.profile.topP,max_tokens:config.profile.maxTokens})},undefined,signal,generationTimeoutMs(JSON.stringify(messages).length,config.profile.maxTokens),config)
-      const payload=await response.json() as {choices?:Array<{message?:{content?:unknown;tool_calls?:unknown}}>},message=payload.choices?.[0]?.message
+    const resolved=await this.settings.resolve(task,connectionIdOverride),config=compileRemoteConfig(resolved,task,modelOverride,'tools'),model=config.profile.model
+    return {model,connectionId:config.connectionId,step:async(messages:AiToolMessage[],tools:AiFunctionTool[],signal:AbortSignal,onDelta?:(content:string)=>void):Promise<AiToolStep>=>{
+      const response=await this.request('/chat/completions',task,{method:'POST',body:JSON.stringify({model,messages:chatToolHistory(config,messages),tools,tool_choice:'auto',parallel_tool_calls:false,...config.generation.parameters,...(onDelta?{stream:true}:{})})},undefined,signal,generationTimeoutMs(JSON.stringify(messages).length,config.profile.maxTokens),config)
+      if(onDelta&&response.headers.get('content-type')?.includes('text/event-stream'))return consumeToolStream(response,signal,onDelta,config)
+      const payload=await readProviderJson(response,signal) as {choices?:Array<{finish_reason?:string;message?:{content?:unknown;tool_calls?:unknown;reasoning_content?:unknown}}>},message=payload.choices?.[0]?.message
+      assertOpenAiFinishReason(payload.choices?.[0]?.finish_reason)
       const content=typeof message?.content==='string'?message.content:''
       const raw=message?.tool_calls??[]
       if(!Array.isArray(raw)||raw.length>8||content.length>50000)throw new AppError('AI_RESPONSE_INVALID','模型返回的工具调用无法识别，请重试。',{recoverable:true})
@@ -108,30 +118,34 @@ export class OpenAiCompatibleTextClient {
         return {id:call.id,type:'function',function:{name:call.function.name,arguments:call.function.arguments}}
       })
       if(!content&&!toolCalls.length)throw new AppError('AI_RESPONSE_INVALID','模型没有返回对话或工具调用，请检查接口是否支持工具调用。',{recoverable:true})
-      return {content,toolCalls}
+      if(config.generation.policyVersion===2)assertSuccessfulStop(payload.choices?.[0]?.finish_reason,[toolCalls.length?'tool_calls':'stop'])
+      const reasoning = message?.reasoning_content
+      if (reasoning !== undefined && (typeof reasoning !== 'string' || reasoning.length > 131072)) return providerInvalid()
+      return {content,toolCalls,diagnostics:generationDiagnostics(config,payload,payload.choices?.[0]?.finish_reason),
+        ...(typeof reasoning === 'string' && config.generation.capabilities.rule?.preserveReasoning ? {providerContent:{version:1 as const,protocol:'openai-compatible' as const,scope:providerScope(config),reasoningContent:reasoning}} : {})}
     }}
   }
 
-  private async completeWithConfig(instruction: string, draft: string, systemContext: string, task: AiTask, signal: AbortSignal | undefined, model: string, config: Awaited<ReturnType<RemoteModelSettings['resolve']>>): Promise<{ content: string }> {
+  private async completeWithConfig(instruction: string, draft: string, systemContext: string, task: AiTask, signal: AbortSignal | undefined, model: string, config: CompiledRemoteConfig): Promise<GeneratedText> {
     return this.completeMessagesWithConfig([{role:'system',content:systemContext},{role:'user',content:`${instruction.trim()}${draft ? `\n\n当前正文：\n${draft}` : ''}`}],task,signal,model,config)
   }
 
-  private async completeMessagesWithConfig(messages:TextCompletionInput['messages'],task:AiTask,signal:AbortSignal|undefined,model:string,config:Awaited<ReturnType<RemoteModelSettings['resolve']>>):Promise<{content:string}> {
+  private async completeMessagesWithConfig(messages:TextCompletionInput['messages'],task:AiTask,signal:AbortSignal|undefined,model:string,config:CompiledRemoteConfig):Promise<GeneratedText> {
     const { profile } = config
     const response = await this.request('/chat/completions', task, {
       method: 'POST',
       body: JSON.stringify({
         model,
         messages,
-        temperature: profile.temperature,
-        top_p: profile.topP,
-        max_tokens: profile.maxTokens
+        ...config.generation.parameters
       })
     }, undefined, signal, generationTimeoutMs(messages.reduce((sum,item)=>sum+item.content.length,0), profile.maxTokens), config)
-    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> }
+    const payload = await readProviderJson(response, signal) as { choices?: Array<{ finish_reason?: string; message?: { content?: string } }> }
+    assertOpenAiFinishReason(payload.choices?.[0]?.finish_reason)
+    if (config.generation.policyVersion === 2) assertSuccessfulStop(payload.choices?.[0]?.finish_reason, ['stop'])
     const content = payload.choices?.[0]?.message?.content
     if (!content) throw new Error('AI API 未返回正文内容')
-    return { content }
+    return { content, diagnostics: generationDiagnostics(config,payload,payload.choices?.[0]?.finish_reason) }
   }
 
   async streamComplete(
@@ -143,37 +157,47 @@ export class OpenAiCompatibleTextClient {
     modelOverride?: string,
     onDelta?: (delta: string, content: string) => void | Promise<void>,
     connectionIdOverride?: string
-  ): Promise<{ content: string }> {
+  ): Promise<GeneratedText> {
     const taskConfig = await this.settings.resolve(task, connectionIdOverride)
-    const config = { ...taskConfig, profile: { ...taskConfig.profile } }
+    const config = compileRemoteConfig(taskConfig, task, modelOverride)
     const { profile } = config
     const model = modelOverride?.trim() || profile.model
-    const response = await this.request('/chat/completions', task, {
-      method: 'POST',
-      headers: { Accept: 'text/event-stream' },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemContext },
-          { role: 'user', content: `${instruction.trim()}${draft ? `\n\n当前正文：\n${draft}` : ''}` }
-        ],
-        temperature: profile.temperature,
-        top_p: profile.topP,
-        max_tokens: profile.maxTokens,
-        stream: true
-      })
-    }, undefined, signal, generationTimeoutMs(systemContext.length, profile.maxTokens), config)
+    const messages: TextCompletionInput['messages'] = [
+      { role: 'system', content: systemContext },
+      { role: 'user', content: `${instruction.trim()}${draft ? `\n\n当前正文：\n${draft}` : ''}` }
+    ]
+    let response: Response
+    try {
+      response = await this.request('/chat/completions', task, {
+        method: 'POST',
+        headers: { Accept: 'text/event-stream' },
+        body: JSON.stringify({
+          model,
+          messages,
+          ...config.generation.parameters,
+          stream: true
+        })
+      }, undefined, signal, generationTimeoutMs(systemContext.length, profile.maxTokens), config)
+    } catch (error) {
+      if (!isExplicitStreamServerFailure(error)) throw error
+      const fallback = await this.completeMessagesWithConfig(messages, task, signal, model, config)
+      await onDelta?.(fallback.content, fallback.content)
+      return fallback
+    }
     const contentType = response.headers.get('content-type')?.toLowerCase() || ''
     if (contentType.includes('application/json')) {
-      const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> }
+      const payload = await readProviderJson(response, signal) as { choices?: Array<{ finish_reason?: string; message?: { content?: string } }> }
+      assertOpenAiFinishReason(payload.choices?.[0]?.finish_reason)
+      if (config.generation.policyVersion === 2) assertSuccessfulStop(payload.choices?.[0]?.finish_reason, ['stop'])
       const content = payload.choices?.[0]?.message?.content
       if (!content) throw new Error('AI API 未返回正文内容')
       await onDelta?.(content, content)
-      return { content }
+      return { content, diagnostics: generationDiagnostics(config,payload,payload.choices?.[0]?.finish_reason) }
     }
-    const content = await consumeOpenAiStream(response, onDelta)
+    let lastPayload: Record<string, unknown> = {}, lastReason: string | undefined
+    const content = await consumeOpenAiStream(response, onDelta, (payload, reason) => { lastPayload = { ...lastPayload, ...payload }; if(reason) lastReason = reason }, signal)
     if (!content) throw new Error('AI API 未返回正文内容')
-    return { content }
+    return { content, diagnostics: generationDiagnostics(config,lastPayload,lastReason) }
   }
 
   private async request(
@@ -206,7 +230,7 @@ export class OpenAiCompatibleTextClient {
     try {
       // No await between this scope assertion and actual dispatch.
       connection?.requestGuard?.assertActive()
-      response = await fetch(`${baseUrl}${path}`, {
+      response = await (this.transport ?? fetch)(`${baseUrl}${path}`, {
         ...init,
         headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json', 'Content-Type': 'application/json', ...init.headers },
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs)
@@ -236,41 +260,28 @@ export function generationTimeoutMs(contextCharacters: number, maxOutputTokens: 
 
 export async function consumeOpenAiStream(
   response: Response,
-  onDelta?: (delta: string, content: string) => void | Promise<void>
+  onDelta?: (delta: string, content: string) => void | Promise<void>,
+  onMetadata?: (payload: Record<string, unknown>, reason?: string) => void,
+  signal: AbortSignal = new AbortController().signal
 ): Promise<string> {
-  if (!response.body) throw new Error('模型服务没有返回可读取的数据流')
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let content = ''
-  const consumeEvent = async (event: string): Promise<boolean> => {
-    const data = event.split(/\r?\n/)
-      .filter((line) => line.startsWith('data:'))
-      .map((line) => line.slice(5).trimStart())
-      .join('\n')
-      .trim()
-    if (!data) return false
-    if (data === '[DONE]') return true
-    let payload: { choices?: Array<{ delta?: { content?: unknown }; message?: { content?: unknown } }> }
-    try { payload = JSON.parse(data) }
-    catch { throw new Error('模型服务返回了无法解析的流式数据') }
-    const value = payload.choices?.[0]?.delta?.content ?? payload.choices?.[0]?.message?.content
-    const delta = typeof value === 'string' ? value : ''
-    if (!delta) return false
-    content += delta
-    if (content.length > 5_000_000) throw new Error('AI 输出超过 500 万字符限制，已停止接收')
-    await onDelta?.(delta, content)
-    return false
-  }
-  while (true) {
-    const { value, done } = await reader.read()
-    buffer += decoder.decode(value, { stream: !done })
-    const events = buffer.split(/\r?\n\r?\n/)
-    buffer = events.pop() || ''
-    for (const event of events) if (await consumeEvent(event)) return content
-    if (done) break
-  }
-  if (buffer.trim()) await consumeEvent(buffer)
+  let content = '', finished = false
+  await consumeProviderResponse(response, signal, async payload => {
+    const choices = payload.choices
+    if (choices === undefined || Array.isArray(choices) && !choices.length) { onMetadata?.(payload); return }
+    if (!Array.isArray(choices) || choices.length !== 1) return providerInvalid()
+    const choice = choices[0], delta = choice?.delta?.content ?? choice?.message?.content
+    if (finished && delta) return providerInvalid()
+    if (delta !== undefined && delta !== null) {
+      if (typeof delta !== 'string') return providerInvalid()
+      content += delta
+      if (content.length > 5000000) return providerInvalid('AI 输出超过 500 万字符限制，已停止接收')
+      await onDelta?.(delta, content)
+    }
+    const reason = choice?.finish_reason
+    if (reason) { assertSuccessfulStop(reason, ['stop']); finished = true }
+    onMetadata?.(payload, reason)
+  }, 24 * 1024 * 1024, true)
+  if (!finished) assertSuccessfulStop(undefined, [])
   return content
 }
 
@@ -286,15 +297,24 @@ function extractErrorMessage(raw: string): string {
 }
 
 function httpErrorMessage(status: number, detail: string): string {
-  const lower = detail.toLowerCase()
+  const safeDetail = sanitizeProviderDetail(detail)
+  const lower = safeDetail.toLowerCase()
   if (status === 401) return '接口密钥无效或已经失效，请重新检查令牌。'
   if (status === 403 || /group|分组|permission|forbidden|unauthorized/.test(lower)) {
     return '令牌没有当前模型或模型分组的调用权限，请在服务控制台授权后重试。'
   }
   if (status === 404) return '接口地址或兼容路径不正确；请确认地址通常以 /v1 结尾。'
   if (status === 429) return '接口当前限流、余额不足或配额已用完，请稍后重试或检查账户额度。'
-  if (status === 400) return '请求被服务拒绝，通常是模型名称或接口协议不兼容。'
-  return `模型服务返回 ${status}，请稍后重试。`
+  if (status === 400 || status === 422) return '请求被服务拒绝，可能是型号、参数或接口协议不兼容。请核对型号；如设置了自定义参数，可恢复自动后主动重试。'
+  return safeDetail
+    ? `模型服务返回 ${status}：${safeDetail}`
+    : `模型服务返回 ${status}，请稍后重试。`
+}
+
+function sanitizeProviderDetail(detail: string): string {
+  return detail
+    .replace(/(authorization\s*:\s*bearer\s+)[^\s"'<>]+/gi, '$1[REDACTED]')
+    .replace(/\bsk-[a-z0-9_-]{8,}\b/gi, '[REDACTED]')
 }
 
 function friendlyError(error: unknown, fallback: string): string {
@@ -302,4 +322,13 @@ function friendlyError(error: unknown, fallback: string): string {
   if (error instanceof TypeError) return '无法连接模型服务，请检查接口地址、网络和本机代理设置。'
   if (error instanceof Error && error.message.trim()) return error.message
   return fallback
+}
+
+function isExplicitStreamServerFailure(error: unknown): boolean {
+  return error instanceof AppError && error.code === 'FEATURE_UNAVAILABLE' && error.message.startsWith('模型服务返回 500')
+}
+
+function assertOpenAiFinishReason(reason: string | undefined) {
+  if (reason === 'content_filter' || reason === 'refusal') assertSuccessfulStop(reason, [])
+  if (reason === 'length') throw new AppError('AI_RESPONSE_INVALID', '输出达到预算上限，内容未完整返回。请提高输出预算后重试。', { recoverable: true })
 }

@@ -82,6 +82,7 @@ try {
   await page.getByText('重构验证版本', { exact: true }).first().waitFor()
   await page.getByRole('button', { name: '关闭历史版本', exact: true }).click()
   mark('template-ref-and-revision-dialog-binding')
+  await page.getByTestId('chapter-transfer-toggle').click()
   await page.getByTestId('import-manuscript-in-book').click()
   await page.locator('.txt-import-modal').waitFor()
   await page.locator('.txt-import-modal').getByRole('button', { name: /取消|关闭/ }).first().click()

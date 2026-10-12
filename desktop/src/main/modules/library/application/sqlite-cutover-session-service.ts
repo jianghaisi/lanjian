@@ -28,8 +28,8 @@ export class SqliteCutoverSessionService {
     try {
       const mode = database.storageMode()
       if (mode === 'sqlite') {
-        const chapters = database.formalChapters()
-        const outlines = database.formalOutlineReady() ? database.formalOutlines() : []
+        const chapters = await (database.formalChaptersAsync?.() ?? database.formalChapters())
+        const outlines = database.formalOutlineReady() ? await (database.formalOutlinesAsync?.() ?? database.formalOutlines()) : []
         const fileText = database.textAuthority() === 'files-v1'
         const pending = database.pendingMirrorPlans(fileText ? { excludeSourceTypes: ['chapter_markdown', 'outline_markdown'] } : undefined)
         const promptMirror = database.formalPromptReady() ? database.formalPromptMirror() : null

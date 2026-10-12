@@ -47,21 +47,30 @@ export function registerAssistantField(binding: FieldBinding, element?: HTMLElem
   entry.stop=()=>{entry.alive=false;stop();fieldRegistry.delete(key)}
   return {key,dispose:entry.stop,composing(value:boolean){entry.composing=value;fieldRegistry.set(key,{...entry})},update(next:FieldBinding){descriptor.value=next}}
 }
+// The persistent premise and its visible input share one explicit draft owner.
+// A composition in either binding must block writes through the other binding.
+export function fieldIsComposing(key: string) {
+  const entry=fieldRegistry.get(key)
+  if(!entry)return false
+  if(entry.composing)return true
+  const owner=entry.binding.identity?.()
+  return owner!=null && availableFields.value.some(other=>other.composing && other.target.fieldId===entry.target.fieldId && other.binding.identity?.()===owner)
+}
 export function fieldIsCurrent(key: string, target: FieldTarget) {
   const entry=fieldRegistry.get(key)
-  return Boolean(entry?.alive && !entry.composing && availableFields.value.some(e=>e.key===key) && sameFieldSnapshot(entry.target,target))
+  return Boolean(entry?.alive && !fieldIsComposing(key) && availableFields.value.some(e=>e.key===key) && sameFieldSnapshot(entry.target,target))
 }
-export async function applyFieldDraft(key: string, candidate: FieldCandidate) {
+export async function applyFieldDraft(key: string, candidate: FieldCandidate, current: () => boolean = () => true) {
   let entry=fieldRegistry.get(key)
-  if (!entry || !fieldIsCurrent(key,candidate.target)) throw new Error('这个输入内容已变化，请基于当前草稿重新生成。')
+  if (!current() || !entry || !fieldIsCurrent(key,candidate.target)) throw new Error('这个输入内容已变化，请基于当前草稿重新生成。')
   if(entry.binding.reveal && !await entry.binding.reveal()) throw new Error('当前页面有待处理的修改，未切换目标。')
   entry=fieldRegistry.get(key)
-  if(!entry || !fieldIsCurrent(key,candidate.target))throw new Error('目标已变化，请重新选择。')
+  if(!current() || !entry || !fieldIsCurrent(key,candidate.target))throw new Error('目标已变化，请重新选择。')
   validateFieldValue(entry.target,candidate.after)
   entry.binding.write(candidate.after)
   await nextTick()
   const applied=fieldRegistry.get(key)
-  if(!applied || applied.target.instanceId!==candidate.target.instanceId || (applied.target.value===candidate.before && candidate.after!==candidate.before))throw new Error('输入未能回填，请检查本页提示后重试。')
+  if(!current() || !applied || applied.target.instanceId!==candidate.target.instanceId || (applied.target.value===candidate.before && candidate.after!==candidate.before))throw new Error('输入未能回填，请检查本页提示后重试。')
   return {key,before:candidate.before,after:applied.target.value,target:{...applied.target}}
 }
 export function undoFieldDraft(change: {key:string;before:FieldValue;after:FieldValue;target:FieldTarget}) {

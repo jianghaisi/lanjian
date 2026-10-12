@@ -8,9 +8,9 @@ import { join, resolve } from 'node:path'
 
 const require = createRequire(import.meta.url), { _electron } = require('playwright')
 const root = await realpath(await mkdtemp(join(tmpdir(), 'lanjian-global-ui-')))
-const userData = join(root, 'app'), books = join(root, 'books')
+const userData = join(root, 'app'), globalModelData = join(root, 'global-model-data'), books = join(root, 'books')
 const output = resolve('../.trellis/tasks/09-18-v3-gemini-native-protocol/evidence/global-model-connections')
-await mkdir(userData); await mkdir(books); await mkdir(output, { recursive: true })
+await mkdir(userData); await mkdir(globalModelData); await mkdir(books); await mkdir(output, { recursive: true })
 const requests = [], errors = [], geometries = []
 let rejectCatalog = false
 const server = createServer(async (req, res) => {
@@ -28,7 +28,7 @@ const server = createServer(async (req, res) => {
 })
 await new Promise(done => server.listen(0, '127.0.0.1', done))
 const endpoint = `http://127.0.0.1:${server.address().port}/v1`
-const env = { ...process.env, LANJIAN_USER_DATA_PATH: userData }; delete env.ELECTRON_RUN_AS_NODE; delete env.LANJIAN_SMOKE
+const env = { ...process.env, LANJIAN_USER_DATA_PATH: userData, LANJIAN_GLOBAL_MODEL_DATA_PATH: globalModelData }; delete env.ELECTRON_RUN_AS_NODE; delete env.LANJIAN_SMOKE
 let app, page
 const manager = () => page.locator('[data-testid="global-model-settings"]')
 const settled = async () => { await page.waitForFunction(() => document.querySelector('[data-testid="global-model-settings"]')?.getAttribute('aria-busy') === 'false') }
@@ -174,19 +174,19 @@ try {
   await capture('02-book-routing-125-percent', 1440, 900, 1.25)
   await page.evaluate(() => localStorage.setItem('lanjian-theme', 'moye'))
   await app.close(); app = undefined
-  const stored = await readFile(join(userData, 'global-model-connections.json'), 'utf8')
+  const stored = await readFile(join(globalModelData, 'global-model-connections.json'), 'utf8')
   assert.doesNotMatch(stored, /synthetic-ui-key/)
   assert.match(stored, /encryptedApiKey/)
   for (const title of ['Model-A', 'Model-B', 'Model-C']) assert.doesNotMatch(JSON.stringify(await readBook(title)), /synthetic-ui-key|encryptedApiKey/)
   await start(); await openLibraryManager()
-  const beforeSecondProcess = await readFile(join(userData, 'global-model-connections.json'))
+  const beforeSecondProcess = await readFile(join(globalModelData, 'global-model-connections.json'))
   await new Promise((done, reject) => {
     const child = spawn(require('electron'), ['.'], { cwd: process.cwd(), env, windowsHide: true, stdio: 'ignore' })
     const timeout = setTimeout(() => { child.kill(); reject(Error('second process did not respect application ownership')) }, 15000)
     child.on('error', error => { clearTimeout(timeout); reject(error) })
     child.on('exit', code => { clearTimeout(timeout); code === 0 ? done() : reject(Error('second process exit failed')) })
   })
-  assert.deepEqual(await readFile(join(userData, 'global-model-connections.json')), beforeSecondProcess)
+  assert.deepEqual(await readFile(join(globalModelData, 'global-model-connections.json')), beforeSecondProcess)
   assert.equal(await manager().locator('[data-global-id]').count(), 1); assert.equal(requests.length, 3)
   await capture('03-global-library-dark-restart', 1280, 800, 1)
   await manager().getByRole('button', { name: '停用（影响所有引用作品）', exact: true }).click(); await settled()
@@ -221,12 +221,12 @@ try {
   await page.locator('[data-testid="global-save-connection"]').click(); await settled()
   assert.equal(await manager().locator('[data-global-id]').count(), 3)
   assert.match(await manager().locator('[data-global-id]').filter({ hasText: 'Gemini 原生隔离接口' }).innerText(), /Gemini 原生协议/)
-  const finalCatalogBytes = await readFile(join(userData, 'global-model-connections.json'), 'utf8')
+  const finalCatalogBytes = await readFile(join(globalModelData, 'global-model-connections.json'), 'utf8')
   assert.doesNotMatch(finalCatalogBytes, /synthetic-native-ui-key/)
   assert.ok(JSON.parse(finalCatalogBytes).connections.some(connection => connection.protocol === 'gemini-native' && connection.baseUrl === 'https://native.example.test'))
   await capture('04-gemini-native-connection', 1280, 800, 1, 'last-connection')
   assert.equal(requests.length, 3); assert.deepEqual(errors, [])
-  await writeFile(join(output, 'results.json'), JSON.stringify({ ok: true, root, userData, books, errors, requests, geometries, liveModelCalls: 0, checks: ['library global management', 'keyboard and Chinese composition', 'conflict preserves transient input without publishing keys', 'OS-encrypted synthetic key', 'explicit loopback test and catalog only', 'A/B/C independent copies', 'explicit apply preview', 'restart and disable/recover', 'single-instance ownership', 'sandboxed context-isolated main renderer', 'manual no-default book', 'private key management and source-preserving reuse', 'explicit Gemini native protocol selection and immutable service-root persistence'] }, null, 2))
+  await writeFile(join(output, 'results.json'), JSON.stringify({ ok: true, root, userData, globalModelData, books, errors, requests, geometries, liveModelCalls: 0, checks: ['library global management', 'keyboard and Chinese composition', 'conflict preserves transient input without publishing keys', 'OS-encrypted synthetic key', 'explicit loopback test and catalog only', 'A/B/C independent copies', 'explicit apply preview', 'restart and disable/recover', 'single-instance ownership', 'sandboxed context-isolated main renderer', 'manual no-default book', 'private key management and source-preserving reuse', 'explicit Gemini native protocol selection and immutable service-root persistence'] }, null, 2))
   console.log(JSON.stringify({ ok: true, root, output, requests: requests.length }))
 } catch (error) {
   if (page && !page.isClosed()) await page.screenshot({ path: join(output, `failure-${Date.now()}.png`) }).catch(() => {})

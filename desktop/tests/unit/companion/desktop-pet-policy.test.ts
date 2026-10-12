@@ -35,6 +35,7 @@ test('context rejects missing/unknown fields, invalid statuses, unsafe IDs and n
   }
 })
 test('commands are strict discriminated unions and return detached preferences', () => {
+  for (const panel of [null, 'menu', 'chat', 'care', 'settings']) assert.deepEqual(decodeDesktopPetCommand({ type: 'panel', panel }), { type: 'panel', panel })
   for (const type of ['toggle', 'hide', 'locate', 'return-to-writing', 'settings', 'drag-start', 'drag-end']) assert.deepEqual(decodeDesktopPetCommand({ type }), { type })
   for (const mode of ['detailed', 'chibi']) assert.deepEqual(decodeDesktopPetCommand({ type: 'mode', mode }), { type: 'mode', mode })
   assert.deepEqual(decodeDesktopPetCommand({ type: 'hover', interactive: true }), { type: 'hover', interactive: true })
@@ -45,6 +46,7 @@ test('commands are strict discriminated unions and return detached preferences',
 })
 test('commands reject arbitrary commands, extra arguments and invalid ranges', () => {
   for (const input of [undefined, [], { type: 'execute' }, { type: 'hide', position: {} }, { type: 'hover', interactive: 'true' }, { type: 'mode', mode: 'hidden' },
+    { type: 'panel' }, { type: 'panel', panel: 'browser' }, { type: 'panel', panel: 'settings', x: 0 },
     { type: 'configure', preferences: {} }, { type: 'configure', preferences: { ...defaultDesktopPetPreferences, extra: true } },
     ...[{ scale: .59 }, { scale: 1.81 }, { scale: '1' }, { scale: Infinity }, { alwaysOnTop: 1 }, { reminderMinutes: -1 }, { reminderMinutes: 241 }, { reminderMinutes: 1.2 }].map(patch => ({ type: 'configure', preferences: { ...defaultDesktopPetPreferences, ...patch } }))]) {
     assert.throws(() => decodeDesktopPetCommand(input), validation)
@@ -190,4 +192,21 @@ test('preference path cannot be a directory junction leading outside userData', 
 }))
 test('store rejects relative directory rather than writing into the working project', () => {
   assert.throws(() => new DesktopPetPreferencesStore('book'), validation)
+})
+
+
+test('pre-lock preferences migrate without enabling the pet or discarding the saved location', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pet-lock-migration-'))
+  try {
+    const legacy = {enabled:false,preferences:{scale:1.25,alwaysOnTop:true,clickThrough:false,reminderMinutes:25},position:{x:-900,y:40}}
+    const file = join(root,'desktop-pet.json'), bytes = JSON.stringify(legacy)
+    await writeFile(file,bytes)
+    const store = new DesktopPetPreferencesStore(root), migrated = await store.read()
+    assert.deepEqual(migrated,{...legacy,preferences:{...legacy.preferences,positionLocked:false}})
+    assert.equal(await readFile(file,'utf8'),bytes,'read migration must not rewrite the original')
+    migrated.preferences.positionLocked=true;await store.save(migrated)
+    assert.deepEqual(await new DesktopPetPreferencesStore(root).read(),migrated)
+    assert.throws(()=>decodeDesktopPetCommand({type:'configure',preferences:legacy.preferences}))
+    assert.throws(()=>decodeDesktopPetCommand({type:'configure',preferences:{...migrated.preferences,positionLocked:'yes'}}))
+  } finally { await rm(root,{recursive:true,force:true}) }
 })

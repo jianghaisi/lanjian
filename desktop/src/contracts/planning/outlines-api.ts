@@ -36,6 +36,7 @@ export type DesktopOutlinesApi = {
   placeEvent: (eventId: string, volume: number | null) => Promise<OutlinePlanningStatus>
   placeEventInChapter: (eventId: string, chapterId: number) => Promise<OutlinePlanningStatus>
   placeChapter: (chapterId: number, volume: number | null) => Promise<OutlinePlanningStatus>
+  decideUpstreamReview: (input: import('./upstream-review-contracts').UpstreamReviewInput) => Promise<OutlinePlanningStatus>
   reviewChapter: (chapterId: number) => Promise<ChapterOutlineReview>
   confirmChapter: (chapterId: number) => Promise<OutlinePlanningStatus>
   acknowledgeReview: (volume: OutlineVolume) => Promise<OutlinePlanningStatus>

@@ -1,5 +1,5 @@
 import { AppError } from '../../../core/errors/app-error'
-import { BOOK_MODEL_TASKS, decodeBookModelSettings, referenceBookModelSettings, type BookModelSettings } from './book-model-settings'
+import { BOOK_MODEL_TASKS, decodeBookModelSettings, referenceBookModelSettings, isReferencedBookSettings, type BookModelSettings } from './book-model-settings'
 import type { BookModelSnapshot } from './book-model-resolution'
 import { connectionRecord, connectionRevision, globalConnectionId } from './model-connections'
 import type { ModelRequestGuard } from './model-provider'
@@ -24,9 +24,9 @@ export function applyBookModelAssignment(current: BookModelSettings, value: unkn
     const r = connectionRecord(value, ['routingMode', 'shared', 'tasks', 'globalReferences', 'globalRevisions'])
     if (!['routingMode', 'shared', 'tasks', 'globalReferences'].some(k => Object.hasOwn(r, k))) throw assignmentInvalid()
     const base = Object.hasOwn(r, 'globalReferences') ? referenceBookModelSettings(current) : current
-    const fields = ['connectionId', 'model', 'temperature', 'topP', 'maxTokens']
+    const fields = ['connectionId', 'model', 'temperature', 'topP', 'maxTokens', 'thinkingLevel', 'parameterPolicy']
     const tasks = Object.hasOwn(r, 'tasks') ? connectionRecord(r.tasks, BOOK_MODEL_TASKS) : {}
-    let references: unknown = base.version === 4 ? base.references : undefined
+    let references: unknown = isReferencedBookSettings(base) ? base.references : undefined
     if (Object.hasOwn(r, 'globalReferences')) {
       if (!Array.isArray(r.globalReferences) || r.globalReferences.length > 100) throw assignmentInvalid()
       references = [...referenceBookModelSettings(current).references.filter(c => c.kind === 'legacy-private'),
@@ -35,12 +35,19 @@ export function applyBookModelAssignment(current: BookModelSettings, value: unkn
           return { kind: 'global' as const, id: c.id, globalConnectionId: globalConnectionId(c.globalConnectionId) }
         })]
     }
-    const settings = decodeBookModelSettings({ ...base,
+    const merge = (before: unknown, patch: unknown) => {
+      const p = connectionRecord(patch, fields)
+      if (Object.hasOwn(p, 'parameterPolicy')) return p
+      return { ...before as object, ...p }
+    }
+    const shared = Object.hasOwn(r, 'shared') ? merge(base.shared, r.shared) : base.shared
+    const profiles = Object.fromEntries(BOOK_MODEL_TASKS.map(task => [task, Object.hasOwn(tasks, task) ? merge(base.tasks[task], tasks[task]) : base.tasks[task]]))
+    const adaptive = [shared, ...Object.values(profiles)].some(p => 'parameterPolicy' in p)
+    const settings = decodeBookModelSettings({ ...(adaptive ? referenceBookModelSettings(base) : base),
+      ...(adaptive ? { version: 5 } : {}),
       ...(references ? { references } : {}),
       routingMode: Object.hasOwn(r, 'routingMode') ? r.routingMode : base.routingMode,
-      shared: { ...base.shared, ...(Object.hasOwn(r, 'shared') ? connectionRecord(r.shared, fields) : {}) },
-      tasks: Object.fromEntries(BOOK_MODEL_TASKS.map(task => [task, { ...base.tasks[task],
-        ...(Object.hasOwn(tasks, task) ? connectionRecord(tasks[task], fields) : {}) }])) })
+      shared, tasks: profiles })
     const globalRevisions = new Map<string, number>()
     if (Object.hasOwn(r, 'globalRevisions')) {
       if (!Array.isArray(r.globalRevisions) || r.globalRevisions.length > 100) throw assignmentInvalid()

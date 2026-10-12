@@ -1,4 +1,5 @@
 import { characterStateResult, planningStatusResult, type IpcValueDecoder } from '../core/ipc-result-contracts'
+import { decodeCreativePolicyRecords } from '../writing-plugins/creative-policy'
 
 const previewChannels: Array<[string, ContinuationArea]> = [
   ['imports:preview-continuation-project-definition', 'projectDefinition'],
@@ -149,6 +150,7 @@ function continuationCandidate(value: unknown, path: string): unknown {
   })
   text(result.rationale, `${path}.rationale`, 100_000)
   if (result.adoption !== undefined) adoptionLedger(result.adoption, `${path}.adoption`)
+  if (result.creativePolicy !== undefined) decodeCreativePolicyRecords(result.creativePolicy)
   return value
 }
 
@@ -162,7 +164,12 @@ function adoptionLedger(value: unknown, path: string): void {
     const receipt = adoptionReceipt(result.totalOutline, `${path}.totalOutline`, ['candidateFingerprint', 'outlineFingerprint', 'prerequisiteFingerprint'])
     count(receipt.revision, `${path}.totalOutline.revision`)
   }
-  adoptionReceiptList(result.existingPlot, `${path}.existingPlot`, ['candidateFingerprint', 'eventFingerprint', 'timelineEventId'])
+  adoptionReceiptList(result.existingPlot, `${path}.existingPlot`, ['candidateFingerprint', 'eventFingerprint', 'timelineEventId'], (receipt, itemPath) => {
+    for (const field of ['eventVersionId', 'operationId', 'sourceManifestId'] as const) {
+      if (receipt[field] !== undefined) identifier(receipt[field], `${itemPath}.${field}`)
+    }
+    if (receipt.sourceFingerprint !== undefined) identifier(receipt.sourceFingerprint, `${itemPath}.sourceFingerprint`)
+  })
   adoptionReceiptList(result.characters, `${path}.characters`, ['candidateFingerprint', 'anchorFingerprint', 'name'])
   adoptionReceiptList(result.volumeOutlines, `${path}.volumeOutlines`, ['candidateFingerprint', 'outlineFingerprint', 'parentTotalFingerprint'], (receipt, itemPath) => {
     positive(receipt.volume, `${itemPath}.volume`)

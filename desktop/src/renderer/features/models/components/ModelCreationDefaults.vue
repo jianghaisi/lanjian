@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { hostedModelMode } from '../services/hosted-model-mode'
 import type { ModelConnectionsApi, ModelCreationPreview } from '../../../../contracts/models/model-connections-contracts'
 const props = defineProps<{ api: ModelConnectionsApi; disabled?: boolean }>()
 const emit = defineEmits<{ ready: [value: ModelCreationPreview | null] }>()
@@ -15,15 +16,16 @@ onMounted(refresh); watch(manual, refresh)
 onBeforeUnmount(() => { generation++; emit('ready', null) })
 </script>
 <template>
-  <section class="creation-defaults" data-testid="creation-model-defaults" aria-label="新书模型分配">
-    <header><b>本书的初始模型分配</b><button class="text-action compact" type="button" :disabled="disabled || loading" @click="refresh">重新读取</button></header>
-    <p v-if="loading" role="status">正在核对默认分配…</p>
+  <p v-if="hostedModelMode() && (loading || error)" role="status">{{ error || '正在准备作品…' }}</p>
+  <section v-else-if="!hostedModelMode()" class="creation-defaults" data-testid="creation-model-defaults" aria-label="新书模型分配">
+    <header><b>本书的写作模型</b><button class="text-action compact" type="button" :disabled="disabled || loading" @click="refresh">重新读取</button></header>
+    <p v-if="loading" role="status">正在读取已配置的模型…</p>
     <p v-else-if="error" role="alert">{{ error }}</p>
     <template v-else-if="preview">
-      <p v-if="!preview.defaults.template">{{ manual ? '明确不继承默认分配。' : '尚未设置默认分配。' }}可以正常手写，之后再配置 AI。</p>
-      <template v-else><p>复制默认版本 {{ preview.defaults.revision }}；之后修改默认，不会改变本书。</p><dl v-if="preview.defaults.template.routingMode === 'perTask'"><template v-for="(label, task) in { outline: '总纲', chapterOutline: '章纲', prose: '正文', review: '审校' }" :key="task"><dt>{{ label }}</dt><dd>{{ preview.defaults.template.tasks[task].model }}</dd></template></dl><p v-else>统一模型：{{ preview.defaults.template.shared.model }}</p></template>
+      <p v-if="!preview.defaults.template">{{ manual ? '不继承默认模型，可先手动写作。' : '尚未配置模型，可先手动写作。' }}</p>
+      <template v-else><p>自动使用已配置的写作模型，无需重新填写 API 和密钥。</p><dl v-if="preview.defaults.template.routingMode === 'perTask'"><template v-for="(label, task) in { outline: '总纲', chapterOutline: '章纲', prose: '正文', review: '审校' }" :key="task"><dt>{{ label }}</dt><dd>{{ preview.defaults.template.tasks[task].model }}</dd></template></dl><p v-else>统一模型：{{ preview.defaults.template.shared.model }}</p></template>
     </template>
-    <label><input v-model="manual" type="checkbox" :disabled="disabled || loading">本次不继承默认，先手写建书</label>
+    <label class="creation-manual-choice"><input v-model="manual" type="checkbox" :disabled="disabled || loading"><span>这本书暂不使用 AI</span></label>
   </section>
 </template>
 <style scoped>
@@ -33,5 +35,6 @@ p { margin:0; font-size:var(--form-help); line-height:1.6; }
 dl { display:grid; grid-template-columns:auto minmax(0,1fr); gap:6px 16px; margin:0; }
 dd { margin:0; overflow-wrap:anywhere; }
 label { display:flex; align-items:center; gap:8px; font-size:var(--form-help); }
-input { width:auto; }
+.creation-defaults > label.creation-manual-choice { display:flex; flex-direction:row; justify-content:flex-start; gap:10px; width:fit-content; max-width:100%; cursor:pointer; }
+.creation-defaults .creation-manual-choice > input[type=checkbox] { flex:0 0 16px; width:16px; height:16px; min-width:16px; min-height:16px; padding:0; margin:0; appearance:auto; accent-color:var(--jade); }
 </style>

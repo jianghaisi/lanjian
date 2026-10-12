@@ -24,14 +24,15 @@ async function open() {
   query.value = ''; index.value = 0; visibleCount.value = 40; error.value = ''
   dialog.value?.showModal()
   await nextTick()
-  input.value?.focus()
+  if (dialog.value?.open) input.value?.focus()
 }
 function close() {
   if (pending.value) return
   dialog.value?.close()
 }
 function restore() {
-  if (restoreFocus?.isConnected) restoreFocus.focus({ preventScroll: true })
+  if (dialog.value?.open) return
+  if (restoreFocus?.isConnected && !restoreFocus.closest('[inert]') && (document.activeElement === document.body || dialog.value?.contains(document.activeElement))) restoreFocus.focus({ preventScroll: true })
   restoreFocus = null
 }
 async function choose(id: number) {

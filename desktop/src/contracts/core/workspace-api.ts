@@ -1,4 +1,5 @@
 import type { WorkflowStatus, WorkspaceBootstrapIssue, WorkspaceBootstrapProjection } from '../library/types'
+import type { WorkspaceLoadCheckInput, WorkspaceLoadCheckResult } from '../library/types'
 import type {
   ContextBudgetPreferences,
   ContextChapterSummaryView,
@@ -55,6 +56,7 @@ import type { AiTask } from '../models/types'
 
 export type DesktopWorkspaceApi = {
   bootstrap: () => Promise<WorkspaceBootstrapProjection>
+  recheckLoadIssues: (input: WorkspaceLoadCheckInput) => Promise<WorkspaceLoadCheckResult>
   listTaskCenter: () => Promise<TaskCenterItem[]>
   getBookProfile: () => Promise<BookProfile>
   saveBookProfile: (data: BookProfile) => Promise<BookProfile>

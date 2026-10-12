@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdtemp, mkdir, rm, readFile, writeFile, unlink } from 'node:fs/promises'
 import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import test, { type TestContext } from 'node:test'
 import { ShadowImportService } from '../../../src/main/modules/library/application/shadow-import-service'
 import { WORKSPACE_DATABASE_SCHEMA_VERSION } from '../../../src/main/core/ports/workspace-database'
@@ -325,10 +325,9 @@ test('explicit expansion preview is zero-write and adoption durably links candid
     const candidateBefore = await readFile(candidatePath, 'utf8')
     const preview = await adoption.preview(task.id)
     assert.equal(preview.children[0].key, 'volume-1')
-    assert.match(preview.children[0].content, /时间：翌日/)
-    assert.match(preview.children[0].content, /人物：主角/)
-    assert.match(preview.children[0].content, /地点：钟楼/)
-    assert.match(preview.children[0].content, /事件与结果：发现线索并出发/)
+    assert.match(preview.children[0].content, /追索线索。/)
+    assert.doesNotMatch(preview.children[0].content, /时间：|人物：|地点：|事件与结果：/)
+    assert.deepEqual((await tasks.status(task.id)).proposal?.children[0].events,[{time:'翌日',characters:['主角'],location:'钟楼',event:'发现线索并出发。'}])
     assert.deepEqual(db.formalOutlines(), before)
     assert.equal(await readFile(candidatePath, 'utf8'), candidateBefore)
     assert.equal(db.generationArtifactForTask(task.id, 'outline_expansion')!.status, 'complete')
@@ -499,6 +498,7 @@ test('runs the complete approved idea to setting, summary, volume, stage and cha
   ]
   let calls = 0
   const runner = new PlanningDraftService({ complete: async (_instruction, _draft, context) => {
+    if(_instruction.startsWith('复核下方完整候选'))return {content:'{"issues":[]}'} // Draft-generation count below excludes the independent review fixture.
     assert.match(context || '', /作者已批准的正式设定/)
     assert.match(context || '', /钟楼只记住谎话/)
     const response = responses[calls++]
@@ -567,6 +567,7 @@ test('persists single-layer tasks, replays without a model call, and recovers on
   const source = (await workspace.planningOutline('total'))!
   let calls = 0
   const runner = new PlanningDraftService({ complete: async (_instruction, _draft, _context, _task, _signal, model) => {
+    if(_instruction.startsWith('复核下方完整候选'))return {content:'{"issues":[]}'}
     assert.equal(model, 'pinned-model')
     calls++
     return { content: JSON.stringify({ children: [{ title: '回声', content: '追索线索。', events: [{ time: '翌日', characters: ['主角'], location: '钟楼', event: '发现线索并出发。' }] }] }) }
@@ -723,6 +724,96 @@ async function fixture(t: TestContext) {
   return { project, projects, databases, authority, idea, request }
 }
 
+test('book-bound idea jobs with identical task IDs finish in their own stores and cancellation only touches the selected book', async t => {
+  const a = await fixture(t)
+  const { projects, databases, authority } = a
+  const b = (await projects.create({ parentPath: dirname(a.project.path), name: '并行灵感乙' })).project
+  const documents = new DocumentService(projects)
+  const source = new CurrentProjectLegacyWorkspaceSource(projects, documents)
+  const importer = new ShadowImportService(source, databases)
+  await importer.import(await importer.preview())
+  await authority.activate(b.path, await source.snapshot())
+  const idea = await authority.saveIdea(b.path, { title: '乙书灵感', content: '乙书独立内容。' })
+  const requestB: IdeaGenerationInput = { ...a.request, operationId: randomUUID(), ideaId: idea.id, expectedUpdatedAt: idea.updatedAt }
+  const signals = new Map<string, AbortSignal>()
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  t.after(() => release())
+  const service = new IdeaGenerationService(projects, databases, {
+    modelFor: async () => 'test', complete: async (_instruction, _draft, _context, _task, signal) => {
+      const root = await projects.currentPath()
+      signals.set(root, signal)
+      await gate
+      assert.equal(await projects.currentPath(), root)
+      return { content: output }
+    }
+  }, async () => '', () => '00000000-0000-4000-8000-000000000099')
+  await projects.switch(a.project.path)
+  const first = await projects.runBookTask('灵感生成', () => service.start(a.request), id => service.status(id))
+  await projects.switch(b.path)
+  const second = await projects.runBookTask('灵感生成', () => service.start(requestB), id => service.status(id))
+  assert.equal(first.id, second.id)
+  for (let i = 0; signals.size < 2 && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 10))
+  assert.equal(signals.size, 2)
+  await service.cancel(second.id)
+  assert.equal(signals.get(b.path)?.aborted, true)
+  assert.equal(signals.get(a.project.path)?.aborted, false)
+  release()
+  await projects.switch(a.project.path)
+  assert.equal((await terminal(service, first.id)).status, 'succeeded')
+  await projects.switch(b.path)
+  assert.equal((await service.status(second.id)).status, 'cancelled')
+})
+
+test('book-bound expansion survives switching, and stopping B leaves A to finish in its original database', async t => {
+  const a = await fixture(t)
+  const { projects, databases, authority } = a
+  const documents = new DocumentService(projects, undefined, authority)
+  await documents.updateOutline('total', '甲书钟楼。')
+  const b = (await projects.create({ parentPath: dirname(a.project.path), name: '并行谋篇乙' })).project
+  const legacy = new CurrentProjectLegacyWorkspaceSource(projects, new DocumentService(projects))
+  const importer = new ShadowImportService(legacy, databases)
+  await importer.import(await importer.preview())
+  await authority.activate(b.path, await legacy.snapshot())
+  await documents.updateOutline('total', '乙书钟楼。')
+  const workspace = new WorkspaceService(projects, undefined, undefined, documents, undefined, undefined, authority)
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  t.after(() => release())
+  const signals = new Map<string, AbortSignal>()
+  const runner = new PlanningDraftService({ complete: async (_instruction, _draft, _context, _task, signal) => {
+    if(_instruction.startsWith('复核下方完整候选'))return {content:'{"issues":[]}'}
+    const root = await projects.currentPath()
+    assert.ok(signal)
+    signals.set(root, signal)
+    await gate
+    assert.equal(await projects.currentPath(), root)
+    return { content: JSON.stringify({ children: [{ title: '回声', content: root === a.project.path ? '甲书线索。' : '乙书线索。', events: [{ time: '翌日', characters: ['主角'], location: '钟楼', event: '发现线索并出发。' }] }] }) }
+  } }, workspace)
+  const service = new OutlineExpansionTaskService(projects, databases, runner, key => workspace.planningOutline(key), async () => 'test')
+  const start = async () => service.start({ operationId: randomUUID(), parentKey: 'total', expectedRevision: (await workspace.planningOutline('total'))!.revision, count: 1, instruction: '' })
+  await projects.switch(a.project.path)
+  const first = await projects.runBookTask('章纲扩展', start, id => service.status(id))
+  await projects.switch(b.path)
+  const second = await projects.runBookTask('章纲扩展', start, id => service.status(id))
+  for (let i = 0; signals.size < 2 && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 10))
+  assert.equal(signals.size, 2)
+  await assert.rejects(service.cancel(first.id))
+  await service.cancel(second.id)
+  assert.equal(signals.get(b.path)?.aborted, true)
+  assert.equal(signals.get(a.project.path)?.aborted, false)
+  release()
+  await projects.switch(a.project.path)
+  const result = await expansionTerminal(service, first.id)
+  assert.equal(result.status, 'succeeded')
+  assert.match(JSON.stringify(result.proposal), /甲书线索/)
+  assert.doesNotMatch(JSON.stringify(result.proposal), /乙书线索/)
+  assert.equal((await documents.outlines()).volumes.length, 0)
+  await projects.switch(b.path)
+  assert.equal((await service.status(second.id)).status, 'cancelled')
+  assert.equal((await documents.outlines()).volumes.length, 0)
+})
+
 async function terminal(service: IdeaGenerationService, id: string) {
   for (let n = 0; n < 80; n++) {
     const task = (await service.recent()).find((item) => item.id === id)!
@@ -856,7 +947,8 @@ test('recovers only its own orphan tasks and stores safe failures', async (t) =>
   assert.doesNotMatch(JSON.stringify(result), /secret-key/)
   const database = (await databases.openExisting(project.path))!
   const original = database.taskRun(started.id)!
-  database.createTaskRun({ id: randomUUID(), taskType: 'idea_generation', idempotencyKey: randomUUID(), checkpointJson: original.checkpointJson })
+  assert.ok(original.contentHash)
+  database.createTaskRun({ id: randomUUID(), taskType: 'idea_generation', idempotencyKey: randomUUID(), checkpointJson: original.checkpointJson, contentHash: original.contentHash })
   const writing = database.createTaskRun({ id: randomUUID(), taskType: 'writing_agent', idempotencyKey: randomUUID(), checkpointJson: '{}' })
   database.close()
   const restarted = new IdeaGenerationService(projects, databases, { modelFor: async () => 'test', complete: async () => ({ content: output }) }, async () => '')
@@ -990,6 +1082,7 @@ test('manually saved summaries enable planning and SQLite remains authoritative 
   assert.equal((await authority.ideas(project.path))[0].promotedToId, null)
   const parent = (await workspace.planningOutline('total'))!
   const expansion = new PlanningDraftService({ complete: async (instruction) => {
+    if(instruction.startsWith('复核下方完整候选'))return {content:'{"issues":[]}'}
     assert.match(instruction, /作者手写梗概/)
     assert.doesNotMatch(instruction, /外部修改只留在镜像/)
     return { content: JSON.stringify({ children: [{ title: '失声之城', content: '主角追查回声，在旧街发现线索。', events: [{ time: '第一日', characters: ['主角'], location: '旧街', event: '发现线索，决定夜探钟楼。' }] }] }) }
@@ -1016,8 +1109,10 @@ test('old retries do not regenerate and history reads use one database connectio
   await terminal(service, first.id)
   const database = (await databases.openExisting(project.path))!
   const checkpointJson = database.taskRun(first.id)!.checkpointJson
+  const contentHash = database.taskRun(first.id)!.contentHash
+  assert.ok(contentHash)
   for (let index = 0; index < 101; index++) {
-    const task = database.createTaskRun({ id: randomUUID(), taskType: 'idea_generation', idempotencyKey: randomUUID(), checkpointJson })
+    const task = database.createTaskRun({ id: randomUUID(), taskType: 'idea_generation', idempotencyKey: randomUUID(), checkpointJson, contentHash })
     database.transitionTaskRun({ id: task.id, status: 'cancelled' })
   }
   assert.equal(database.recentTaskRuns('idea_generation', undefined, 100).some((task) => task.id === first.id), false)

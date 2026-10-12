@@ -2,6 +2,53 @@ import type { EventCandidateCreateInput, TimelineEvent } from '../index'
 import type { ArgsDecoder } from '../core/validation'
 import { boundedString, exactArgs, invalid, record, rejectUnknown, requiredString, uuid } from '../core/validation'
 import { planningLimits } from '../planning/validation'
+import { decodeEventMaterialCandidateInput, decodeEventMigrationPageInput, decodeEventMigrationReviewInput,
+  decodeEventModelCandidateGenerationInput, decodeEventModelCandidatePreviewInput, decodeEventOperationGrant, decodeEventOperationInput } from './event-contracts'
+
+const decodeEventIdentifierArgs: ArgsDecoder<[string]> = (args) => {
+  exactArgs(args, 1)
+  return [decodeEventOperationGrant(args[0])]
+}
+
+export const decodeEventOperationPreviewArgs: ArgsDecoder<[ReturnType<typeof decodeEventOperationInput>]> = (args) => {
+  exactArgs(args, 1)
+  return [decodeEventOperationInput(args[0])]
+}
+
+export const decodeEventMaterialCandidatePreviewArgs: ArgsDecoder<[ReturnType<typeof decodeEventMaterialCandidateInput>]> = (args) => {
+  exactArgs(args, 1)
+  return [decodeEventMaterialCandidateInput(args[0])]
+}
+
+export const decodeEventModelCandidateGenerationArgs: ArgsDecoder<[ReturnType<typeof decodeEventModelCandidateGenerationInput>]> = (args) => {
+  exactArgs(args, 1)
+  return [decodeEventModelCandidateGenerationInput(args[0])]
+}
+
+export const decodeEventModelCandidatePreviewArgs: ArgsDecoder<[ReturnType<typeof decodeEventModelCandidatePreviewInput>]> = (args) => {
+  exactArgs(args, 1)
+  return [decodeEventModelCandidatePreviewInput(args[0])]
+}
+
+export const decodeEventOperationTokenArgs = decodeEventIdentifierArgs
+export const decodeEventOperationReceiptArgs = decodeEventIdentifierArgs
+
+export const decodeEventMigrationPageArgs: ArgsDecoder<[ReturnType<typeof decodeEventMigrationPageInput>]> = (args) => {
+  exactArgs(args, 1)
+  return [decodeEventMigrationPageInput(args[0])]
+}
+
+export const decodeEventMigrationReviewArgs: ArgsDecoder<[ReturnType<typeof decodeEventMigrationReviewInput>]> = (args) => {
+  exactArgs(args, 1)
+  return [decodeEventMigrationReviewInput(args[0])]
+}
+
+export const decodeEventMigrationCancelArgs = decodeEventIdentifierArgs
+
+export const decodeOptionalEventOperationIdArgs: ArgsDecoder<[string | undefined]> = (args) => {
+  if (args.length > 1) invalid('arguments', '参数数量不能超过 1')
+  return [args.length === 0 || args[0] === undefined ? undefined : decodeEventOperationGrant(args[0])]
+}
 
 export const decodeEventCandidateCreateArgs: ArgsDecoder<[EventCandidateCreateInput]> = (args) => {
   exactArgs(args, 1)

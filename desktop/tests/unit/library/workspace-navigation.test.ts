@@ -12,12 +12,18 @@ import {
 
 test('declares one ordered V3 creation hierarchy and keeps settings separate', () => {
   assert.deepEqual(workspaceCreationNavigation.map((group) => group.id), [
-    'definition', 'materials', 'foundation', 'chronicle', 'planning', 'manuscript'
+    'group', 'definition', 'materials', 'foundation', 'chronicle', 'planning', 'manuscript'
   ])
-  assert.deepEqual(workspaceCreationNavigation.map((group) => group.sequence), ['01', '02', '03', '04', '05', '06'])
+  assert.deepEqual(workspaceCreationNavigation.map((group) => group.sequence), ['CHAT', '01', '02', '03', '04', '05', '06'])
   assert.equal(workspaceNavigationTree.at(-1)?.id, 'settings')
   assert.equal(workspaceNavigationTree.at(-1)?.sequence, 'SYS')
   assert.ok(!workspaceCreationNavigation.some((group) => group.id === 'preparation'))
+})
+
+test('book group has one canonical destination beside definition and material stages', () => {
+  assert.equal(groupForLocation({ active: 'group' }).id, 'group')
+  assert.equal(leafForLocation({ active: 'group' })?.id, 'group-chat')
+  assert.equal(groupForLocation({ active: 'unknown' }).id, 'definition')
 })
 
 test('planning owns all outline documents and their supporting views without a second total-outline parent', () => {

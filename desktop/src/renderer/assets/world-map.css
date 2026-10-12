@@ -2,7 +2,7 @@
 .world-map { position:relative; display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; height:100%; padding:0; overflow:hidden; color:var(--color-ink); background:var(--color-surface); font:12px/1.6 var(--sans); container-type:inline-size; }
 .world-map .map-heading { display:flex; align-items:center; flex:none; gap:20px; min-height:66px; padding:10px 20px; box-sizing:border-box; margin:0; border-bottom:1px solid var(--color-line); }
 .map-title { flex:none; border-left:3px solid var(--color-ink); padding-left:10px; }
-.world-map .map-title h2 { margin:0; font:600 22px/1.25 var(--serif); letter-spacing:.08em; }
+.world-map .map-title h2 { margin:0; font:600 var(--type-section-title)/1.4 var(--serif); letter-spacing:.02em; }
 .map-code { font:9px/1.5 Consolas,monospace; letter-spacing:.1em; color:var(--color-muted); }
 .world-map .map-search { display:flex; align-items:center; flex:1; min-width:100px; max-width:420px; gap:8px; margin:0 0 0 auto; padding:0 10px; border:1px solid var(--color-line); color:var(--color-muted); }
 .world-map .map-search input { width:100%; border:0; background:transparent; box-shadow:none; padding:8px 0; min-height:34px; }
@@ -60,7 +60,7 @@
 .map-ground-rings::after { content:''; position:absolute; inset:-4px -8px; border:1px solid #F04A23; border-radius:50%; opacity:.8; }
 .map-empty-grid { position:absolute; inset:50% auto auto 50%; transform:translate(-50%,-50%); display:flex; align-items:center; flex-direction:column; gap:15px; width:min(85%,450px); text-align:center; color:#F2EEE4; cursor:default; }
 .map-empty-grid .map-empty-symbol { font:50px/1.1 var(--serif); color:#96B3A5; }
-.map-empty-grid > small { color:#BACEC3; font:9px/1.5 Consolas,monospace; letter-spacing:.12em; }
+.narrative-terminal.redesigned-studio .world-map .map-empty-grid > small { color:#BACEC3; font:var(--type-meta)/1.5 var(--sans); letter-spacing:.02em; }
 .map-empty-grid > b { font:500 25px/1.5 var(--serif); letter-spacing:.08em; }
 .map-empty-grid p { color:#D0DED6; font:12px/1.9 var(--sans); max-width:29em; margin:0; }
 .map-empty-actions { display:flex; gap:8px; margin:6px 0; }

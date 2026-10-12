@@ -113,12 +113,14 @@ test('current schema retains empty v40 receipt structures, legacy rows and origi
     assert.equal(after.version, WORKSPACE_DATABASE_SCHEMA_VERSION)
     for (const [table, rows] of Object.entries(before.rows)) {
       const actual = table === 'schema_migrations' ? after.rows[table]!.filter(row => Number(row.version) <= 39) : after.rows[table]
-      const expected = table === 'projects' ? rows.map(row => ({ ...row, current_schema_version: WORKSPACE_DATABASE_SCHEMA_VERSION, text_authority: 'legacy-sqlite' })) : rows
+      const expected = table === 'projects' ? rows.map(row => ({ ...row, current_schema_version: WORKSPACE_DATABASE_SCHEMA_VERSION, text_authority: 'legacy-sqlite' })) : ['body_versions', 'outline_versions'].includes(table) ? rows.map(row => ({ ...row, review_application_id: null })) : rows
       assert.deepEqual(actual?.map(row => ({ ...row })), expected.map(row => ({ ...row })), table)
     }
     for (const item of before.schema.filter(row => row.name !== 'projects_schema_version_v39_after_insert')) {
       const expected = item.name === 'projects' ? { ...item,
         sql: String(item.sql).replace(/\)$/, ", text_authority TEXT NOT NULL DEFAULT 'legacy-sqlite'\n  CHECK(text_authority IN ('legacy-sqlite', 'files-v1')))") } : item
+      if (['body_versions', 'outline_versions'].includes(String(item.name))) expected.sql = String(item.sql).replace(',\n  UNIQUE', ', review_application_id TEXT REFERENCES document_review_applications(id),\n  UNIQUE')
+      if (item.name === 'body_versions_ai_task_reference_guard') expected.sql = String(item.sql).replace('BEFORE INSERT ON body_versions\nBEGIN', 'BEFORE INSERT ON body_versions\nWHEN NEW.review_application_id IS NULL\nBEGIN')
       assert.deepEqual({ ...after.schema.find(row => row.name === item.name) }, { ...expected })
     }
     for (const table of eventMigrationReceiptTables) assert.equal(after.rows[table]!.length, 0)

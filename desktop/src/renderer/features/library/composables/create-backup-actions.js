@@ -49,6 +49,7 @@ export function createLibraryBackupActions(ports) {
   }
 
   async function runAutomaticBackup(showNotice = true) {
+    if (ports.desktop.app.hosted?.readOnly) return
     if (
       !ports.current.value ||
       ports.autoBackupRunning.value ||

@@ -232,12 +232,14 @@ test('map decoders strictly reject extra keys, untrimmed/duplicate locations and
   const chapter = { id: 90, position: 1, title: '原稿' }
   const event = { id: 'canonical:fact-1', source: 'canonical', sourceId: 'fact-1', title: '到站', time: '清晨', characters: ['旅人'], location: '旧车站', event: '到达', result: '', chapterId: 90 }
   assert.deepEqual(decodeWorldMapView({ ...layout, events: [event], chapters: [chapter] }).events, [event])
+  const versioned = { ...event, versionId: 'version-1', phase: 'planned' }
+  assert.deepEqual(decodeWorldMapView({ ...layout, events: [versioned], chapters: [chapter] }).events, [versioned])
   const direct = { ...event, id: 'direct:fact-1', source: 'direct', chapterId: null }
   assert.deepEqual(decodeWorldMapView({ ...layout, events: [direct], chapters: [] }).events, [direct])
   for (const invalidEvent of [
     { ...event, id: 'bare-id' }, { ...event, id: 'direct:fact-1' },
     { ...event, sourceId: 'different-fact' }, { ...event, chapterId: 91 },
-    { ...direct, chapterId: 90 }
+    { ...direct, chapterId: 90 }, { ...versioned, phase: 'unknown' }, { ...versioned, versionId: '' }
   ]) assert.throws(() => decodeWorldMapView({ ...layout, events: [invalidEvent], chapters: [chapter] }), { code: 'VALIDATION_ERROR' })
   assert.throws(() => decodeWorldMapView({ ...layout, events: [event], chapters: [] }), { code: 'VALIDATION_ERROR' })
 })

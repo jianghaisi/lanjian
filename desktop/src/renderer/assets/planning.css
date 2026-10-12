@@ -1,13 +1,7 @@
 /* Planning shares the Chronicle archive palette; layout remains document-first. */
-.narrative-terminal.redesigned-studio[data-destination=planning] { --color-paper:#F2EEE4; --color-surface:#F8F4EA; --color-ink:#17211E; --color-muted:#66716A; --color-line:#D6D5C9; --color-jade:#448B79; --color-orange:#FF6337; }
-:root[data-theme=moye] .narrative-terminal.redesigned-studio[data-destination=planning] { --color-paper:#1C2924; --color-surface:#24352E; --color-ink:#F2EEE4; --color-muted:#B7C5BA; --color-line:#46594D; --color-jade:#82BFA8; }
 .narrative-terminal.redesigned-studio.studio:not(.library-mode):not(.writing-focus)[data-destination=planning] { --explorer-layout-width:clamp(240px,var(--explorer-width,280px),340px); }
 .planning-sidebar { grid-column:2; grid-row:2; display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; background:var(--color-paper); color:var(--color-ink); border-right:1px solid var(--color-line); font-family:var(--sans); }
-.planning-sidebar-heading { display:flex; align-items:center; justify-content:space-between; padding:24px 20px 18px; gap:12px; }
-.planning-sidebar-heading h2 { font:600 25px/1.3 var(--serif); letter-spacing:.1em; margin:0 0 5px; }
-.planning-sidebar-heading small { font:9px/1.5 Consolas,monospace; letter-spacing:.12em; color:var(--color-muted); }
-.planning-sidebar-heading > span { font:11px var(--sans); color:var(--color-muted); white-space:nowrap; }
-.planning-search { display:flex; flex:none; align-items:center; gap:8px; margin:0 14px 15px; padding:9px 10px; border:1px solid var(--color-line); background:var(--color-surface); color:var(--color-muted); }
+.planning-search { display:flex; flex:none; align-items:center; gap:8px; margin:14px 14px 15px; padding:9px 10px; border:1px solid var(--color-line); background:var(--color-surface); color:var(--color-muted); }
 .planning-search input { border:0; outline:0; background:transparent; color:var(--color-ink); width:100%; min-width:0; font:12px/1.5 var(--sans); }
 .planning-sidebar button { cursor:pointer; color:inherit; font-family:var(--sans); }
 .planning-sidebar button:disabled { cursor:wait; opacity:.5; }
@@ -47,7 +41,8 @@
 .planning-tools > button { width:100%; display:flex; align-items:center; gap:8px; border:1px solid var(--color-line); background:transparent; min-height:35px; padding:8px 10px; margin-top:6px; text-align:left; font-size:12px; }
 .planning-tools > button span:last-child { margin-left:auto; color:var(--color-jade); }
 .planning-tools > button[aria-current=page] { border-left:3px solid var(--color-orange); background:color-mix(in srgb,var(--color-ink) 7%,var(--color-paper)); }
-.narrative-terminal.redesigned-studio[data-destination=planning] > .workbench { grid-column:3; background:var(--color-surface); color:var(--color-ink); }
+.narrative-terminal.redesigned-studio[data-destination=planning]:not(.writing-focus) > .workbench { grid-column:3; background:var(--color-surface); color:var(--color-ink); }
+.studio.writing-focus > .planning-sidebar { display:none; }
 .narrative-terminal.redesigned-studio[data-destination=planning] .outline-editor.document-editor { display:flex; flex-direction:column; gap:0; padding:0 26px; background:var(--color-surface); color:var(--color-ink); }
 .narrative-terminal.redesigned-studio[data-destination=planning] .outline-writing-toolbar { flex:none; min-height:64px; padding:12px 0!important; background:transparent; border-color:var(--color-line)!important; }
 .narrative-terminal.redesigned-studio[data-destination=planning] .outline-document-state { display:grid; gap:4px; }
@@ -66,12 +61,23 @@
 .planning-example b { margin-right:8px; font:11px var(--sans); color:var(--color-jade); }
 .planning-writing-help small { display:inline-block; margin-left:12px; font-size:10px; }
 .planning-empty-editor { display:grid; place-content:center; flex:1; text-align:center; padding:30px; }
-.planning-empty-editor h3 { font:600 24px var(--serif); }
+.planning-empty-editor h3 { font:600 var(--type-card-title)/1.4 var(--serif); }
 .planning-empty-editor p { font:13px/1.8 var(--sans); color:var(--color-muted); }
 .planning-dialog { width:min(430px,calc(100vw - 48px)); padding:25px; background:var(--surface); color:var(--ink); border:1px solid var(--line); font:13px/1.8 var(--sans); }
 .planning-dialog::backdrop { background:rgb(0 0 0 / .4); }
 .planning-dialog h2 { font:600 22px var(--serif); margin:0 0 14px; }
 .planning-dialog input { width:100%; box-sizing:border-box; background:var(--surface-raised); color:inherit; border:1px solid var(--line); padding:10px; }
 .planning-dialog footer { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; margin-top:22px; }
-@media(max-width:1100px) { .narrative-terminal.redesigned-studio.studio:not(.library-mode):not(.writing-focus)[data-destination=planning] { --explorer-layout-width:240px; } .narrative-terminal.redesigned-studio[data-destination=planning] .outline-editor.document-editor { padding-inline:16px; } .planning-sidebar-heading { padding:18px 16px 14px; } }
+@media(max-width:1100px) { .narrative-terminal.redesigned-studio.studio:not(.library-mode):not(.writing-focus)[data-destination=planning] { --explorer-layout-width:240px; } .narrative-terminal.redesigned-studio[data-destination=planning] .outline-editor.document-editor { padding-inline:16px; } }
 @media(prefers-reduced-motion:reduce) { .planning-sidebar * { transition:none!important; } }
+
+/* Full paper editor shared with prose; planning adds only document actions. */
+.planning-document-workspace { position:relative; display:flex; flex-direction:column; min-width:0; min-height:0; height:100%; overflow:hidden; background:var(--surface); }
+.planning-document-workspace > .outline-writing-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:.5rem; flex:none; width:auto; margin:0 .75rem; padding:.5rem 0 !important; }
+.planning-document-workspace .outline-toolbar-actions { flex-wrap:wrap; }
+.planning-document-workspace > .planning-writing-help { flex:none; margin-inline:.75rem; max-height:180px; overflow:auto; }
+.planning-document-workspace > .annotated-document-editor { flex:1; height:auto; }
+.planning-document-workspace .outline-document-state span { font-size:.8125rem; }
+.planning-document-workspace:has(.is-focus-mode) > .outline-writing-toolbar,
+.planning-document-workspace:has(.is-focus-mode) > .planning-writing-help { display:none; }
+.outline-storage-warning { display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding:.5rem .75rem; color:var(--cinnabar); font-size:.75rem; }

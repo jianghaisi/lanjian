@@ -1,4 +1,8 @@
 import { characterStateResult, planningStatusResult, type IpcValueDecoder } from '../core/ipc-result-contracts'
+import { decodeChapterStoryConstraints } from './chapter-story-contract'
+import { decodeCreativePolicyRecords } from '../writing-plugins/creative-policy'
+import { uuid as validUuid } from '../core/validation'
+import { decodeChapterEventAdoptionArgs, MAX_CHAPTER_ADOPTION_EVENTS } from './chapter-event-contracts'
 
 const jobChannels = ['planning:start', 'planning:job', 'planning:cancel']
 const skeletonJobChannels = ['planning:start-chapter-skeleton', 'planning:chapter-skeleton-job', 'planning:cancel-chapter-skeleton']
@@ -8,6 +12,9 @@ export const planningIpcValueDecoders: Readonly<Record<string, IpcValueDecoder>>
   ...Object.fromEntries(jobChannels.map((channel) => [channel, planningJob])),
   ...Object.fromEntries(skeletonJobChannels.map((channel) => [channel, skeletonJob])),
   ...Object.fromEntries(detailJobChannels.map((channel) => [channel, detailJob])),
+  'planning:generate-chapter-story': (value, path) => { const v = object(value, path); if (!text(v.content, `${path}.content`, 100_000).trim()) invalid(path); return value },
+  'planning:prepare-chapter-story-contract': (value, path) => { const v = object(value, path); validUuid(v.token, `${path}.token`); integer(v.chapterId, `${path}.chapterId`, 1, 1_000_000); formalDigest(v.outlineHash, `${path}.outlineHash`); try { decodeChapterStoryConstraints(v.constraints) } catch { invalid(`${path}.constraints`) }; return value },
+  'planning:adopt-chapter-story-contract': planningStatusResult,
   'planning:draft': nullable(planningPackage),
   'planning:save-draft': planningPackage,
   'planning:discard-draft': successResult,
@@ -19,6 +26,10 @@ export const planningIpcValueDecoders: Readonly<Record<string, IpcValueDecoder>>
   'planning:preview-volume-outline-adoption': volumeOutlinePreview,
   'planning:adopt-volume-outline': proposalAndPlanning('volumeOutlines', true),
   'planning:preview-chapter-detail-adoption': chapterDetailPreview,
+  'planning:preview-chapter-events': chapterEventPreview,
+  'planning:preview-chapter-event-adoption': chapterEventAdoptionPreview,
+  'planning:adopt-chapter-event': chapterEventAdoptionResult,
+  'planning:recover-chapter-event': chapterEventAdoptionResult,
   'planning:adopt-chapter-detail': proposalAndPlanning('chapterOutlines', true),
   'planning:preview-character-seed-adoption': characterSeedPreview,
   'planning:adopt-character-seeds': characterSeedResult,
@@ -29,11 +40,62 @@ export const planningIpcValueDecoders: Readonly<Record<string, IpcValueDecoder>>
   'planning:preview-cheat-system-adoption': cheatSystemPreview,
   'planning:adopt-cheat-system': overviewResult('cheatSystem'),
   'planning:chapter-skeleton-status': skeletonStatus,
+  'planning:preview-formal-skeleton': formalSkeletonPreview,
+  'planning:adopt-formal-skeleton': formalSkeletonView,
   'planning:chapter-detail-statuses': listOf(detailStatus)
+}
+
+function chapterEventAdoptionPreview(value: unknown, path: string): unknown {
+  const v = object(value, path)
+  validUuid(v.token, `${path}.token`); validUuid(v.operationId, `${path}.operationId`)
+  identifier(v.proposalId, `${path}.proposalId`)
+  integer(v.chapterId, `${path}.chapterId`, 1, 1000000)
+  if (!text(v.chapterContent, `${path}.chapterContent`, 500000).trim()) invalid(`${path}.chapterContent`)
+  if (typeof v.replacesChapter !== 'boolean') invalid(`${path}.replacesChapter`)
+  integer(v.existingEventCount, `${path}.existingEventCount`, 0, 50000)
+  if (v.replacementImpact !== undefined) {
+    const impact = object(v.replacementImpact, `${path}.replacementImpact`)
+    for (const key of ['chapterIds', 'skeletonChapterIds']) {
+      const ids = array(impact[key], `${path}.replacementImpact.${key}`)
+      if (ids.length > 50000 || new Set(ids).size !== ids.length) invalid(`${path}.replacementImpact.${key}`)
+      ids.forEach(id => integer(id, `${path}.replacementImpact.${key}`, 1, 1000000))
+    }
+  }
+  if (Array.isArray(v.event)) invalid(`${path}.event`)
+  decodeChapterEventAdoptionArgs([v.proposalId, v.chapterId, v.event])
+  if (v.events !== undefined) {
+    if (!Array.isArray(v.events) || v.events.length < 2) invalid(`${path}.events`)
+    const [, , events] = decodeChapterEventAdoptionArgs([v.proposalId, v.chapterId, v.events])
+    const [, , event] = decodeChapterEventAdoptionArgs([v.proposalId, v.chapterId, v.event])
+    if (!Array.isArray(events) || JSON.stringify(events[0]) !== JSON.stringify(event)) invalid(`${path}.event`)
+  }
+  return value
+}
+function chapterEventAdoptionResult(value: unknown, path: string): unknown {
+  const v = object(value, path)
+  integer(v.chapterId, `${path}.chapterId`, 1, 1000000)
+  validUuid(v.eventId, `${path}.eventId`); validUuid(v.eventVersionId, `${path}.eventVersionId`)
+  if (typeof v.mirrorsPending !== 'boolean' || typeof v.candidateReceiptPending !== 'boolean') invalid(path)
+  if (v.events !== undefined) {
+    if (!Array.isArray(v.events) || v.events.length < 2 || v.events.length > MAX_CHAPTER_ADOPTION_EVENTS) invalid(`${path}.events`)
+    const ids = new Set<string>()
+    for (const item of v.events as unknown[]) {
+      const event = object(item, `${path}.events`)
+      validUuid(event.eventId, `${path}.eventId`); validUuid(event.eventVersionId, `${path}.eventVersionId`)
+      for (const id of [event.eventId, event.eventVersionId] as string[]) {
+        if (ids.has(id)) invalid(`${path}.events`)
+        ids.add(id)
+      }
+    }
+    const first = (v.events as Array<Record<string, unknown>>)[0]
+    if (first.eventId !== v.eventId || first.eventVersionId !== v.eventVersionId) invalid(`${path}.events`)
+  }
+  return value
 }
 
 function planningPackage(value: unknown, path: string): unknown {
   const result = object(value, path)
+  if (result.creativePolicy !== undefined) decodeCreativePolicyRecords(result.creativePolicy)
   identifier(result.id, `${path}.id`)
   identifier(result.workItemId, `${path}.workItemId`)
   date(result.createdAt, `${path}.createdAt`)
@@ -60,16 +122,19 @@ function characterSeed(value: unknown, path: string): void {
 function volume(value: unknown, path: string): void {
   const result = object(value, path)
   positive(result.order, `${path}.order`)
+  if (result.storyContent !== undefined && !text(result.storyContent, `${path}.storyContent`, 100_000).trim()) invalid(`${path}.storyContent`)
   for (const field of ['title', 'goal', 'summary', 'ending'] as const) text(result[field], `${path}.${field}`, 2_000_000)
 }
 
 function chapterSkeleton(value: unknown, path: string): void {
   const result = object(value, path)
+  if (result.creativePolicy !== undefined) decodeCreativePolicyRecords(result.creativePolicy)
   date(result.generatedAt, `${path}.generatedAt`)
   fingerprints(result.basedOn, `${path}.basedOn`, ['totalOutlineFingerprint', 'volumePlanFingerprint'])
   positive(result.targetWordsPerChapter, `${path}.targetWordsPerChapter`)
   array(result.chapters, `${path}.chapters`).forEach((item, index) => {
     const chapter = object(item, `${path}.chapters[${index}]`)
+    if (chapter.storyContent !== undefined && !text(chapter.storyContent, `${path}.chapters[${index}].storyContent`, 100_000).trim()) invalid(`${path}.storyContent`)
     for (const field of ['chapter', 'volume', 'volumeChapter'] as const) positive(chapter[field], `${path}.chapters[${index}].${field}`)
     for (const field of ['title', 'coreEvent', 'location', 'result'] as const) text(chapter[field], `${path}.chapters[${index}].${field}`, 100_000)
     stringArray(chapter.characters, `${path}.chapters[${index}].characters`)
@@ -78,11 +143,15 @@ function chapterSkeleton(value: unknown, path: string): void {
 
 function chapterDetailVolume(value: unknown, path: string): void {
   const result = object(value, path)
+  if (result.creativePolicy !== undefined) decodeCreativePolicyRecords(result.creativePolicy)
   positive(result.volume, `${path}.volume`)
   date(result.generatedAt, `${path}.generatedAt`)
   fingerprints(result.basedOn, `${path}.basedOn`, ['totalOutlineFingerprint', 'volumeOutlineFingerprint', 'skeletonFingerprint'])
+  const sources = object(result.basedOn, `${path}.basedOn`)
+  if (sources.formalSkeletonFingerprint !== undefined) formalDigest(sources.formalSkeletonFingerprint, `${path}.basedOn.formalSkeletonFingerprint`)
   array(result.chapters, `${path}.chapters`).forEach((item, index) => {
     const chapter = object(item, `${path}.chapters[${index}]`)
+    if (chapter.storyContent !== undefined && !text(chapter.storyContent, `${path}.chapters[${index}].storyContent`, 100_000).trim()) invalid(`${path}.storyContent`)
     for (const field of ['chapter', 'volume', 'volumeChapter'] as const) positive(chapter[field], `${path}.chapters[${index}].${field}`)
     for (const field of ['title', 'entryState', 'exitState'] as const) text(chapter[field], `${path}.chapters[${index}].${field}`, 100_000)
     for (const field of ['beats', 'allowedFacts', 'forbiddenEvents'] as const) stringArray(chapter[field], `${path}.chapters[${index}].${field}`)
@@ -115,6 +184,7 @@ function receipt(value: unknown, path: string, fingerprintFields: readonly strin
 
 function planningJob(value: unknown, path: string): unknown {
   const result = baseJob(value, path)
+  if (result.rawResult !== undefined) text(result.rawResult, `${path}.rawResult`, 3_000_000)
   oneOf(result.stage, ['blueprint', 'totalOutline', 'volumePlan'], `${path}.stage`)
   const progress = object(result.progress, `${path}.progress`)
   count(progress.completed, `${path}.progress.completed`)
@@ -128,6 +198,7 @@ function planningJob(value: unknown, path: string): unknown {
 
 function skeletonJob(value: unknown, path: string): unknown {
   const result = baseJob(value, path)
+  if (result.rawResult !== undefined) text(result.rawResult, `${path}.rawResult`, 3_000_000)
   identifier(result.proposalId, `${path}.proposalId`)
   literal(result.stage, 'chapterSkeleton', `${path}.stage`)
   progress(result.progress, `${path}.progress`)
@@ -138,6 +209,7 @@ function skeletonJob(value: unknown, path: string): unknown {
 
 function detailJob(value: unknown, path: string): unknown {
   const result = baseJob(value, path)
+  if (result.rawResult !== undefined) text(result.rawResult, `${path}.rawResult`, 3_000_000)
   identifier(result.proposalId, `${path}.proposalId`)
   positive(result.volume, `${path}.volume`)
   literal(result.stage, 'chapterDetail', `${path}.stage`)
@@ -204,6 +276,7 @@ function volumeStructurePreview(value: unknown, path: string): unknown {
 function volumeOutlinePreview(value: unknown, path: string): unknown {
   const result = previewBase(value, path)
   positive(result.order, `${path}.order`)
+  if (result.storyContent !== undefined && !text(result.storyContent, `${path}.storyContent`, 100_000).trim()) invalid(`${path}.storyContent`)
   fingerprint(result.parentFingerprint, `${path}.parentFingerprint`)
   previewDocument(result.current, `${path}.current`, true)
   candidateDocument(result.candidate, `${path}.candidate`)
@@ -437,6 +510,11 @@ function positive(value: unknown, path: string): number {
   return Number(value)
 }
 
+function integer(value: unknown, path: string, min: number, max: number): number {
+  if (!Number.isSafeInteger(value) || Number(value) < min || Number(value) > max) invalid(path)
+  return Number(value)
+}
+
 function count(value: unknown, path: string): number {
   if (!Number.isSafeInteger(value) || Number(value) < 0) invalid(path)
   return Number(value)
@@ -457,4 +535,91 @@ function stringArray(value: unknown, path: string): void {
 
 function invalid(path: string): never {
   throw new TypeError(`Invalid IPC result at ${path}`)
+}
+
+function formalSkeletonView(value: unknown, path: string): unknown {
+  const v = object(value, path)
+  integer(v.volume, `${path}.volume`, 1, 1000)
+  formalDigest(v.fingerprint, `${path}.fingerprint`)
+  bool(v.canAdopt, `${path}.canAdopt`)
+  text(v.reason, `${path}.reason`, 2000)
+  const entries = array(v.entries, `${path}.entries`)
+  if (entries.length > 50000) throw new Error('Formal skeleton result exceeds bounds')
+  const ids = new Set<number>()
+  entries.forEach((raw, index) => {
+    const row = object(raw, `${path}.entries[${index}]`)
+    integer(row.chapter, `${path}.chapter`, 1, 1000000)
+    if (ids.has(row.chapter as number)) throw new Error('Duplicate skeleton chapter')
+    ids.add(row.chapter as number)
+    text(row.title, `${path}.title`, 200)
+    if (row.revision !== null) formalDigest(row.revision, `${path}.revision`)
+    oneOf(row.status, ['untracked', 'current', 'stale', 'changed'], `${path}.status`)
+    array(row.reasons, `${path}.reasons`).forEach(reason => text(reason, `${path}.reason`, 2000))
+  })
+  array(v.affectedChapterIds, `${path}.affectedChapterIds`).forEach(id => {
+    integer(id, `${path}.affectedChapterId`, 1, 1000000)
+    if (!ids.has(id as number)) throw new Error('Unknown affected skeleton chapter')
+  })
+  return value
+}
+function formalSkeletonPreview(value: unknown, path: string): unknown {
+  formalSkeletonView(value, path)
+  const v = object(value, path)
+  identifier(v.token, `${path}.token`)
+  identifier(v.proposalId, `${path}.proposalId`)
+  return value
+}
+
+function formalDigest(value: unknown, path: string): void {
+  if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)) invalid(path)
+}
+
+function chapterEventPreview(value: unknown, path: string): unknown {
+  const v = object(value, path)
+  identifier(v.workItemId, `${path}.workItemId`); identifier(v.proposalId, `${path}.proposalId`)
+  integer(v.chapterId, `${path}.chapterId`, 1, 1000000)
+  formalDigest(v.fingerprint, `${path}.fingerprint`)
+  oneOf(v.freshness, ['current', 'stale', 'untracked'], `${path}.freshness`)
+  const c = object(v.candidate, `${path}.candidate`)
+  if (c.time !== null) invalid(`${path}.candidate.time`)
+  text(c.title, `${path}.candidate.title`, 200)
+  for (const key of ['location', 'coreEvent', 'plannedResult', 'entryState', 'exitState']) text(c[key], `${path}.candidate.${key}`, 5000)
+  const texts = (input: unknown, name: string, max: number, length: number) => {
+    const values = array(input, name)
+    if (!values.length || values.length > max) invalid(name)
+    values.forEach((item, index) => { text(item, `${name}[${index}]`, length); if (!(item as string).trim()) invalid(name) })
+  }
+  texts(c.characters, `${path}.candidate.characters`, 500, 120)
+  texts(c.beats, `${path}.candidate.beats`, 8, 5000)
+  const events = array(v.formalEvents, `${path}.formalEvents`)
+  if (events.length > 200) invalid(`${path}.formalEvents`)
+  const ids = new Set<unknown>()
+  events.forEach((item, index) => {
+    const e = object(item, `${path}.formalEvents[${index}]`)
+    identifier(e.id, `${path}.event.id`)
+    if (ids.has(e.id)) invalid(`${path}.formalEvents`)
+    ids.add(e.id)
+    if (e.version !== null) identifier(e.version, `${path}.event.version`)
+    if (e.replaceable !== undefined) bool(e.replaceable, `${path}.event.replaceable`)
+    oneOf(e.phase, ['planned', 'realized', 'deviated', 'legacy-unknown'], `${path}.event.phase`)
+    for (const key of ['time', 'location', 'event']) text(e[key], `${path}.event.${key}`, 100000)
+    if (e.result !== null) text(e.result, `${path}.event.result`, 100000)
+    const people = array(e.characters, `${path}.event.characters`)
+    if (people.length > 1000) invalid(`${path}.event.characters`)
+    people.forEach(person => text(person, `${path}.event.character`, 2000))
+  })
+  const findings = array(v.findings, `${path}.findings`)
+  if (findings.length < 2 || findings.length > 3) invalid(`${path}.findings`)
+  const codes = new Set<unknown>()
+  findings.forEach(item => {
+    const f = object(item, `${path}.finding`)
+    oneOf(f.code, ['TIME_UNSPECIFIED', 'SOURCE_CHANGED', 'UNTRACKED_CANDIDATE', 'SEMANTIC_REVIEW_REQUIRED'], `${path}.finding.code`)
+    if (codes.has(f.code)) invalid(`${path}.findings`)
+    codes.add(f.code); text(f.message, `${path}.finding.message`, 2000)
+  })
+  if (!codes.has('TIME_UNSPECIFIED') || !codes.has('SEMANTIC_REVIEW_REQUIRED')
+    || (v.freshness === 'current' && findings.length !== 2)
+    || (v.freshness === 'stale' && !codes.has('SOURCE_CHANGED'))
+    || (v.freshness === 'untracked' && !codes.has('UNTRACKED_CANDIDATE'))) invalid(`${path}.findings`)
+  return value
 }

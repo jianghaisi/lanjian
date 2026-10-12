@@ -1,9 +1,11 @@
 <script setup>
 import ChapterTreeList from '../../features/manuscript/components/ChapterTreeList.vue'
+import ManuscriptExportDialog from '../../features/manuscript/components/ManuscriptExportDialog.vue'
 import StudioIcon from '../../ui/StudioIcon.vue'
 import { timelineEventTitle } from '../../features/timeline/timeline-workbench'
 import { categoryForSettingsSection } from '../services/settings-navigation'
-import { toRefs } from 'vue'
+import { ref, toRefs } from 'vue'
+import { ArrowDownUp, Download, Upload } from '@lucide/vue'
 
 const props = defineProps({ scope: { type: Object, required: true } })
 const {
@@ -31,6 +33,7 @@ const {
   current,
   eventPlacementLabel,
   explorerScrolling,
+  exportSelectedChapters,
   foreshadowLedger,
   foreshadowLedgerLoaded,
   formatChapterTrashTime,
@@ -59,6 +62,8 @@ const {
   researchSourcesIssue,
   restoreDeletedChapter,
   resumeImportManifest,
+  workspaceRecoveryBusy, workspaceRecoveryFeedback, recheckWorkspaceIssues,
+  workspaceIssueDiagnostic, copyWorkspaceIssueDiagnostic,
   revealBootstrapIssue,
   sectionNavigation,
   selectChapter,
@@ -83,15 +88,26 @@ const {
   worldMapDirty,
   worldMapView
 } = toRefs(props.scope)
+const transferMenu = ref(null)
+const exportDialog = ref(null)
+function positionTransferMenu(event) {
+  const bounds = event.currentTarget.getBoundingClientRect()
+  transferMenu.value.style.top = `${bounds.bottom + 6}px`
+  transferMenu.value.style.left = `${Math.max(8, Math.min(bounds.right - 264, window.innerWidth - 280))}px`
+}
+function transfer(action) {
+  transferMenu.value.hidePopover()
+  if (action === 'export') return exportDialog.value?.open()
+  return openTxtImport.value(action)
+}
 </script>
 
 <template>
   <aside class="explorer" :class="{ 'is-scrolling': explorerScrolling }" @scroll.passive="noteExplorerScroll">
-    <header v-if="active === 'desk'" class="archive-chapter-heading">
-      <h2>{{ chapterTrashOpen ? '章节回收站' : '章节目录' }}</h2>
-      <small>{{ chapterTrashOpen ? `RECENT / ${chapterTrashEntries.length}` : `CHAPTERS / ${chapters.length}` }}</small
-      ><i aria-hidden="true"></i>
-    </header>
+    <nav v-if="activeWorkspaceGroup.id === 'manuscript'" class="manuscript-view-nav" aria-label="书稿视图">
+      <button type="button" data-nav-leaf="chapters" :aria-current="active === 'desk' ? 'page' : undefined" @click="selectWorkspaceLeaf('chapters')">正文</button>
+      <button type="button" data-nav-leaf="review" :aria-current="active === 'review' ? 'page' : undefined" @click="selectWorkspaceLeaf('review')">审校</button>
+    </nav>
     <div
       v-if="active === 'desk' && !chapterTrashOpen"
       class="chapter-explorer-tools"
@@ -134,22 +150,18 @@ const {
       >
         <StudioIcon name="trash" :size="16" />
       </button>
+      <button class="chapter-new-compact" type="button" aria-label="导入或导出文稿" title="导入 / 导出" data-testid="chapter-transfer-toggle" popovertarget="chapter-transfer-menu" @click="positionTransferMenu"><ArrowDownUp :size="16" /></button>
+      <div ref="transferMenu" id="chapter-transfer-menu" class="chapter-transfer-menu" popover="auto" aria-label="文稿导入与导出">
+        <button type="button" data-testid="import-manuscript-in-book" :disabled="busy" @click="transfer('inside-work-item')"><Upload :size="16"/><span>导入文稿<small>识别章节，勾选后新建或追加</small></span></button>
+        <button type="button" data-testid="continue-manuscript-files" :disabled="busy" @click="transfer('create-from-files')"><Upload :size="16"/><span>从旧稿新建作品<small>添加多份正文、大纲和设定</small></span></button>
+        <button type="button" data-testid="export-manuscript-in-book" :disabled="busy || !chapters.length || Boolean(chapterOrderIssue)" @click="transfer('export')"><Download :size="16"/><span>批量导出<small>选择章节或整书 · TXT / Markdown</small></span></button>
+      </div>
     </div>
-    <div v-else-if="active === 'desk'" class="chapter-trash-toolbar">
+    <div v-else-if="active === 'desk'" class="chapter-trash-toolbar" aria-label="章节回收站">
       <button type="button" data-testid="close-chapter-trash" @click="chapterTrashOpen = false">
         <StudioIcon name="undo" :size="15" /><span>返回章节目录</span>
       </button>
     </div>
-    <button
-      v-if="active === 'desk' && !chapterTrashOpen"
-      class="control-button"
-      type="button"
-      data-testid="import-manuscript-in-book"
-      :disabled="busy"
-      @click="openTxtImport('inside-work-item')"
-    >
-      <StudioIcon name="manuscript" :size="16" /><span>导入文稿 / 旧稿接续</span>
-    </button>
     <nav
       v-if="sectionNavigation.length && activeWorkspaceGroup.id !== 'manuscript'"
       class="section-navigation"
@@ -223,6 +235,7 @@ const {
       </div>
     </details>
 
+    <p v-if="workspaceRecoveryFeedback" class="workspace-recovery-feedback" role="status" data-testid="workspace-recovery-feedback">{{ workspaceRecoveryFeedback }}</p>
     <details
       v-if="workspaceBootstrapIssues.length"
       class="bootstrap-issue-group"
@@ -232,7 +245,7 @@ const {
         <span
           ><i aria-hidden="true">!</i
           ><span
-            ><b>{{ workspaceBootstrapIssues.length }} 项文件待处理</b><small>原稿安全，展开选择恢复方式</small></span
+            ><b>{{ workspaceBootstrapIssues.length }} 项资料尚未加载</b><small>展开查看原因和处理方式</small></span
           ></span
         >
         <span class="bootstrap-issue-toggle"
@@ -250,16 +263,23 @@ const {
         >
           <header>
             <span>{{ issue.title }}</span
-            ><b>原稿安全</b>
+            ><b>{{ issue.reason === 'busy' ? '可重新检查' : '原文件保留' }}</b>
           </header>
           <p>
             {{ issue.message }}
             {{
-              issue.id === 'chapterOrderUnreadable'
+              issue.reason ? '' : issue.id === 'chapterOrderUnreadable'
                 ? '每份正文仍可只读核对，但叙事顺序未知；岚笺没有覆盖账本或正文。'
                 : '正式设定、大纲与正文仍可正常读取，岚笺没有覆盖原文件。'
             }}
           </p>
+          <div v-if="['unifiedEventsUnreadable', 'modelSettingsUnreadable'].includes(issue.id)" class="workspace-recovery-actions">
+            <button type="button" :disabled="busy || workspaceRecoveryBusy" data-testid="recheck-workspace-issues" @click="recheckWorkspaceIssues">
+              {{ workspaceRecoveryBusy ? '正在检查…' : '重新检查' }}
+            </button>
+            <button type="button" class="workspace-recovery-secondary" data-testid="copy-workspace-diagnostic" @click="copyWorkspaceIssueDiagnostic(issue)">复制诊断信息</button>
+            <details class="workspace-recovery-diagnostic"><summary>诊断信息</summary><pre>{{ workspaceIssueDiagnostic(issue) }}</pre></details>
+          </div>
           <button
             v-if="issue.recovery === 'quarantinePlanningDraft'"
             type="button"
@@ -279,7 +299,7 @@ const {
             保留原文件并使用内置提示词
           </button>
           <button
-            v-else-if="issue.recovery === 'manualReview'"
+            v-else-if="issue.recovery === 'manualReview' && issue.reason !== 'busy'"
             type="button"
             :data-testid="`reveal-bootstrap-issue-${issue.id}`"
             :disabled="busy"
@@ -606,7 +626,22 @@ const {
           没有找到相关设置。试试“模型”“备份”或“字体”。
         </p>
       </div>
-      <p class="settings-material-note">人物、地点与世界规则属于作品内容，请在“设定”中管理。</p>
+      <details class="settings-material-note"><summary>人物与世界在哪里？</summary><p>在“设定”中管理人物、地点与世界规则。</p></details>
     </template>
+    <ManuscriptExportDialog ref="exportDialog" :work-item="current" :chapters="chapters" :selected-id="selectedId" :volumes="outlinePlanning.volumes" :placements="outlinePlanning.chapterPlacements" :blocked="busy || Boolean(chapterOrderIssue)" :export-selection="exportSelectedChapters" />
   </aside>
 </template>
+
+<style scoped>
+.workspace-recovery-feedback { margin: 10px; padding: 10px; border: 1px solid var(--jade); color: var(--ink); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.workspace-recovery-actions { display: grid; gap: 8px; margin-block: 10px; }
+.workspace-recovery-actions .workspace-recovery-secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.workspace-recovery-diagnostic { color: var(--muted); font-size: 12px; }
+.workspace-recovery-diagnostic pre { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.chapter-transfer-menu { position:fixed; inset:auto; margin:0; width:264px; max-width:calc(100vw - 16px); padding:6px; border:1px solid var(--line); border-radius:4px; background:var(--surface); color:var(--ink); box-shadow:0 8px 24px #0004; }
+.chapter-transfer-menu button { display:flex; align-items:center; gap:10px; width:100%; padding:10px; border:0; background:transparent; color:var(--ink); text-align:left; font:500 13px/1.4 var(--sans); cursor:pointer; }
+.chapter-transfer-menu button:hover { background:var(--surface-muted); }
+.chapter-transfer-menu button:disabled { opacity:.5; cursor:default; }
+.chapter-transfer-menu button:focus-visible { outline:2px solid var(--jade); outline-offset:-2px; }
+.chapter-transfer-menu small { display:block; margin-top:3px; color:var(--muted); font-size:11px; }
+</style>

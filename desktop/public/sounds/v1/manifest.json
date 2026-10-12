@@ -1,0 +1,415 @@
+[
+  {
+    "id": "B15",
+    "file": "B15-boot-prelude.wav",
+    "source": "boot-access.mp3",
+    "source_sha256": "841e23542988f6cd37b20bc8feb03ece6eebb1703a652c3f24d42e7e8cefe103",
+    "sha256": "cf5863f19198e6ba4a4123203eb952940c39414d373cc96a99a3f3b320972773",
+    "duration": 12.8,
+    "sample_rate": 48000,
+    "channels": 2,
+    "source_start": 0,
+    "source_end": 11.42,
+    "loop": false,
+    "peak_dbfs": -11.05683656267951,
+    "processing": "original musical phrases and source transients; offline tail crossfades; no spectral resynthesis, new noise, pitch or speed change",
+    "edits": [
+      {
+        "name": "access-and-brand-musical-phrase",
+        "source_start": 0,
+        "source_end": 4.98,
+        "at": 0.015,
+        "gain": 1,
+        "fade_in": 0.012,
+        "fade_out": 0.18
+      },
+      {
+        "name": "scan-original-attack-and-tail",
+        "source_start": 5.45,
+        "source_end": 9.0,
+        "at": 4.85,
+        "gain": 0.85,
+        "fade_in": 0.075,
+        "fade_out": 0.22
+      },
+      {
+        "name": "scan-to-welcome-tonal-bridge",
+        "source_start": 8.78,
+        "source_end": 10.43,
+        "at": 8.18,
+        "gain": 0.62,
+        "fade_in": 0.22,
+        "fade_out": 0.28
+      },
+      {
+        "name": "welcome-rising-musical-phrase",
+        "source_start": 8.0,
+        "source_end": 10.44,
+        "at": 9.54,
+        "gain": 0.7,
+        "fade_in": 0.28,
+        "fade_out": 0.3
+      },
+      {
+        "name": "shutter-cover-8.79",
+        "source_start": 10.43,
+        "source_end": 10.74,
+        "at": 8.745,
+        "gain": 0.74,
+        "fade_in": 0.016,
+        "fade_out": 0.09
+      },
+      {
+        "name": "shutter-uncover-9.25",
+        "source_start": 10.76,
+        "source_end": 11.42,
+        "at": 9.158,
+        "gain": 0.64,
+        "fade_in": 0.018,
+        "fade_out": 0.22
+      },
+      {
+        "name": "shutter-cover-11.79",
+        "source_start": 10.43,
+        "source_end": 10.74,
+        "at": 11.745,
+        "gain": 0.74,
+        "fade_in": 0.016,
+        "fade_out": 0.09
+      },
+      {
+        "name": "shutter-uncover-12.25",
+        "source_start": 10.76,
+        "source_end": 11.42,
+        "at": 12.158,
+        "gain": 0.64,
+        "fade_in": 0.018,
+        "fade_out": 0.22
+      },
+      {
+        "name": "welcome-to-original-wave-tail",
+        "source_start": 9.4,
+        "source_end": 10.43,
+        "at": 11.77,
+        "gain": 0.4,
+        "fade_in": 0.2,
+        "fade_out": 0.16
+      }
+    ],
+    "render_gain": 0.37950421424267866,
+    "landmarks": [
+      {
+        "name": "access",
+        "visual_time": 0.14,
+        "asset_time": 0.14922916666666666,
+        "error_ms": 9.22916666666665
+      },
+      {
+        "name": "scan-entry",
+        "visual_time": 5,
+        "asset_time": 5.0058541666666665,
+        "error_ms": 5.854166666666494
+      },
+      {
+        "name": "welcome-cover",
+        "visual_time": 8.79,
+        "asset_time": 8.795416666666666,
+        "error_ms": 5.416666666667069
+      },
+      {
+        "name": "welcome-reveal",
+        "visual_time": 9.25,
+        "asset_time": 9.2473125,
+        "error_ms": -2.687500000000398
+      },
+      {
+        "name": "array-cover",
+        "visual_time": 11.79,
+        "asset_time": 11.789708333333333,
+        "error_ms": -0.29166666666569085
+      },
+      {
+        "name": "array-reveal",
+        "visual_time": 12.25,
+        "asset_time": 12.247354166666666,
+        "error_ms": -2.6458333333341244
+      }
+    ]
+  },
+  {
+    "id": "B16",
+    "file": "B16-boot-wave-loop.wav",
+    "source": "boot-access.mp3",
+    "source_sha256": "841e23542988f6cd37b20bc8feb03ece6eebb1703a652c3f24d42e7e8cefe103",
+    "sha256": "68ef38d4c6497f912acf474d4e0610270e8353da390484f1fdaaa7b0c05a8810",
+    "duration": 8.0,
+    "sample_rate": 48000,
+    "channels": 2,
+    "source_start": 5.25,
+    "source_end": 14.45,
+    "loop": true,
+    "peak_dbfs": -15.917600346881503,
+    "processing": "9.2s same-source passage; 1.2s circular splice yields exact 8s loop; gentle periodic leveling; common 65–6800Hz source palette, no pitch changes or layered old cues"
+  },
+  {
+    "id": "B17",
+    "file": "B17-boot-resolve.wav",
+    "source": "boot-access.mp3",
+    "source_sha256": "841e23542988f6cd37b20bc8feb03ece6eebb1703a652c3f24d42e7e8cefe103",
+    "sha256": "a2d668da7d56ec214506a35c1747cee1e078f80d6aa4610f0a0ccdb1ca3183b3",
+    "duration": 13.8,
+    "sample_rate": 48000,
+    "channels": 2,
+    "source_start": 0.5,
+    "source_end": 14.3,
+    "loop": false,
+    "peak_dbfs": -12.792299995169554,
+    "processing": "uninterrupted same-source passage; fixed 13s scene plus 0.8s overlap tail; gradual resolve; common 65–6800Hz source palette, no pitch changes or layered old cues"
+  },
+  {
+    "id": "B18",
+    "file": "B18-boot-idle-loop.wav",
+    "source": "boot-access.mp3",
+    "source_sha256": "841e23542988f6cd37b20bc8feb03ece6eebb1703a652c3f24d42e7e8cefe103",
+    "sha256": "b16680a195137b72345753c0d7c9a566bfedb1d5bef57dda853d948a9ad5ae2e",
+    "duration": 8.0,
+    "sample_rate": 48000,
+    "channels": 2,
+    "source_start": 5.25,
+    "source_end": 14.45,
+    "loop": true,
+    "peak_dbfs": -26.935749724493125,
+    "processing": "same 8s wave loop at low level; periodic low-pass; no repeating completion accent; common 65–6800Hz source palette, no pitch changes or layered old cues"
+  },
+  {
+    "id": "B19",
+    "file": "B19-boot-exit.wav",
+    "source": "boot-access.mp3",
+    "source_sha256": "841e23542988f6cd37b20bc8feb03ece6eebb1703a652c3f24d42e7e8cefe103",
+    "sha256": "7b2ae144422e6be2a91d1625915a1a38793240131942a4547228c8377a68c7a6",
+    "duration": 1.6,
+    "sample_rate": 48000,
+    "channels": 2,
+    "source_start": 11.6,
+    "source_end": 13.2,
+    "loop": false,
+    "peak_dbfs": -13.926084752668517,
+    "processing": "single 1.6s closure from the same palette; fade finishes within existing 1.65s handoff; common 65–6800Hz source palette, no pitch changes or layered old cues"
+  },
+  {
+    "id": "L01",
+    "file": "L01-load-impact-start.wav",
+    "source": "L01-load-impact-start.wav",
+    "source_sha256": "e1b87cd16996e95d549132fdd8ff674e7d15376a33dbec092ddb418d2b3a14a2",
+    "sha256": "e1b87cd16996e95d549132fdd8ff674e7d15376a33dbec092ddb418d2b3a14a2",
+    "duration": 0.86,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -8.5,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "L02",
+    "file": "L02-load-wait-loop.wav",
+    "source": "L02-load-wait-loop.wav",
+    "source_sha256": "e9a7b1b53f1d39bea1261f968694ca9488c05931927b8a9206d99ea27c3cc64a",
+    "sha256": "e9a7b1b53f1d39bea1261f968694ca9488c05931927b8a9206d99ea27c3cc64a",
+    "duration": 6.0,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -26.0,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "L03",
+    "file": "L03-load-step.wav",
+    "source": "L03-load-step.wav",
+    "source_sha256": "2623a1fb773c7a7ca9524b8c8412d6275bd55c01f0a3445059331948173c6347",
+    "sha256": "2623a1fb773c7a7ca9524b8c8412d6275bd55c01f0a3445059331948173c6347",
+    "duration": 0.16,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -16.0,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "L04",
+    "file": "L04-load-ready.wav",
+    "source": "L04-load-ready.wav",
+    "source_sha256": "8dabc2748f23290736063af29e36273206fa82aaf6ebc3eb6f45ca8a9123feca",
+    "sha256": "8dabc2748f23290736063af29e36273206fa82aaf6ebc3eb6f45ca8a9123feca",
+    "duration": 0.72,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -10.5,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "L05",
+    "file": "L05-load-reveal.wav",
+    "source": "L05-load-reveal.wav",
+    "source_sha256": "07b4569756c93e1716e7da9b6753ade67b176106af7a22c0638f2613506dde2d",
+    "sha256": "07b4569756c93e1716e7da9b6753ade67b176106af7a22c0638f2613506dde2d",
+    "duration": 0.51,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -14.0,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "U01",
+    "file": "U01-ui-hover.wav",
+    "source": "U01-ui-hover.wav",
+    "source_sha256": "7017cbf20f91c93c5f0328cf87176c96c97823aeaf185fca0a8e0993c30aee0e",
+    "sha256": "7017cbf20f91c93c5f0328cf87176c96c97823aeaf185fca0a8e0993c30aee0e",
+    "duration": 0.082,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -23.0,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "U02",
+    "file": "U02-ui-click.wav",
+    "source": "U02-ui-click.wav",
+    "source_sha256": "a76ea85c84b04d619fe652f5520a0d867d9329f19a049f5a626274fe5fdde8f3",
+    "sha256": "a76ea85c84b04d619fe652f5520a0d867d9329f19a049f5a626274fe5fdde8f3",
+    "duration": 0.115,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -15.5,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "U03",
+    "file": "U03-ui-confirm.wav",
+    "source": "U03-ui-confirm.wav",
+    "source_sha256": "a0985a570a352d8f2aca8989810557cf359d77d51c4f7aed67f5018d532c4343",
+    "sha256": "a0985a570a352d8f2aca8989810557cf359d77d51c4f7aed67f5018d532c4343",
+    "duration": 0.23,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -14.0,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "U04",
+    "file": "U04-ui-back.wav",
+    "source": "U04-ui-back.wav",
+    "source_sha256": "64bc1160c65be7799e923f0199d1852454201661d62556bc10d126ec938b6198",
+    "sha256": "64bc1160c65be7799e923f0199d1852454201661d62556bc10d126ec938b6198",
+    "duration": 0.2,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -16.0,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "U05",
+    "file": "U05-ui-navigate.wav",
+    "source": "U05-ui-navigate.wav",
+    "source_sha256": "fd9c5371037f06fd1501a3dd6b16a7f9b0d5665f0f26738d40a6f17ea7a5370e",
+    "sha256": "fd9c5371037f06fd1501a3dd6b16a7f9b0d5665f0f26738d40a6f17ea7a5370e",
+    "duration": 0.225,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -17.0,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "U06",
+    "file": "U06-ui-toggle-on.wav",
+    "source": "U06-ui-toggle-on.wav",
+    "source_sha256": "fab8fbba9ac7e9fe16a0606c737068bf61877e50a146b1afc94b32e8db78ecb5",
+    "sha256": "fab8fbba9ac7e9fe16a0606c737068bf61877e50a146b1afc94b32e8db78ecb5",
+    "duration": 0.17,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -16.0,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "U07",
+    "file": "U07-ui-toggle-off.wav",
+    "source": "U07-ui-toggle-off.wav",
+    "source_sha256": "f91ce943993add6269b8e95c2f815ac24acac462e508af7ad60c3b09a8ac69bc",
+    "sha256": "f91ce943993add6269b8e95c2f815ac24acac462e508af7ad60c3b09a8ac69bc",
+    "duration": 0.17,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -16.0,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "U08",
+    "file": "U08-ui-panel-open.wav",
+    "source": "U08-ui-panel-open.wav",
+    "source_sha256": "2318fac5c3e357016de08f9127257698b668287ec1624b95285e876b01f31142",
+    "sha256": "2318fac5c3e357016de08f9127257698b668287ec1624b95285e876b01f31142",
+    "duration": 0.32,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -19.0,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "U09",
+    "file": "U09-ui-panel-close.wav",
+    "source": "U09-ui-panel-close.wav",
+    "source_sha256": "c33a8ef4b4f0928ccd78b1b7e224d3f707f33093ff7e89198376d81457d0313a",
+    "sha256": "c33a8ef4b4f0928ccd78b1b7e224d3f707f33093ff7e89198376d81457d0313a",
+    "duration": 0.27,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -19.0,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "U10",
+    "file": "U10-ui-success.wav",
+    "source": "U10-ui-success.wav",
+    "source_sha256": "b42f808d6481155721c5e1d831426f1355e2d0633f9833117f3b57c7d5826c62",
+    "sha256": "b42f808d6481155721c5e1d831426f1355e2d0633f9833117f3b57c7d5826c62",
+    "duration": 0.49,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -14.5,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "U11",
+    "file": "U11-ui-warning.wav",
+    "source": "U11-ui-warning.wav",
+    "source_sha256": "5329cd1e12a0dd4f9397197c5ab7537f2b8e3a22663665781fdb0edc422f1e46",
+    "sha256": "5329cd1e12a0dd4f9397197c5ab7537f2b8e3a22663665781fdb0edc422f1e46",
+    "duration": 0.43,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -15.0,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "U12",
+    "file": "U12-ui-error.wav",
+    "source": "U12-ui-error.wav",
+    "source_sha256": "a9c00e0ed1a0321bd47344f63509763bd52276696fd9e47a14a660466547f318",
+    "sha256": "a9c00e0ed1a0321bd47344f63509763bd52276696fd9e47a14a660466547f318",
+    "duration": 0.43,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -15.0,
+    "processing": "approved original synthesis; byte-identical"
+  },
+  {
+    "id": "V01",
+    "file": "V01-lanjian.mp3",
+    "source": "Lanjian.mp3",
+    "source_sha256": "5f218bffad46ecc081c87fb54c5135ac1d7073ee957ca1fb6e1d4040fcb95664",
+    "sha256": "5f218bffad46ecc081c87fb54c5135ac1d7073ee957ca1fb6e1d4040fcb95664",
+    "duration": 2.64,
+    "sample_rate": 48000,
+    "channels": 2,
+    "peak_dbfs": -1.456,
+    "processing": "author-selected voice; byte-identical"
+  }
+]

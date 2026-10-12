@@ -255,13 +255,34 @@ export function createManuscriptRecoveryActions(ports) {
   }
 
   async function flushChapterSave() {
-    await ports.manuscriptEditor.value?.flush?.()
+    if (!ports.current.value || !ports.selectedId.value) return
+    const request = ports.workspaceRequests.capture(ports.current.value)
+    const chapterId = ports.selectedId.value
+    const generation = ports.chapterSelectionGeneration
+    const editor = ports.manuscriptEditor.value
+    const assertCurrent = () => {
+      if (!ports.workspaceRequests.isCurrent(request, ports.current.value) ||
+        chapterId !== ports.selectedId.value || generation !== ports.chapterSelectionGeneration ||
+        editor !== ports.manuscriptEditor.value) throw new Error('编辑文档已变化，请重新执行刚才的操作。')
+    }
+    await editor?.flush?.()
+    assertCurrent()
     ports.clearAutosaveTimer()
     await ports.manuscriptSaves.idle()
+    assertCurrent()
     if (ports.chapterIsDirty()) await ports.persistChapter(ports.pendingSaveReason)
+    assertCurrent()
     await ports.manuscriptSaves.idle()
+    assertCurrent()
     if (ports.activeAutosaveCheckpoint) await ports.finalizeAutosaveCheckpoint()
+    assertCurrent()
     await ports.manuscriptSaves.idle()
+    assertCurrent()
+    // Waiting for the queue does not include text still buffered by the editor.
+    await editor?.flush?.()
+    assertCurrent()
+    if (ports.chapterIsDirty() || ports.activeAutosaveCheckpoint)
+      throw new Error('保存期间正文又有新修改，已保留当前输入，请再次执行刚才的操作。')
   }
 
   async function flushChapterSaveSafely() {

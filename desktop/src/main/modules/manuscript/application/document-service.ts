@@ -169,6 +169,7 @@ export class DocumentService {
   async chapter(id: number): Promise<Chapter> {
     const formal = await this.formalManuscript()
     if (formal) {
+      if (formal.authority.chapter) return formal.authority.chapter(formal.workItemId, id)
       const match = (await formal.authority.chapters(formal.workItemId)).find((item) => item.id === id)
       if (!match) throw new AppError('NOT_FOUND', `第 ${id} 章不存在`, { recoverable: true, details: { chapterId: id } })
       return match
@@ -417,6 +418,10 @@ export class DocumentService {
   async outlines(): Promise<OutlineList> {
     const formal = await this.formalOutline()
     if (formal) return formal.authority.outlines(formal.workItemId)
+    return this.fileOutlines()
+  }
+
+  private async fileOutlines(): Promise<OutlineList> {
     const root = await this.root('大纲')
     let files: string[] = []
     try { files = (await readdir(root)).filter((file) => file.endsWith('.md')) } catch { return { total: null, volumes: [] } }
@@ -430,7 +435,9 @@ export class DocumentService {
   }
 
   async outline(volume: OutlineVolume): Promise<OutlineDocument> {
-    const all = await this.outlines()
+    const formal = await this.formalOutline()
+    if (formal?.authority.outline) return formal.authority.outline(formal.workItemId, volume)
+    const all = formal ? await formal.authority.outlines(formal.workItemId) : await this.fileOutlines()
     if (volume === 'total') return all.total ?? { content: '' }
     return all.volumes.find((item) => item.volume === volume) ?? { volume, content: '' }
   }
@@ -490,6 +497,10 @@ export class DocumentService {
   async chapterOutlines(): Promise<ChapterOutlineDocument[]> {
     const formal = await this.formalOutline()
     if (formal) return formal.authority.chapterOutlines(formal.workItemId)
+    return this.fileChapterOutlines()
+  }
+
+  private async fileChapterOutlines(): Promise<ChapterOutlineDocument[]> {
     const root = await this.chapterOutlineRoot()
     let files: string[] = []
     try { files = (await readdir(root)).filter((file) => /^第\d+章\.md$/.test(file)) } catch { return [] }
@@ -501,7 +512,10 @@ export class DocumentService {
   }
 
   async chapterOutline(chapterId: number): Promise<ChapterOutlineDocument> {
-    const existing = (await this.chapterOutlines()).find((item) => item.chapterId === chapterId)
+    const formal = await this.formalOutline()
+    if (formal?.authority.chapterOutline) return formal.authority.chapterOutline(formal.workItemId, chapterId)
+    const all = formal ? await formal.authority.chapterOutlines(formal.workItemId) : await this.fileChapterOutlines()
+    const existing = all.find((item) => item.chapterId === chapterId)
     return existing ?? { chapterId, content: '' }
   }
 

@@ -1,12 +1,13 @@
 import { randomUUID, createHash } from 'node:crypto'
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { AppError } from '../../../core/errors/app-error'
 import type { WorkspaceDatabasePort } from '../../../core/ports/workspace-database'
 import { ManuscriptTextObjects } from './manuscript-text-objects'
-import { projectExistingPathSync, projectTargetPathSync } from '../../../platform/storage/project-path'
+import { projectExistingPath, projectExistingPathSync, projectTargetPathSync } from '../../../platform/storage/project-path'
 
-const commandNames = ['writeFormalChapter', 'writeFormalOutline', 'appendFormalOutlineChildren', 'applyWritingAgentArtifact',
+const commandNames = ['writeFormalChapter', 'writeFormalOutline', 'adoptChapterEvent', 'appendFormalOutlineChildren', 'applyWritingAgentArtifact', 'saveReviewedDraft',
   'createFormalChapter', 'startChapterFromOutline', 'stageAutosaveCheckpoint', 'finalizeAutosaveCheckpoint',
   'updateChapterPlanning', 'archiveFormalChapter', 'restoreArchivedFormalChapter', 'promoteIdeaToSummary'] as const
 type CommandName = typeof commandNames[number]
@@ -31,12 +32,24 @@ export class ManuscriptCommitJournal {
     manuscriptPath(relativePath)
     try {
       const target = projectExistingPathSync(this.root, join(this.root, relativePath))
-      if (!statSync(target).isFile() || statSync(target).size > 16 * 1024 * 1024) throw invalid('稿件文件大小或类型无效。')
+      const metadata = statSync(target)
+      if (!metadata.isFile() || metadata.size > 16 * 1024 * 1024) throw invalid('稿件文件大小或类型无效。')
       const bytes = readFileSync(target)
-      if (bytes.length > 16 * 1024 * 1024) throw invalid('稿件文件超过读取上限。')
-      const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
-      if (content.includes('\0')) throw invalid('稿件包含无效字符。')
-      return { content, hash: hashBytes(bytes) }
+      return decodeCurrentBytes(bytes)
+    } catch (error) {
+      if (code(error) === 'ENOENT') return null
+      if (error instanceof AppError) throw error
+      throw new AppError('STORAGE_ERROR', '稿件文件读取失败，未返回空稿。', { recoverable: true, cause: error })
+    }
+  }
+
+  async readCurrentAsync(relativePath: string): Promise<{ content: string; hash: string } | null> {
+    manuscriptPath(relativePath)
+    try {
+      const target = await projectExistingPath(this.root, join(this.root, relativePath))
+      const metadata = await stat(target)
+      if (!metadata.isFile() || metadata.size > 16 * 1024 * 1024) throw invalid('稿件文件大小或类型无效。')
+      return decodeCurrentBytes(await readFile(target))
     } catch (error) {
       if (code(error) === 'ENOENT') return null
       if (error instanceof AppError) throw error
@@ -176,6 +189,13 @@ export class ManuscriptCommitJournal {
     this.command(record)
     return record
   }
+}
+
+function decodeCurrentBytes(bytes: Buffer): { content: string; hash: string } {
+  if (bytes.length > 16 * 1024 * 1024) throw invalid('稿件文件超过读取上限。')
+  const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+  if (content.includes('\0')) throw invalid('稿件包含无效字符。')
+  return { content, hash: hashBytes(bytes) }
 }
 
 function manuscriptPath(path: string): void {

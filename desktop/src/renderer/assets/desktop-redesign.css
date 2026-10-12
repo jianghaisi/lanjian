@@ -36,7 +36,7 @@ button, input, textarea, select { accent-color: var(--jade); }
   --activity-width: 72px;
   --explorer-layout-width: clamp(180px, var(--explorer-width, 248px), min(420px, 28vw));
   --assistant-layout-width: clamp(280px, var(--assistant-width, 352px), min(460px, 32vw));
-  grid-template-rows: 48px minmax(0, 1fr) 24px;
+  grid-template-rows: 48px minmax(0, 1fr);
   color: var(--ink); background: var(--canvas);
 }
 .redesigned-studio.studio.library-mode { grid-template-rows: 48px minmax(0, 1fr); }
@@ -71,10 +71,7 @@ button, input, textarea, select { accent-color: var(--jade); }
 .section-navigation button:hover, .section-navigation button.selected { background: var(--jade-wash); color: var(--jade-deep); }
 .redesigned-studio :is(.activitybar > button span, .section-navigation button, .pane-title) { font-size: var(--type-control, 14px); }
 .redesigned-studio .workbench, .redesigned-studio.library-mode .workbench { background: var(--surface); min-width: 0; }
-.redesigned-studio .statusbar { background: var(--canvas); color: var(--muted); border-top: 1px solid var(--line); font: 400 11px/1.4 var(--sans); }
-.redesigned-studio .statusbar span { color: inherit; }
 .redesigned-studio[data-page="desk"]:not(.library-mode):not(.writing-focus) { grid-template-rows: 48px minmax(0, 1fr); }
-.redesigned-studio[data-page="desk"] > .statusbar { display: none; }
 .redesigned-studio .explorer-resizer { bottom: 0; }
 .redesigned-studio .assistant-panel { background: var(--surface); border-color: var(--line); }
 .redesigned-studio .assistant-panel > header { background: var(--surface); color: var(--ink); border-color: var(--line); }
@@ -231,6 +228,33 @@ button, input, textarea, select { accent-color: var(--jade); }
 
 /* Recovery and approval surfaces retain their status colors and their original actions. */
 .redesigned-studio :is(.revision-ledger, .delete-sheet, .txt-import-modal, .character-conflict-docket, .chapter-card-sheet, .chapter-card-adoption-sheet, .planning-adoption-sheet) { background: var(--surface); color: var(--ink); border-color: var(--line); border-radius: 6px; }
+/* Chapter review keeps the decision row outside the scrolling manuscript fields. */
+.redesigned-studio .sqlite-shadow-dialog { display:grid; grid-template-rows:auto minmax(0,1fr) auto; width:min(1000px,calc(100vw - 32px)); max-height:calc(100dvh - 32px); overflow:hidden; background:var(--surface); color:var(--ink); border-color:var(--line); }
+.storage-confirmation-reading { min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
+.redesigned-studio .sqlite-shadow-dialog > :is(header,footer) { background:var(--surface); padding:16px 24px; gap:16px; }
+.redesigned-studio .sqlite-shadow-dialog > footer > span { font-size:12px; }
+.redesigned-studio .sqlite-shadow-dialog .shadow-blockers { max-height:none; overflow:visible; }
+.redesigned-studio .sqlite-shadow-dialog :is(.shadow-contract-grid article,.shadow-impact-strip,.shadow-impact-strip > div,.shadow-target-path,.shadow-success-ledger,.shadow-blockers article) { background:var(--surface-muted); color:var(--ink); border-color:var(--line); }
+.redesigned-studio :is(.chapter-card-backdrop,.chapter-card-adoption-backdrop) { padding:16px; grid-template-columns:minmax(0,1fr); }
+.redesigned-studio :is(.chapter-card-sheet,.chapter-card-adoption-sheet) { display:grid; grid-template-rows:auto minmax(0,1fr) auto; width:min(1180px,calc(100vw - 32px)); max-height:calc(100dvh - 32px); overflow:hidden; }
+.chapter-card-reading { min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
+.redesigned-studio :is(.chapter-card-sheet,.chapter-card-adoption-sheet) > header { position:relative; padding:20px 24px; gap:16px; backdrop-filter:none; }
+.redesigned-studio .chapter-card-actions { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 24px; border-top:1px solid var(--line); background:var(--surface); }
+.chapter-card-actions > div { display:flex; align-items:center; gap:12px; }
+.chapter-card-actions input[type="checkbox"] { width:16px; height:16px; margin:0; flex:none; }
+.redesigned-studio .chapter-card-form > label > span,.redesigned-studio .chapter-derived-status article b { color:var(--ink); }
+.redesigned-studio .chapter-card-form :is(textarea,input:not([type="checkbox"])) { background:var(--surface-muted); color:var(--ink); border-color:var(--line); }
+.chapter-card-adoption-fields > label:focus-within { outline:2px solid var(--jade); outline-offset:2px; }
+.chapter-card-adoption-fields > label:has(input:disabled) { cursor:wait; }
+.redesigned-studio .chapter-card-field-compare > span { font-size:13px; line-height:1.75; }
+.redesigned-studio .chapter-card-adoption-sheet > footer { gap:12px; padding:14px 24px; background:var(--surface); }
+.redesigned-studio .chapter-card-adoption-sheet > footer > span { font-size:12px; }
+@media(max-width:760px) {
+  .redesigned-studio :is(.chapter-card-sheet,.chapter-card-adoption-sheet) > header { padding:14px 16px; }
+  .redesigned-studio :is(.chapter-card-sheet,.chapter-card-adoption-sheet) > header h2 { font-size:20px; }
+  .redesigned-studio :is(.chapter-card-actions,.chapter-card-adoption-sheet > footer) { padding:12px 16px; flex-wrap:wrap; gap:10px; }
+  .chapter-card-status-row { flex-wrap:wrap; }
+}
 .redesigned-studio :is(.revision-ledger, .delete-sheet, .character-conflict-docket)::after { content: none; }
 .redesigned-studio :is(.revision-ledger > header, .revision-ledger > footer, .revision-name-bar, .revision-body > article, .character-conflict-docket > header, .character-conflict-footer, .chapter-card-sheet > header, .txt-import-modal > .import-heading, .txt-import-modal > .import-footer) { background: var(--surface); border-color: var(--line); }
 .redesigned-studio .revision-body > nav { background: var(--canvas); border-color: var(--line); }

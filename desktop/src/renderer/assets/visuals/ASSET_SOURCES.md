@@ -1,5 +1,19 @@
 # 视觉资产来源
 
+## 当前独立桌宠：透明视频
+
+用户已批准先采用可用视频、暂缓不合格片段并去掉平台logo。`pet-videos/`中17份WebM及同源`poster.png`由本任务已检查的edge-v2透明成果派生，保持960×960/24fps、原动作长度和静音；`manifest.json`绑定源文件和运行文件的SHA-256、帧数、实际时长及循环属性。目录不包含被拒收的握手视频。
+
+来源为 作者保留的 2026-10-02 原始视频目录（不随公开仓库分发）：13份Dola动作加由idle提取的blink，以及用户提供的stretch/listening/drinking原片（服务名未说明）。全帧检查未见独立平台logo图块；候选源区段避开水印覆盖人物的后段，导出仅额外去除人物外的孤立残片，不补绘人物、裁掉动作或移除服饰图案。完整原视频与平台来源记录保留在外部素材目录。
+
+运行文件使用本地WebM透明解码，不需要联网、FFmpeg或Python。处理脚本 `desktop/scripts/prepare-pet-videos.py` 仅用于开发，源码和原始媒体不因来源记录而获得额外第三方授权。当前组件为DesktopPetArtwork的视频播放器；下方原画/程序动画描述为历史来源，资源保留但不再作为独立桌宠当前播放器。
+
+## 新版 Q 桌宠 — 2026-09-20
+
+`character-q-current.png`、`character-q-current-blink.png`、`character-q-current-speaking.png` 由图像工具根据作者新版看板娘 Q 参考生成；分别承担透明主图、闭眼和开口表情。运行时只裁取表情区域，呼吸、拖动、回弹和照料动作使用程序动画，无视频依赖。
+
+三张均为 1254×1254 RGBA，已检查实际 alpha 与原生窗口布局。输入参考、生成原件和验证证据由作者留存于私有开发记录，不随公开仓库分发。这些是本项目素材，未使用 VPet 或其他桌宠项目的人物图片。
+
 ## 岚笺四联视觉系统 v2
 
 - 现实层参考：Historical Photographs of China，`Yang Fang in the smaller courtyard of his house, Beijing`，约 1870 年代。

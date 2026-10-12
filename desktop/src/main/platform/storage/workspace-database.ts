@@ -1,7 +1,24 @@
+import { decodeChapterStoryConstraints } from '../../../contracts/planning/chapter-story-contract'
+import type { OutlineHistoryEntry, OutlineVersionInput } from '../../../contracts/document-review/api'
+import type { RecoverReviewedDraftInput } from '../../../contracts/document-review/api'
+import { readWorldbookProfile } from '../../../contracts/characters/worldbook'
+import type { DocumentLocator, DocumentRef, DocumentSnapshot, ReviewSource } from '../../../contracts/document-review/types'
+import type { OpenReviewInput, SyncReviewDraftInput, PrepareDecisionInput, AcknowledgeDecisionInput, DiscardDecisionInput, SaveReviewedDraftInput, ReviewReadPort } from '../../modules/document-review/domain/review-storage'
+import { DocumentReviewStore } from '../../modules/document-review/adapters/review-store'
+import { createReviewMigrationSql, assertReviewSchema } from '../../modules/document-review/adapters/review-schema'
+import { worldbookFingerprint, worldbookContextVersion } from '../../modules/characters/domain/worldbook-context'
+import { assertPlanningSources, assertSkeletonHistory, assertSkeletonHistoryAppend } from '../../modules/planning/domain/planning-dependencies'
 import { createHash, randomUUID } from 'node:crypto'
+import { annotationMigrationSql } from '../../modules/document-review/adapters/annotation-schema'
+import { reviewRecoveryMigrationSql } from '../../modules/document-review/adapters/recovery-schema'
+import { DocumentAnnotationStore } from '../../modules/document-review/adapters/annotation-store'
+import { annotationRevisionType, revisionConflict, type AnnotationRevisionCheckpoint } from '../../modules/document-review/domain/annotation-revision'
+import { reviewedOutlineState } from '../../modules/planning/domain/reviewed-outline-state'
+import type { AnnotationChangeInput, AnnotationCreateInput, AnnotationListInput, AnnotationReanchorInput, AnnotationUpdateInput } from '../../../contracts/document-review/annotations'
 import { decodeWorldMapDocument } from '../../../contracts/world-map/world-map'
 import { access, mkdir, unlink } from 'node:fs/promises'
-import { unlinkSync } from 'node:fs'
+import { unlinkSync, statSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { AppError } from '../../core/errors/app-error'
@@ -13,6 +30,8 @@ import { normalizeStoryText, storyEventSignature } from '../../modules/timeline/
 import { assertMaterialSources, assertCanonicalEvents, normalizedMaterialUrl } from '../../modules/worldbuilding/domain/legacy-research-validation'
 import { assertAppendStoryEventVersionInput, type AppendStoryEventVersionInput, type StoryEventVersion, type StoryEventVersionHeads } from '../../modules/timeline/domain/story-event-version'
 import { CanonicalEventVersions, canonicalEventVersionsMigrationSql, canonicalEventVersionTables, canonicalEventVersionTriggers } from '../../modules/timeline/adapters/canonical-event-versions'
+import { assertUpstreamReviewAppend } from '../../modules/planning/domain/upstream-review'
+import { assertChapterEventAdoption, assertChapterEventOutputs, assertChapterEventOutputsAppend, chapterEventItems, chapterEventOutputItems, chapterEventRequestHash, chapterContentHash, type ChapterEventAdoption, type ChapterEventOutput, type ChapterEventStorageSnapshot } from '../../modules/planning/domain/chapter-event-adoption'
 import { stableEventReadSnapshot } from '../../modules/timeline/adapters/event-read-snapshot'
 import { ManuscriptTextObjects, manuscriptTextObjectsMigrationSql, manuscriptTextGuardsMigrationSql, assertManuscriptTextSchema, intermediateManuscriptSchema41Checksum, hasIntermediateManuscriptSchema41, type TextObjectReference } from '../../modules/manuscript/adapters/manuscript-text-objects'
 import { ManuscriptCommitJournal, type ManuscriptCommand, type ManuscriptFileIntent, type ManuscriptCommitReceipt } from '../../modules/manuscript/adapters/manuscript-commit-journal'
@@ -20,7 +39,22 @@ import { assertNoManuscriptMigration } from '../../modules/manuscript/adapters/m
 import { rebuildSqliteTable } from './sqlite-table-rebuild'
 import { canonicalEventIdentityCopySql, canonicalEventIdentityGuardsSql, assertCanonicalEventIdentityUpgradeSource, assertCanonicalEventIdentitySchema } from '../../modules/timeline/adapters/canonical-event-identity-schema'
 import { eventMigrationReceiptsMigrationSql, assertEventMigrationReceiptSchema, eventMigrationReceiptTables } from '../../modules/timeline/adapters/event-migration-receipt-schema'
+import { eventStateMigrationSql, assertEventStateSchema } from '../../modules/timeline/adapters/event-state-schema'
+import { eventSettlementMigrationSql, assertEventSettlementSchema } from '../../modules/timeline/adapters/prose-event-settlement-schema'
+import { ProseEventSettlementStorage } from '../../modules/timeline/adapters/prose-event-settlement-storage'
+import type { SettlementWritePort, SettlementCommand } from '../../modules/timeline/domain/prose-event-settlement'
+import { eventOperationMigrationSql, assertEventOperationSchema, intermediateEventOperationSchema44Checksum } from '../../modules/timeline/adapters/event-operation-schema'
+import { readEventOperationReceipt } from '../../modules/timeline/adapters/event-operation-receipt-reader'
+import { writeReviewedEventOperation } from '../../modules/timeline/adapters/event-operation-transaction'
+import type { EventOperationReview, EventOperationWritePort } from '../../modules/timeline/domain/event-operations'
+import type { EventMirrorStoragePort, EventMirrorPlan, EventMirrorFeedback } from '../../modules/timeline/domain/event-mirror'
+import { readEventMirrorPlan, assertSameEventMirror, EVENT_MIRROR_RELATIVE_PATH, unifiedEventMirrorContent } from '../../modules/timeline/adapters/event-mirror-plan'
+import type { EventMigrationWritePort, ClaimedEventMigrationReview } from '../../modules/timeline/domain/event-migration-commit'
+import { writeReviewedEventMigration } from '../../modules/timeline/adapters/event-migration-transaction'
 import { readEventMigrationReceipt } from '../../modules/timeline/adapters/event-migration-receipt-reader'
+import { readEventState } from '../../modules/timeline/adapters/event-state-reader'
+import { initializeMigratedEventState, readEventStateInitializationPlan } from '../../modules/timeline/adapters/event-state-initialization'
+import type { EventStateInitializationPlan, EventStateInitializationWritePort } from '../../modules/timeline/domain/event-state-initialization'
 import {
   chapterLifecycleStates,
   initialChapterLifecycle,
@@ -141,6 +175,7 @@ import {
   type WorkspaceMirrorStatus,
   type WorkspaceStorageMode,
   type WorkspaceOutlineRecord,
+  type WorkspaceOutlineFilter,
   type WorkspaceOutlineWriteInput,
   type WorkspaceProjectWritingConfig,
   type WorkspaceProjectWritingConfigInput,
@@ -2425,6 +2460,7 @@ CREATE TRIGGER projects_schema_version_v37_after_insert AFTER INSERT ON projects
 BEGIN UPDATE projects SET current_schema_version = 37 WHERE id = NEW.id; END;
 UPDATE projects SET current_schema_version = 37;
 `
+const reviewMigrationSql = createReviewMigrationSql(nativeTaskPauseGuardsSql.match(/CREATE TRIGGER body_versions_ai_task_reference_guard[\s\S]*?END;/)![0])
 const migrations = [
   { version: 1, name: initialMigrationName, sql: initialMigrationSql, checksum: hashText(initialMigrationSql) },
   { version: 2, name: formalManuscriptMigrationName, sql: formalManuscriptMigrationSql, checksum: hashText(formalManuscriptMigrationSql) },
@@ -2467,12 +2503,20 @@ const migrations = [
   { version: 39, name: 'distinct-canonical-event-identities', sql: canonicalEventIdentityCopySql + canonicalEventIdentityGuardsSql, checksum: hashText(canonicalEventIdentityCopySql + canonicalEventIdentityGuardsSql) },
   { version: 40, name: 'immutable-event-migration-receipts', sql: eventMigrationReceiptsMigrationSql, checksum: hashText(eventMigrationReceiptsMigrationSql) },
   { version: 41, name: 'file-manuscript-text-references', sql: manuscriptTextObjectsMigrationSql, checksum: hashText(manuscriptTextObjectsMigrationSql) },
-  { version: 42, name: 'file-manuscript-guards-and-bounded-autosave', sql: manuscriptTextGuardsMigrationSql, checksum: hashText(manuscriptTextGuardsMigrationSql) }
+  { version: 42, name: 'file-manuscript-guards-and-bounded-autosave', sql: manuscriptTextGuardsMigrationSql, checksum: hashText(manuscriptTextGuardsMigrationSql) },
+  { version: 43, name: 'event-lifecycle-and-display-order-history', sql: eventStateMigrationSql, checksum: hashText(eventStateMigrationSql) },
+  { version: 44, name: 'immutable-reviewed-event-operation-receipts', sql: eventOperationMigrationSql, checksum: hashText(eventOperationMigrationSql) },
+  { version: 45, name: 'document-inline-review-ledger', sql: reviewMigrationSql, checksum: hashText(reviewMigrationSql) },
+  { version: 46, name: 'versioned-document-annotations', sql: annotationMigrationSql, checksum: hashText(annotationMigrationSql) },
+  { version: 47, name: 'preserved-review-recovery-checkpoints', sql: reviewRecoveryMigrationSql, checksum: hashText(reviewRecoveryMigrationSql) },
+  { version: 48, name: 'versioned-prose-event-settlements', sql: eventSettlementMigrationSql, checksum: hashText(eventSettlementMigrationSql) }
 ] as const
 export const workspaceDatabaseMigrations = migrations
 
 export function workspaceMigrationChecksumMatches(migration: { version: number; checksum: string }, checksum: unknown): boolean {
-  return checksum === migration.checksum || (migration.version === 41 && checksum === intermediateManuscriptSchema41Checksum)
+  return checksum === migration.checksum
+    || (migration.version === 41 && checksum === intermediateManuscriptSchema41Checksum)
+    || (migration.version === 44 && checksum === intermediateEventOperationSchema44Checksum)
 }
 const requiredTables = ['ai_settings_documents', 'autosave_checkpoint_operations', 'autosave_checkpoints', 'body_version_metadata', 'body_versions', 'canonical_event_characters', 'canonical_event_evidence_refs', 'canonical_events', 'chapter_workflows', 'chapters', 'character_aliases', 'character_snapshots', 'character_state_documents', 'context_packages', 'document_chunks', 'entities', 'entity_relations', 'fact_batches', 'fact_changes', 'fact_decisions', 'fact_source_impacts', 'fact_sources', 'facts', 'finding_decisions', 'findings', 'foreshadow_actions', 'foreshadows', 'generation_artifacts', 'ideas', 'material_sources', 'mirror_entries', 'model_configs', 'outline_node_metadata', 'outline_nodes', 'outline_planning_state_documents', 'outline_versions', 'projects', 'prompt_templates', 'real_trial_chapter_records', 'real_trial_conclusions', 'resource_ledger', 'rule_runs', 'rules', 'schema_migrations', 'shadow_imports', 'storage_transitions', 'summary_versions', 'task_runs', 'workspace_config_documents', 'write_operations']
 const requiredTriggers = ['ai_settings_documents_scope_guard', 'canonical_event_evidence_scope_guard', 'autosave_checkpoint_operations_no_delete', 'autosave_checkpoint_operations_no_update', 'autosave_checkpoint_operations_scope_guard', 'autosave_checkpoints_scope_insert_guard', 'autosave_checkpoints_scope_update_guard', 'autosave_checkpoints_terminal_content_guard', 'autosave_checkpoints_transition_guard', 'body_versions_ai_task_reference_guard', 'body_versions_no_delete', 'body_versions_no_update', 'chapter_workflows_transition_guard', 'chapters_outline_insert_scope_guard', 'chapters_outline_scope_guard', 'character_aliases_scope_guard', 'character_snapshots_scope_guard', 'character_state_documents_scope_guard', 'context_packages_no_delete', 'context_packages_no_update', 'context_packages_task_scope_guard', 'entity_relations_scope_guard', 'fact_batches_scope_insert_guard', 'fact_batches_scope_update_guard', 'fact_batches_transition_guard', 'fact_changes_decision_transition_guard', 'fact_changes_provenance_guard', 'fact_decisions_no_delete', 'fact_decisions_no_update', 'fact_source_impacts_no_delete', 'fact_source_impacts_no_update', 'fact_source_impacts_scope_guard', 'fact_sources_no_delete', 'fact_sources_no_update', 'fact_sources_scope_guard', 'facts_no_delete', 'facts_no_update', 'facts_scope_guard', 'finding_decisions_no_delete', 'finding_decisions_no_update', 'findings_rule_run_scope_guard', 'foreshadow_actions_no_delete', 'foreshadow_actions_no_update', 'foreshadow_actions_scope_guard', 'foreshadows_scope_insert_guard', 'foreshadows_scope_update_guard', 'ideas_promotion_scope_insert', 'ideas_promotion_scope_update', 'outline_node_metadata_kind_guard', 'outline_node_metadata_kind_update_guard', 'outline_nodes_planning_kind_guard', 'outline_versions_no_delete', 'outline_versions_no_update', 'projects_schema_version_v37_after_insert', 'findings_evidence_immutable', 'finding_decisions_resolution_scope_guard', 'findings_resolution_status_guard', 'chapters_fixed_findings_invalidation', 'ideas_generation_source_insert', 'ideas_generation_source_immutable', 'prompt_templates_contract_immutable', 'real_trial_chapter_scope_guard', 'real_trial_chapter_update_scope_guard', 'real_trial_conclusion_scope_guard', 'real_trial_conclusion_update_scope_guard', 'resource_ledger_balance_guard', 'resource_ledger_no_delete', 'resource_ledger_no_update', 'resource_ledger_scope_guard', 'task_runs_context_package_guard', 'task_runs_contract_immutable', 'task_runs_contract_insert_guard', 'task_runs_retry_contract_guard', 'workspace_config_documents_scope_guard']
@@ -2481,6 +2525,9 @@ const requiredAdditionalTriggers = ['outline_planning_state_documents_scope_guar
 const promptTaskTypes = ['outline', 'chapterOutline', 'prose', 'review'] as const
 
 export class SqliteWorkspaceDatabaseFactory implements WorkspaceDatabaseFactory {
+  async openDocumentReviewReadOnly(workItemId: string): Promise<ReviewReadPort | null> {
+    return SqliteWorkspaceDatabase.openDocumentReviewReadOnly(workItemId, this.now, this.id)
+  }
   constructor(
     private readonly now: () => Date = () => new Date(),
     private readonly id: () => string = () => randomUUID()
@@ -2498,8 +2545,28 @@ export class SqliteWorkspaceDatabaseFactory implements WorkspaceDatabaseFactory 
     return SqliteWorkspaceDatabase.openModelSettingsWrite(workItemId, this.now, this.id)
   }
 
+  async openEventMirrorWrite(workItemId: string): Promise<EventMirrorStoragePort> {
+    return SqliteWorkspaceDatabase.openEventMirrorWrite(workItemId, this.now, this.id)
+  }
+
+  async openEventMigrationWrite(workItemId: string): Promise<EventMigrationWritePort> {
+    return SqliteWorkspaceDatabase.openEventMigrationWrite(workItemId, this.now, this.id)
+  }
+
+  async openEventStateInitializationWrite(workItemId: string): Promise<EventStateInitializationWritePort> {
+    return SqliteWorkspaceDatabase.openEventStateInitializationWrite(workItemId, this.now, this.id)
+  }
+
   async openEventReadOnly(workItemId: string): Promise<WorkspaceEventReadPort | null> {
     return SqliteWorkspaceDatabase.openEventReadOnly(workItemId, this.now, this.id)
+  }
+
+  async openSettlementWrite(workItemId: string): Promise<SettlementWritePort> {
+    return SqliteWorkspaceDatabase.openSettlementWrite(workItemId, this.now, this.id)
+  }
+
+  async openEventOperationWrite(workItemId: string): Promise<EventOperationWritePort> {
+    return SqliteWorkspaceDatabase.openEventOperationWrite(workItemId, this.now, this.id)
   }
 
   async openRecoveryReadOnly(workItemId: string): Promise<WorkspaceRecoveryReadPort | null> {
@@ -2512,7 +2579,175 @@ export class SqliteWorkspaceDatabaseFactory implements WorkspaceDatabaseFactory 
 }
 
 export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
+  static async openDocumentReviewReadOnly(workItemId: string, now: () => Date = () => new Date(), id: () => string = () => randomUUID()): Promise<ReviewReadPort | null> {
+    return this.openReadOnlyFacade(workItemId, now, id, (workspace, version, close) => {
+      if (version < 45) throw new AppError('FEATURE_UNAVAILABLE', '这本作品尚未启用修订记录，请先完成项目数据升级。', { recoverable: true })
+      return Object.freeze({ documentReviewSnapshot: target => workspace.documentReviewSnapshot(target), documentReviewCatalog: id => workspace.documentReviewCatalog(id),
+        outlineHistory: document => workspace.outlineHistory(document), outlineVersion: input => workspace.outlineVersion(input),
+        taskRun: id => workspace.taskRun(id), taskRunByOperationKey: key => workspace.taskRunByOperationKey(key), recentTaskRuns: (type, chapter, limit) => workspace.recentTaskRuns(type, chapter, limit),
+        generationArtifactForTask: (id, type) => workspace.generationArtifactForTask(id, type), assertAnnotationRevisionCurrent: id => workspace.assertAnnotationRevisionCurrent(id),
+        documentAnnotations: input => workspace.documentAnnotations(input), documentAnnotation: (document, id, revision) => workspace.documentAnnotation(document, id, revision),
+        documentReviews: document => workspace.documentReviews(document), reviewDraft: document => workspace.reviewDraft(document), reviewRecoveryHistory: document => workspace.reviewRecoveryHistory(document), close })
+    })
+  }
+
+  private annotationStore() {
+    if (Number(this.database.prepare('PRAGMA user_version').get()?.user_version) < 46) throw new AppError('FEATURE_UNAVAILABLE', '批注记录需要先完成项目数据升级。', { recoverable: true })
+    return new DocumentAnnotationStore(this.database, { projectId: String(this.projectRow()!.id), id: this.id, now: () => this.now().toISOString(),
+      snapshot: document => this.documentReviewSnapshot(document), drafts: this.reviewStore() })
+  }
+  documentAnnotations(input: AnnotationListInput) { return this.annotationStore().list(input) }
+  documentAnnotation(document: DocumentRef, id: string, revision?: number) { return this.annotationStore().get(document, id, revision) }
+  createDocumentAnnotation(input: AnnotationCreateInput) { return this.transaction(() => this.annotationStore().create(input)) }
+  changeDocumentAnnotation(action: 'update' | 'remove' | 'resolve' | 'reopen' | 'reanchor', input: AnnotationChangeInput | AnnotationUpdateInput | AnnotationReanchorInput) {
+    return this.transaction(() => this.annotationStore().change(action, input))
+  }
+
+  documentReviewSnapshot(target: DocumentLocator | DocumentRef): DocumentSnapshot {
+    this.assertFormal()
+    const project = this.projectRow()!
+    if (target.workItemId !== project.prompt_work_item_id) throw new AppError('CONFLICT', '文档不属于当前作品。', { recoverable: true })
+    const projectId = String(project.id)
+    const body = target.kind === 'body'
+    const id = 'documentId' in target ? target.documentId : null
+    const key = target.kind === 'total' ? 'total' : `${target.kind === 'chapter-outline' ? 'chapter' : target.kind}-${'legacyId' in target ? target.legacyId : ''}`
+    const row = body
+      ? this.database.prepare(`SELECT id,legacy_chapter_id,status FROM chapters WHERE project_id = ? AND ${id ? 'id' : 'legacy_chapter_id'} = ?`).get(projectId, id || ('legacyId' in target ? target.legacyId! : 0))
+      : this.database.prepare(`SELECT id,legacy_key,status FROM outline_nodes WHERE project_id = ? AND ${id ? 'id' : 'legacy_key'} = ?`).get(projectId, id || key)
+    if (!row || row.status === 'archived') {
+      const reason = row?.status === 'archived' ? 'removed' : !body && !id ? 'not-created' : 'missing'
+      throw new AppError('NOT_FOUND', reason === 'not-created' ? '尚无修订记录，首次保存后开始记录。' : reason === 'removed' ? '文档已移除，请核对回收站或恢复记录。' : '文档不存在，请重新读取或核对恢复记录。', { recoverable: true, details: { reason } })
+    }
+    const legacyId = body ? Number(row.legacy_chapter_id) : row.legacy_key === 'total' ? 1 : Number(String(row.legacy_key).split('-')[1])
+    const record = body ? this.formalChapter(legacyId)! : this.formalOutlineRecord(String(row.legacy_key), false, true)!
+    if (!record) throw new AppError('STORAGE_ERROR', '文档记录不完整，请核对恢复记录。', { recoverable: true })
+    if (!body && (target.kind === 'total' ? 'summary' : target.kind === 'chapter-outline' ? 'chapter' : target.kind) !== (record as WorkspaceOutlineRecord).nodeType) throw new AppError('CONFLICT', '大纲层级与文档身份不一致。', { recoverable: true })
+    return { ref: { workItemId: target.workItemId, kind: target.kind, documentId: String(row.id) }, legacyId,
+      title: record.title, content: record.content, versionId: record.currentVersionId, revision: record.revision, hash: record.contentHash }
+  }
+
+  documentReviewCatalog(workItemId: string) {
+    this.assertFormal()
+    const project = this.projectRow()!
+    if (workItemId !== project.prompt_work_item_id) throw new AppError('CONFLICT', '作品已切换。', { recoverable: true })
+    const outlines = this.database.prepare("SELECT id,parent_id,legacy_key,title FROM outline_nodes WHERE project_id=? AND status <> 'archived' AND current_version_id IS NOT NULL ORDER BY seq,id").all(String(project.id))
+    const totalId = outlines.find(row => row.legacy_key === 'total')?.id
+    const result = outlines.map(row => ({ document: { workItemId, documentId: String(row.id), kind: (row.legacy_key === 'total' ? 'total' : String(row.legacy_key).startsWith('chapter-') ? 'chapter-outline' : String(row.legacy_key).split('-')[0]) as DocumentRef['kind'] },
+      title: String(row.title), parentId: row.parent_id === null ? row.legacy_key === 'total' || !totalId ? null : String(totalId) : String(row.parent_id), legacyId: row.legacy_key === 'total' ? 1 : Number(String(row.legacy_key).split('-')[1]) }))
+    for (const row of this.database.prepare("SELECT id,legacy_chapter_id,title FROM chapters WHERE project_id=? AND status <> 'archived' AND current_body_version_id IS NOT NULL ORDER BY legacy_chapter_id").all(String(project.id))) {
+      result.push({ document: { workItemId, documentId: String(row.id), kind: 'body' }, title: String(row.title), legacyId: Number(row.legacy_chapter_id),
+        parentId: result.find(item => item.document.kind === 'chapter-outline' && item.legacyId === Number(row.legacy_chapter_id))?.document.documentId ?? (totalId ? String(totalId) : null) })
+    }
+    return result
+  }
+
+  outlineHistory(document: DocumentRef): OutlineHistoryEntry[] {
+    this.documentReviewSnapshot(document)
+    if (document.kind === 'body') throw new AppError('VALIDATION_ERROR', '请选择大纲文档。', { recoverable: true })
+    return this.database.prepare('SELECT id,version_no,source_type,created_at FROM outline_versions WHERE outline_node_id=? ORDER BY version_no DESC LIMIT 50')
+      .all(document.documentId).map(row => this.outlineHistoryEntry(row))
+  }
+  outlineVersion(input: OutlineVersionInput): { version: OutlineHistoryEntry; content: string } {
+    this.documentReviewSnapshot(input.document)
+    if (input.document.kind === 'body') throw new AppError('VALIDATION_ERROR', '请选择大纲文档。', { recoverable: true })
+    const row = this.database.prepare('SELECT * FROM outline_versions WHERE outline_node_id=? AND id=?').get(input.document.documentId, input.versionId)
+    if (!row) throw new AppError('NOT_FOUND', '历史版本不属于当前大纲或已不可读取。', { recoverable: true })
+    const content = this.readStoredText(row.content, row.content_hash)
+    if (hashText(content) !== row.content_hash) throw this.integrityError('大纲历史内容校验失败。')
+    return { version: this.outlineHistoryEntry(row), content }
+  }
+  private outlineHistoryEntry(row: Record<string, unknown>): OutlineHistoryEntry {
+    return { versionId: String(row.id), versionNo: Number(row.version_no), sourceType: String(row.source_type), createdAt: String(row.created_at) }
+  }
+
+  documentReviews(document: DocumentRef) { return this.reviewStore().list(document) }
+  reviewDraft(document: DocumentRef) { this.documentReviewSnapshot(document); return this.reviewStore().draft(document) }
+  reviewRecoveryHistory(document: DocumentRef) { return this.reviewStore().recoveryHistory(document) }
+  useLatestReviewDraft(input: RecoverReviewedDraftInput) { return this.transaction(() => this.reviewStore().useLatest(input)) }
+  openDocumentReview(input: OpenReviewInput) { return this.transaction(() => this.reviewStore().open(input)) }
+  syncReviewDraft(input: SyncReviewDraftInput) { return this.transaction(() => this.reviewStore().sync(input)) }
+  prepareReviewDecision(input: PrepareDecisionInput) { return this.transaction(() => this.reviewStore().prepare(input)) }
+  acknowledgeReviewStage(input: AcknowledgeDecisionInput) { return this.transaction(() => this.reviewStore().acknowledge(input)) }
+  discardReviewDecision(input: DiscardDecisionInput) { return this.transaction(() => this.reviewStore().discard(input)) }
+  saveReviewedDraft(input: SaveReviewedDraftInput) {
+    return this.manuscriptTransaction({ name: 'saveReviewedDraft', args: [input] }, () => this.reviewStore().save(input))
+  }
+
+  private validateReviewSource(source: ReviewSource, document: DocumentRef) {
+    const snapshot = this.documentReviewSnapshot(document)
+    const task = this.taskRun(source.taskId), artifact = this.generationArtifactForTask(source.taskId, source.artifactType)
+    if (!task || task.status !== 'succeeded' || !artifact || artifact.id !== source.artifactId || artifact.contentHash !== source.artifactHash
+      || artifact.status !== 'complete' || !artifact.schemaValid) throw new AppError('CONFLICT', '修订来源已变化或已经采用。', { recoverable: true })
+    if (task.taskType === annotationRevisionType) {
+      this.assertAnnotationRevisionCurrent(task.id)
+      const checkpoint = JSON.parse(task.checkpointJson) as AnnotationRevisionCheckpoint
+      const payload = JSON.parse(artifact.content) as { document: DocumentRef; candidate: string }
+      if (source.artifactType !== annotationRevisionType || checkpoint.target.ref.documentId !== document.documentId || checkpoint.target.ref.kind !== document.kind
+        || payload.document.documentId !== document.documentId || payload.document.workItemId !== document.workItemId || typeof payload.candidate !== 'string') revisionConflict('批注候选不属于当前文档。')
+    }
+    else if (document.kind === 'body') this.assertWritingArtifactProvenance(String(this.projectRow()!.id), document.documentId, snapshot.legacyId, task, artifact)
+    else throw new AppError('FEATURE_UNAVAILABLE', '大纲模型候选尚未连接到修订来源。', { recoverable: true })
+  }
+
+  assertAnnotationRevisionCurrent(taskId: string): void {
+    const task = this.taskRun(taskId)
+    if (!task || task.taskType !== annotationRevisionType) revisionConflict('批注改稿任务不存在。')
+    const c = JSON.parse(task!.checkpointJson) as AnnotationRevisionCheckpoint
+    if (c.version !== 1 || !c.request || !c.target?.ref || !Array.isArray(c.dependencies)) revisionConflict('批注改稿依据不完整。')
+    for (const ref of c.request.annotations) {
+      const annotation = this.documentAnnotation(c.request.origin, ref.id)
+      if (annotation.revision !== ref.revision || annotation.status !== 'open') revisionConflict('批注已变化，请重新生成修改建议。')
+    }
+    for (const dependency of c.dependencies) if (this.documentReviewSnapshot(dependency.ref).revision !== dependency.revision) revisionConflict('相关上级或批注原文已变化，请重新生成修改建议。')
+    if (c.request.origin.documentId !== c.target.ref.documentId && hashText(this.reviewDraft(c.request.origin)?.content ?? this.documentReviewSnapshot(c.request.origin).content) !== c.originDraftHash) revisionConflict('批注所在文档的编辑稿已变化，请重新生成关联建议。')
+    const target = this.documentReviewSnapshot(c.target.ref)
+    if (target.versionId === c.target.versionId && target.revision !== c.target.revision) revisionConflict('目标文件已被外部修改，请重新生成建议。')
+    let version = target.versionId
+    // Repeated saves from this same real task are allowed; a manual/other-task
+    // formal version in between invalidates the remaining candidate.
+    const table = c.target.ref.kind === 'body' ? 'body_versions' : 'outline_versions'
+    for (let i = 0; version !== c.target.versionId && i < 1000; i++) {
+      const row = this.database.prepare(`SELECT parent_id,review_application_id FROM ${table} WHERE id=?`).get(version)
+      const receipt = row?.review_application_id ? this.database.prepare('SELECT receipt_json FROM document_review_applications WHERE id=?').get(String(row.review_application_id)) : null
+      if (!receipt?.receipt_json || !(JSON.parse(String(receipt.receipt_json)).sourceLinks as Array<{ taskId: string }>).every(link => link.taskId === taskId)) revisionConflict('目标文档已保存了其他修改，请重新生成建议。')
+      version = String(row!.parent_id)
+    }
+    if (version !== c.target.versionId) revisionConflict('无法核对目标文档的版本链。')
+  }
+
+  private reviewStore() {
+    return new DocumentReviewStore(this.database, { projectId: String(this.projectRow()!.id), now: () => this.now().toISOString(), id: this.id,
+      snapshot: document => this.documentReviewSnapshot(document), validateSource: (source, document) => this.validateReviewSource(source, document),
+      write: (snapshot, draft, applicationId) => {
+        if (snapshot.ref.kind === 'body') this.writeFormalChapterInTransaction({ legacyChapterId: snapshot.legacyId, title: draft.title, content: draft.content,
+          expectedRevision: snapshot.revision, reason: applicationId ? 'ai' : 'manual', ...(applicationId ? { reviewApplicationId: applicationId, label: '逐处保留 AI 修订' } : {}) })
+        else {
+          const key = snapshot.ref.kind === 'total' ? 'total' : `${snapshot.ref.kind === 'chapter-outline' ? 'chapter' : snapshot.ref.kind}-${snapshot.legacyId}`
+          const record = this.formalOutlineRecord(key)!
+          this.writeFormalOutlineInTransaction({ ...record, title: draft.title, content: draft.content, expectedRevision: snapshot.revision,
+            sourceType: applicationId ? 'ai' : 'manual', ...(applicationId ? { reviewApplicationId: applicationId } : {}) })
+          if (this.formalOutlinePlanningStateReady()) {
+            const before = this.outlinePlanningState(), now = this.now().toISOString()
+            const content = reviewedOutlineState(before.content, { kind: snapshot.ref.kind, legacyId: snapshot.legacyId, title: draft.title, previousHash: snapshot.hash, nextHash: hashText(draft.content), now })
+            if (content !== before.content) {
+              assertOutlinePlanningStateDocument(content, hashText(content))
+              this.database.prepare('UPDATE outline_planning_state_documents SET revision=revision+1, content_json=?,content_hash=?,updated_at=? WHERE project_id=? AND content_hash=?')
+                .run(content, hashText(content), now, String(this.projectRow()!.id), before.contentHash)
+              this.prepareOutlinePlanningStateMirror(String(this.projectRow()!.id), now)
+            }
+          }
+        }
+        return this.documentReviewSnapshot(snapshot.ref)
+      } })
+  }
+
+  private assertReviewApplication(id: string, documentId: string, title: string, content: string) {
+    const row = this.database.prepare('SELECT * FROM document_review_applications WHERE id = ? AND project_id = ? AND document_id = ? AND receipt_json IS NULL')
+      .get(id, String(this.projectRow()!.id), documentId)
+    if (!row || row.content_hash !== hashText(content) || row.title !== title) throw new AppError('CONFLICT', '采用内容与修订记录不一致。', { recoverable: true })
+  }
   private closed = false
+  private readonly snapshotEventVersions = new Map<string, CanonicalEventVersions>()
   private fileCommand: ManuscriptCommand | null = null
   private fileIntents: ManuscriptFileIntent[] = []
   private fileExpectedHashes = new Map<string, string | null>()
@@ -2567,32 +2802,343 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
 
   static async openEventReadOnly(workItemId: string, now: () => Date = () => new Date(), id: () => string = () => randomUUID()): Promise<WorkspaceEventReadPort | null> {
     return this.openReadOnlyFacade(workItemId, now, id, (workspace, version, close) => {
-      const project = workspace.projectRow()
+      return workspace.eventReadFacade(version, close)
+    })
+  }
+
+  private eventReadFacade(version: number, close: () => void): WorkspaceEventReadPort {
+    const project = this.projectRow()
+    const pinnedVersions = () => {
+      this.assertOpen()
+      return this.readSchemaVersion !== undefined && version >= 38 && project?.storage_mode === 'sqlite'
+        ? this.eventVersions(String(project.id)) : null
+    }
+    // This owner has a private immutable SQLite copy. A write-transaction facade
+    // must never memoize a receipt, including an earlier absent receipt.
+    const receipts = new Map<string | undefined, ReturnType<typeof readEventMigrationReceipt>>()
+    const receipt = (operationId?: string) => {
+      if (this.closed) throw new AppError('STORAGE_ERROR', '事件只读快照已关闭，请重新读取。', { recoverable: true })
+      if (this.readSchemaVersion === undefined) return readEventMigrationReceipt(this.database, version, project ? String(project.id) : null, operationId)
+      if (!receipts.has(operationId)) receipts.set(operationId, readEventMigrationReceipt(this.database, version, project ? String(project.id) : null, operationId))
+      return receipts.get(operationId)!
+    }
+    const facade: WorkspaceEventReadPort = {
+      bookRoot: this.projectRoot,
+      schemaVersion: version,
+      projectId: project ? String(project.id) : null,
+      ...(version >= 48 ? { settlements: () => this.settlementStore() } : {}),
+      eventChapterCatalog: () => this.eventChapterCatalog(),
+      chapterEventSnapshot: (chapterId, volume) => this.chapterEventSnapshot(chapterId, volume),
+      hasEventMigrationEvidence: () => this.hasEventMigrationEvidence(),
+      eventMigrationReceipt: receipt,
+      eventMirrorStatus: (operationId?: string) => readEventMirrorPlan(this.database, facade, operationId)?.feedback ?? null,
+      eventState: () => readEventState(this.database, version, project ? String(project.id) : null, receipt),
+      eventStateInitializationPlan: () => readEventStateInitializationPlan(this.database, version, project ? String(project.id) : null),
+      eventOperationReceipt: (operationId: string) => readEventOperationReceipt(this.database, version, project ? String(project.id) : null, operationId),
+      eventManuscriptSource: (chapterId: number, revision: string) => {
+        if (!Number.isSafeInteger(chapterId) || chapterId < 1 || typeof revision !== 'string' || !revision) return null
+        const row = this.database.prepare(`SELECT c.id,v.id AS revision FROM chapters c JOIN body_versions v ON v.chapter_id=c.id
+          WHERE c.project_id=? AND c.legacy_chapter_id=? AND v.id=?`).get(String(project?.id), chapterId, revision)
+        return row ? { id: String(row.id), revision: String(row.revision) } : null
+      },
+      eventSourceAliases: () => {
+        if (!receipt()) return []
+        return this.database.prepare(`SELECT original_id AS originalId,event_id AS eventId,source_kind AS source
+          FROM event_migration_source_aliases WHERE project_id=? AND event_id IS NOT NULL ORDER BY ordinal`).all(String(project!.id))
+          .map(row => ({ originalId: String(row.originalId), eventId: String(row.eventId), source: row.source as 'events' | 'timeline' }))
+      },
+      storageMode: () => this.storageMode(),
+      formalMaterialSourcesReady: () => this.formalMaterialSourcesReady(),
+      listMaterialSources: () => this.listMaterialSources(),
+      searchMaterialSources: (terms: string[], pinned?: string[], limit?: number) => this.searchMaterialSources(terms, pinned, limit),
+      materialSourcesMirror: () => this.materialSourcesMirror(),
+      formalCanonicalEventsReady: () => this.formalCanonicalEventsReady(),
+      listCanonicalEvents: () => this.listCanonicalEvents(),
+      listCanonicalEventVersions: (eventId: string) => pinnedVersions()?.list(eventId) ?? this.listCanonicalEventVersions(eventId),
+      canonicalEventVersionHeads: (eventId: string) => {
+        const versions = pinnedVersions()
+        if (!versions) return this.canonicalEventVersionHeads(eventId)
+        versions.list(eventId)
+        return versions.heads(eventId)
+      },
+      canonicalEventsMirror: () => this.canonicalEventsMirror(),
+      formalOutlinePlanningStateReady: () => this.formalOutlinePlanningStateReady(),
+      outlinePlanningState: () => this.outlinePlanningState(),
+      outlinePlanningStateMirror: () => this.outlinePlanningStateMirror(),
+      formalWorkspaceConfigReady: (kind: WorkspaceConfigDocumentKind) => this.formalWorkspaceConfigReady(kind),
+      workspaceConfig: (kind: WorkspaceConfigDocumentKind) => this.workspaceConfig(kind),
+      workspaceConfigMirror: (kind: WorkspaceConfigDocumentKind) => this.workspaceConfigMirror(kind),
+      close: () => { receipts.clear(); close() }
+    }
+    return Object.freeze(facade)
+  }
+
+  /** URI mode=rw forbids creation even if the checked file disappears. */
+  static async openEventMigrationWrite(workItemId: string, now: () => Date = () => new Date(), id: () => string = () => randomUUID()): Promise<EventMigrationWritePort> {
+    return this.openEventWrite(workItemId, now, id, (workspace, assertIdentity, root) => Object.freeze({
+        commit: (review: ClaimedEventMigrationReview, assertActive: () => void) => {
+          try {
+            if (review.snapshot.scope.root !== root) throw new AppError('CONFLICT', '迁移作品与核对记录不一致。', { recoverable: true })
+            assertIdentity()
+            assertNoManuscriptMigration(root)
+            return workspace.commitEventMigration(review, assertActive)
+          } catch (cause) {
+            if (cause instanceof AppError) throw cause
+            throw new AppError('STORAGE_ERROR', '事件数据库暂不可提交，请重新核对；原始文件已保留。', { recoverable: true, cause })
+          }
+        },
+        close: () => workspace.close()
+      }))
+  }
+
+  static async openEventStateInitializationWrite(workItemId: string, now: () => Date = () => new Date(), id: () => string = () => randomUUID()): Promise<EventStateInitializationWritePort> {
+    return this.openEventWrite(workItemId, now, id, (workspace, assertIdentity, root) => Object.freeze({
+      initialize: (expected: EventStateInitializationPlan, assertActive: () => void) => {
+        assertIdentity()
+        assertNoManuscriptMigration(root)
+        workspace.initializeEventState(expected, assertActive)
+      },
+      close: () => workspace.close()
+    }))
+  }
+
+  private static async openEventWrite<T>(workItemId: string, now: () => Date, id: () => string,
+    facade: (workspace: SqliteWorkspaceDatabase, assertIdentity: () => void, root: string) => T): Promise<T> {
+    const root = await canonicalDirectory(workItemId)
+    let database: DatabaseSync | undefined
+    try {
+      const path = projectExistingPathSync(root, join(root, ...WORKSPACE_DATABASE_RELATIVE_PATH.split('/')))
+      const identity = statSync(path)
+      if (!identity.isFile()) throw new AppError('CONFLICT', '事件数据库已变化，请重新核对。', { recoverable: true })
+      const uri = pathToFileURL(path)
+      uri.searchParams.set('mode', 'rw')
+      database = new DatabaseSync(uri.href, { allowExtension: false })
+      database.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=100;')
+      const workspace = new SqliteWorkspaceDatabase(database, now, id, root)
+      const assertIdentity = () => {
+        const currentPath = projectExistingPathSync(root, path), current = statSync(currentPath)
+        if (currentPath !== path || identity.dev !== current.dev || identity.ino !== current.ino) {
+          throw new AppError('CONFLICT', '事件数据库已被替换，请重新核对。', { recoverable: true })
+        }
+      }
+      assertIdentity()
+      workspace.assertEventMigrationSchema()
+      return facade(workspace, assertIdentity, root)
+    } catch (cause) {
+      database?.close()
+      if (cause instanceof AppError) throw cause
+      throw new AppError('STORAGE_ERROR', '现有事件数据库暂不可提交；未创建或升级数据库。', { recoverable: true, cause })
+    }
+  }
+
+  static async openEventMirrorWrite(workItemId: string, now: () => Date = () => new Date(), id: () => string = () => randomUUID()): Promise<EventMirrorStoragePort> {
+    return this.openEventWrite(workItemId, now, id, (workspace, assertIdentity) => {
+      const checked = <T>(action: () => T, write = false): T => {
+        assertIdentity()
+        return workspace.eventMirrorTransaction(action, write)
+      }
+      const read = (operationId?: string) => {
+        const plan = readEventMirrorPlan(workspace.database, workspace.eventReadFacade(WORKSPACE_DATABASE_SCHEMA_VERSION, () => {}), operationId)
+        if (!plan) throw new AppError('FEATURE_UNAVAILABLE', '当前作品尚无已提交的事件迁移可供同步。', { recoverable: true })
+        return plan
+      }
       return Object.freeze({
-        schemaVersion: version,
-        projectId: project ? String(project.id) : null,
-        eventChapterCatalog: () => workspace.eventChapterCatalog(),
-        hasEventMigrationEvidence: () => workspace.hasEventMigrationEvidence(),
-        eventMigrationReceipt: (operationId?: string) => readEventMigrationReceipt(workspace.database, version, project ? String(project.id) : null, operationId),
-        storageMode: () => workspace.storageMode(),
-        formalMaterialSourcesReady: () => workspace.formalMaterialSourcesReady(),
-        listMaterialSources: () => workspace.listMaterialSources(),
-        searchMaterialSources: (terms: string[], pinned?: string[], limit?: number) => workspace.searchMaterialSources(terms, pinned, limit),
-        materialSourcesMirror: () => workspace.materialSourcesMirror(),
-        formalCanonicalEventsReady: () => workspace.formalCanonicalEventsReady(),
-        listCanonicalEvents: () => workspace.listCanonicalEvents(),
-        listCanonicalEventVersions: (eventId: string) => workspace.listCanonicalEventVersions(eventId),
-        canonicalEventVersionHeads: (eventId: string) => workspace.canonicalEventVersionHeads(eventId),
-        canonicalEventsMirror: () => workspace.canonicalEventsMirror(),
-        formalOutlinePlanningStateReady: () => workspace.formalOutlinePlanningStateReady(),
-        outlinePlanningState: () => workspace.outlinePlanningState(),
-        outlinePlanningStateMirror: () => workspace.outlinePlanningStateMirror(),
-        formalWorkspaceConfigReady: (kind: WorkspaceConfigDocumentKind) => workspace.formalWorkspaceConfigReady(kind),
-        workspaceConfig: (kind: WorkspaceConfigDocumentKind) => workspace.workspaceConfig(kind),
-        workspaceConfigMirror: (kind: WorkspaceConfigDocumentKind) => workspace.workspaceConfigMirror(kind),
-        close
+        read: (operationId?: string) => checked(() => read(operationId)),
+        assertCurrent: (plan: EventMirrorPlan) => checked(() => assertSameEventMirror(plan, read(plan.receipt.operationId))),
+        acknowledge: (plan: EventMirrorPlan, feedback: EventMirrorFeedback, observedHash: string | null) => checked(() => {
+          assertSameEventMirror(plan, read(plan.receipt.operationId))
+          const validFeedback = (feedback.status === 'synced' && feedback.issue === 'none')
+            || (feedback.status === 'pending' && feedback.issue === 'stale')
+            || (feedback.status === 'conflict' && feedback.issue === 'external-change')
+            || (feedback.status === 'failed' && feedback.issue === 'storage-error')
+          if (!validFeedback
+            || (observedHash !== null && !isSha256(observedHash))
+            || (feedback.status === 'synced' && observedHash !== plan.contentHash)) {
+            throw new AppError('VALIDATION_ERROR', '事件可读副本的同步结果无效。', { recoverable: true })
+          }
+          const synced = feedback.status === 'synced'
+          const lastError = synced ? null : feedback.status === 'conflict' ? 'MIRROR_EXTERNAL_CHANGE'
+            : feedback.status === 'failed' ? 'MIRROR_WRITE_FAILED' : 'MIRROR_STALE'
+          const changed = workspace.database.prepare(`UPDATE mirror_entries SET status=?, observed_hash=?, last_error_code=?,
+            previous_relative_path=?, previous_observed_hash=?, updated_at=?
+            WHERE project_id=? AND source_type='canonical_events_json' AND source_id=?`)
+            .run(feedback.status, observedHash, lastError,
+              synced ? null : EVENT_MIRROR_RELATIVE_PATH, synced ? null : plan.expectedFileHash, now().toISOString(), plan.receipt.projectId, plan.receipt.projectId)
+          if (Number(changed.changes) !== 1) throw new AppError('CONFLICT', '事件可读副本同步记录已变化，请重新读取。', { recoverable: true })
+        }, true),
+        close: () => workspace.close()
       })
     })
+  }
+
+  static async openEventOperationWrite(workItemId: string, now: () => Date = () => new Date(), id: () => string = () => randomUUID()): Promise<EventOperationWritePort> {
+    return this.openEventWrite(workItemId, now, id, (workspace, assertIdentity, root) => Object.freeze({
+      commit: (review: EventOperationReview, assertActive: () => void) => {
+        if (review.snapshot.scope.root !== root) throw new AppError('CONFLICT', '事件操作不属于当前作品。', { recoverable: true })
+        assertIdentity()
+        assertNoManuscriptMigration(root)
+        return workspace.commitEventOperation(review, assertActive)
+      }, close: () => workspace.close()
+    }))
+  }
+
+  private settlementStore(): ProseEventSettlementStorage {
+    const projectId = String(this.projectRow()!.id)
+    const physicalIdentity = () => {
+      const root = statSync(this.projectRoot, { bigint: true })
+      const file = statSync(projectExistingPathSync(this.projectRoot, join(this.projectRoot, ...WORKSPACE_DATABASE_RELATIVE_PATH.split('/'))), { bigint: true })
+      if (!root.isDirectory() || !file.isFile()) throw new AppError('CONFLICT', '作品文件已被替换，请重新核对。', { recoverable: true })
+      return hashText([root.dev, root.ino, root.birthtimeNs, file.dev, file.ino, file.birthtimeNs].join(':'))
+    }
+    const capturedIdentity = physicalIdentity()
+    return new ProseEventSettlementStorage(this.database, {
+      projectId, identity: () => {
+        if (physicalIdentity() !== capturedIdentity) throw new AppError('CONFLICT', '作品文件已被替换，请重新核对。', { recoverable: true })
+        return capturedIdentity
+      }, id: this.id, now: () => this.now().toISOString(),
+      chapter: chapterId => {
+        const pending = new ManuscriptCommitJournal(this.projectRoot).pending()
+        if (pending.some(item => !this.database.prepare('SELECT operation_id FROM manuscript_file_commits WHERE operation_id=?').get(item.operationId)))
+          throw new AppError('CONFLICT', '稿件保存尚待恢复，请先处理原有保存状态。', { recoverable: true })
+        return this.formalChapter(chapterId)
+      },
+      read: () => this.eventReadFacade(this.readSchemaVersion ?? WORKSPACE_DATABASE_SCHEMA_VERSION, () => {}),
+      insertEvent: event => this.insertCanonicalEventRecord(projectId, event),
+      updateEvent: (id, version) => this.updateCanonicalEventProjection(projectId, id, version, this.now().toISOString(), true),
+      mirror: () => this.prepareJsonMirror(projectId, 'canonical_events_json', projectId, '.webnovel/research/events.json',
+        unifiedEventMirrorContent(this.eventReadFacade(WORKSPACE_DATABASE_SCHEMA_VERSION, () => {})), this.now().toISOString())
+    })
+  }
+
+  static async openSettlementWrite(workItemId: string, now: () => Date = () => new Date(), id: () => string = () => randomUUID()): Promise<SettlementWritePort> {
+    return this.openEventWrite(workItemId, now, id, (workspace, assertIdentity, root) => {
+      const store = workspace.settlementStore()
+      return {
+        identity: () => { assertIdentity(); return store.identity() },
+        source: (chapterId: number) => { assertIdentity(); return store.source(chapterId) },
+        drafts: store.drafts.bind(store), decisions: store.decisions.bind(store), receipt: store.receipt.bind(store),
+        event: store.event.bind(store), statuses: store.statuses.bind(store),
+        saveDraft: (...args: Parameters<ProseEventSettlementStorage['saveDraft']>) => {
+          assertIdentity(); return workspace.transaction(() => store.saveDraft(...args))
+        },
+        saveDrafts: (source, candidates, taskId) => {
+          assertIdentity(); return workspace.transaction(() => candidates.map(candidate => store.saveDraft(source,candidate,undefined,undefined,taskId)))
+        },
+        commit: (command: SettlementCommand, active: () => void) => {
+          assertIdentity(); assertNoManuscriptMigration(root)
+          const prior=store.receipt(command.operationId)
+          if(prior){if(prior.requestHash!==command.requestHash)throw new AppError('CONFLICT','操作编号已用于其他结算。', {recoverable:true});return prior}
+          const source=store.source(command.source.basis.chapterId)
+          if(source.basis.fingerprint!==command.source.basis.fingerprint || source.body!==command.source.body) throw new AppError('CONFLICT','正文或计划已变化，请重新预览。',{recoverable:true})
+          return workspace.transaction(() => { active(); const result=store.commit(command,active); active(); return result })
+        },
+        close: () => workspace.close()
+      }
+    })
+  }
+
+  private commitEventOperation(review: EventOperationReview, assertActive: () => void) {
+    let began = false
+    try {
+      this.database.exec('BEGIN IMMEDIATE'); began = true
+      this.assertEventMigrationSchema(); assertActive()
+      const projectId = String(this.projectRow()!.id), timestamp = this.now().toISOString()
+      const read = this.eventReadFacade(WORKSPACE_DATABASE_SCHEMA_VERSION, () => {})
+      const receipt = writeReviewedEventOperation(this.database, read, review, timestamp, {
+        id: this.id,
+        insertEvent: event => this.insertCanonicalEventRecord(projectId, event),
+        updateEvent: (eventId, version) => this.updateCanonicalEventProjection(projectId, eventId, version, timestamp, true),
+        prepareMirror: () => { this.prepareJsonMirror(projectId, 'canonical_events_json', projectId,
+          '.webnovel/research/events.json', unifiedEventMirrorContent(read), timestamp) }
+      })
+      assertActive(); this.database.exec('COMMIT')
+      return receipt
+    } catch (cause) {
+      if (began) { try { this.database.exec('ROLLBACK') } catch { /* retain the first failure */ } }
+      if (cause instanceof AppError) throw cause
+      throw new AppError('STORAGE_ERROR', '事件操作未能提交，原事件、顺序和历史已保留。', { recoverable: true, cause })
+    }
+  }
+
+  private initializeEventState(expected: EventStateInitializationPlan, assertActive: () => void): void {
+    let began = false
+    try {
+      assertActive()
+      this.database.exec('BEGIN IMMEDIATE'); began = true
+      this.assertEventMigrationSchema(); assertActive()
+      const projectId = String(this.projectRow()!.id)
+      const actual = readEventStateInitializationPlan(this.database, WORKSPACE_DATABASE_SCHEMA_VERSION, projectId)
+      if (actual.operationId !== expected.operationId || actual.projectId !== expected.projectId
+        || actual.committedAt !== expected.committedAt || actual.orderHash !== expected.orderHash
+        || JSON.stringify(actual.eventIds) !== JSON.stringify(expected.eventIds)) {
+        throw new AppError('CONFLICT', '事件迁移记录已经变化，请重新预览恢复。', { recoverable: true })
+      }
+      initializeMigratedEventState(this.database, projectId, actual.eventIds, actual.committedAt, this.id)
+      readEventState(this.database, WORKSPACE_DATABASE_SCHEMA_VERSION, projectId)
+      assertActive(); this.database.exec('COMMIT')
+    } catch (cause) {
+      if (began) { try { this.database.exec('ROLLBACK') } catch { /* preserve first failure */ } }
+      if (cause instanceof AppError) throw cause
+      throw new AppError('STORAGE_ERROR', '事件状态恢复未能提交；原事件和迁移记录保持不变。', { recoverable: true, cause })
+    }
+  }
+
+  private eventMirrorTransaction<T>(action: () => T, write: boolean): T {
+    this.assertOpen()
+    let began = false
+    try {
+      this.database.exec(write ? 'BEGIN IMMEDIATE' : 'BEGIN')
+      began = true
+      this.assertEventMigrationSchema()
+      const result = action()
+      this.database.exec('COMMIT')
+      return result
+    } catch (cause) {
+      if (began) { try { this.database.exec('ROLLBACK') } catch { /* preserve first error */ } }
+      if (cause instanceof AppError) throw cause
+      throw new AppError('STORAGE_ERROR', '事件可读副本的同步记录暂不可用；已提交的事件仍然保留。', { recoverable: true, cause })
+    }
+  }
+
+  private assertEventMigrationSchema(): void {
+    if (this.database.prepare('PRAGMA user_version').get()?.user_version !== WORKSPACE_DATABASE_SCHEMA_VERSION) {
+      throw new AppError('FEATURE_UNAVAILABLE', '请先核对数据库版本；事件提交不会执行升级。', { recoverable: true })
+    }
+    this.validateSchema()
+    this.assertFormal()
+  }
+
+  private commitEventMigration(review: ClaimedEventMigrationReview, assertActive: () => void) {
+    this.assertOpen()
+    let began = false
+    try {
+      assertActive()
+      this.database.exec('BEGIN IMMEDIATE')
+      began = true
+      assertActive()
+      this.assertEventMigrationSchema()
+      const projectId = String(this.projectRow()!.id), timestamp = this.now().toISOString()
+      const receipt = writeReviewedEventMigration(this.database, this.eventReadFacade(WORKSPACE_DATABASE_SCHEMA_VERSION, () => {}), review, timestamp, {
+        id: this.id,
+        insertMaterial: source => this.insertMaterialSource(projectId, source),
+        insertEvent: event => this.insertCanonicalEventRecord(projectId, event),
+        prepareSourcesMirror: observedHash => {
+          this.prepareMaterialSourcesMirror(projectId, timestamp, observedHash ?? undefined)
+        },
+        prepareMirror: (content, observedHash) => {
+          this.prepareJsonMirror(projectId, 'canonical_events_json', projectId, '.webnovel/research/events.json', content, timestamp)
+          this.database.prepare(`UPDATE mirror_entries SET previous_relative_path=relative_path, previous_observed_hash=?
+            WHERE project_id=? AND source_type='canonical_events_json'`).run(observedHash, projectId)
+        }
+      })
+      assertActive()
+      this.database.exec('COMMIT')
+      return receipt
+    } catch (cause) {
+      if (began) { try { this.database.exec('ROLLBACK') } catch { /* retain the first failure */ } }
+      if (cause instanceof AppError) throw cause
+      throw new AppError('STORAGE_ERROR', '事件迁移事务未提交，原始文件和旧事件已保留。', { recoverable: true, cause })
+    }
   }
 
   static async readProjectIdentity(workItemId: string): Promise<{ title: string; genre: string } | null> {
@@ -2611,10 +3157,12 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
       return Object.freeze({
         storageMode: () => workspace.storageMode(),
         textAuthority: () => workspace.textAuthority(),
+        projectWritingConfig: () => workspace.projectWritingConfig(),
         formalBodyVersion: (id: number, versionId: string) => workspace.formalBodyVersion(id, versionId),
+        chapterPlanning: (id: number) => workspace.chapterPlanning(id),
         formalOutlineReady: () => workspace.formalOutlineReady(),
         formalChapters: () => workspace.formalChapters(),
-        formalOutlines: () => workspace.formalOutlines(),
+        formalOutlines: (filter) => workspace.formalOutlines(filter),
         readableMirrorPlans: (filter) => workspace.readableMirrorPlans(filter),
         close
       })
@@ -3192,6 +3740,12 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     return this.formalChapterRows(true)
   }
 
+  async formalChaptersAsync(): Promise<WorkspaceChapterRecord[]> {
+    this.assertFormal()
+    if (this.textAuthority() !== 'files-v1' || this.fileCommand) return this.formalChapters()
+    return (await this.readCurrentList('body')).map(({ row, current }) => this.chapterRecord(row, true, true, current))
+  }
+
   formalChapterIds(): number[] {
     this.assertFormal()
     return this.activeChapterIds()
@@ -3239,10 +3793,167 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     return Boolean(project && Number(project.outline_storage_ready) === 1)
   }
 
-  formalOutlines(): WorkspaceOutlineRecord[] {
+  formalOutlines(filter?: WorkspaceOutlineFilter): WorkspaceOutlineRecord[] {
     this.assertFormal()
     if (!this.formalOutlineReady()) throw new AppError('FEATURE_UNAVAILABLE', '这部作品的大纲仍由 Markdown 保存，尚未迁入 SQLite。', { recoverable: true })
-    return this.formalOutlineRows(true)
+    return this.formalOutlineRows(true, filter)
+  }
+
+  async formalOutlinesAsync(): Promise<WorkspaceOutlineRecord[]> {
+    this.assertFormal()
+    if (!this.formalOutlineReady()) throw new AppError('FEATURE_UNAVAILABLE', '这部作品的大纲仍由 Markdown 保存，尚未迁入 SQLite。', { recoverable: true })
+    if (this.textAuthority() !== 'files-v1' || this.fileCommand) return this.formalOutlines()
+    return (await this.readCurrentList('outline')).map(({ row, current }) => this.outlineRecord(row, true, true, current))
+  }
+
+  chapterEventSnapshot(chapterId: number, volume: number): ChapterEventStorageSnapshot {
+    this.assertFormal()
+    if (!Number.isSafeInteger(chapterId) || chapterId < 1 || chapterId > 1_000_000
+      || !Number.isSafeInteger(volume) || volume < 1 || volume > 1000) throw new AppError('VALIDATION_ERROR', '章或卷序无效。', { recoverable: true })
+    if (!this.formalOutlineReady() || !this.formalOutlinePlanningStateReady()) throw new AppError('FEATURE_UNAVAILABLE', '请先完成正式大纲与谋篇准备。', { recoverable: true })
+    const read = this.eventReadFacade(this.readSchemaVersion ?? WORKSPACE_DATABASE_SCHEMA_VERSION, () => {})
+    const state = read.eventState()
+    if (!read.eventMigrationReceipt() || !state) throw new AppError('FEATURE_UNAVAILABLE', '请先在纪事中完成正式事件转换和状态准备。', { recoverable: true })
+    const planning = this.outlinePlanningState()
+    const ledger = JSON.parse(planning.content)
+    const parents = ['total', `volume-${volume}`].map(key => {
+      const node = this.formalOutlineRecord(key, false, 'unchanged-source')
+      if (!node || node.nodeType !== (key === 'total' ? 'summary' : 'volume')) throw new AppError('CONFLICT', '正式总纲或卷纲缺失，请重新核对。', { recoverable: true })
+      return { key, revision: node.revision }
+    })
+    const chapter = this.formalOutlineRecord(`chapter-${chapterId}`, false, true)
+    if (chapter) {
+      const conflict = () => new AppError('CONFLICT', '章纲所属阶段或篇卷已变化，请重新核对。', { recoverable: true })
+      if (chapter.nodeType !== 'chapter') throw conflict()
+      if (chapter.parentLegacyKey !== `volume-${volume}`) {
+        if (!chapter.parentLegacyKey?.startsWith('stage-')) throw conflict()
+        const stage = this.formalOutlineRecord(chapter.parentLegacyKey, false, 'unchanged-source')
+        if (!stage || stage.nodeType !== 'stage' || stage.parentLegacyKey !== `volume-${volume}`) throw conflict()
+        parents.push({ key: stage.legacyKey, revision: stage.revision })
+      }
+    }
+    const ids = ledger.eventChapterPlacements.filter((p: { chapterId: number }) => p.chapterId === chapterId).map((p: { eventId: string }) => p.eventId) as string[]
+    if (ids.length > 50_000 || new Set(ids).size !== ids.length) throw this.integrityError('章纲关联事件无效。')
+    const eventHeads = ids.sort((a, b) => a.localeCompare(b)).map(id => {
+      const head = read.canonicalEventVersionHeads(id)
+      if (!head?.approvedVersionId || state.lifecycles.find(l => l.eventId === id)?.state !== 'active') throw new AppError('CONFLICT', '章纲关联事件缺失、未批准或已归档。', { recoverable: true })
+      return { id, revision: head.approvedVersionId }
+    })
+    return { planning, chapter: chapter ? { revision: chapter.revision, title: chapter.title, parent: chapter.parentLegacyKey } : null,
+      parents, orderId: state.order.id, eventHeads,
+      eventStates: ids.map(eventId => ({ eventId, latestVersionId: read.canonicalEventVersionHeads(eventId)!.latestVersionId,
+        lifecycleId: state.lifecycles.find(l => l.eventId === eventId)!.id })) }
+  }
+
+  recoverChapterEvent(operationId: string): ChapterEventOutput {
+    const lookup = () => (JSON.parse(this.outlinePlanningState().content).chapterEventOutputs as ChapterEventOutput[] | undefined)?.find(r => r.operationId === operationId)
+    const committed = lookup()
+    if (committed) return committed
+    const journal = new ManuscriptCommitJournal(this.projectRoot)
+    const pending = journal.pending().some(receipt => {
+      const command = journal.command(receipt)
+      return command.name === 'adoptChapterEvent' && command.args[0].operationId === operationId
+    })
+    if (!pending) throw new AppError('NOT_FOUND', '未找到本次联合采用的提交或恢复记录；请核对正式数据后重新预览。', { recoverable: true })
+    this.recoverManuscriptCommits()
+    const recovered = lookup()
+    if (!recovered) throw this.integrityError('联合采用恢复记录未能核实。')
+    return recovered
+  }
+
+  adoptChapterEvent(input: ChapterEventAdoption): ChapterEventOutput {
+    assertChapterEventAdoption(input)
+    const requestHash = chapterEventRequestHash(input)
+    const conflict = () => new AppError('CONFLICT', '章纲、正式事件或来源在核对后变化，请重新核对；未执行联合采用。', { recoverable: true })
+    return this.manuscriptTransaction({ name: 'adoptChapterEvent', args: [input] }, () => {
+      const current = this.outlinePlanningState()
+      const prior = JSON.parse(current.content).chapterEventOutputs as ChapterEventOutput[] | undefined
+      const receipt = prior?.find(r => r.operationId === input.operationId)
+      if (receipt) {
+        if (receipt.requestHash !== requestHash) throw conflict()
+        return receipt
+      }
+      const snapshot = this.chapterEventSnapshot(input.chapterId, input.volume)
+      if (snapshot.planning.contentHash !== input.expectedPlanningHash || snapshot.orderId !== input.expectedOrderId
+        || JSON.stringify(snapshot.parents) !== JSON.stringify(input.parents) || JSON.stringify(snapshot.eventHeads) !== JSON.stringify(input.eventHeads)) throw conflict()
+      const key = `chapter-${input.chapterId}`
+      const nodeId = deterministicOutlineId(String(this.projectRow()!.id), key)
+      const stored = this.database.prepare('SELECT id,status FROM outline_nodes WHERE project_id=? AND legacy_key=?').get(String(this.projectRow()!.id), key)
+      if (stored?.status === 'archived' || (stored && !snapshot.chapter)) throw conflict()
+      const baseline = stored && this.textAuthority() === 'files-v1' ? this.fileWriteBaseline(String(stored.id), 'outline') : null
+      const revision = baseline ? hashText(`${key}\u0000${baseline.title}\u0000${baseline.content}`) : snapshot.chapter?.revision ?? null
+      const targetParent = input.parents[input.parents.length - 1].key
+      if (revision !== input.expectedOutlineRevision || (snapshot.chapter && snapshot.chapter.parent !== targetParent)) throw conflict()
+      assertOutlinePlanningStateDocument(input.planningContent, hashText(input.planningContent))
+      const next = JSON.parse(input.planningContent), before = JSON.parse(current.content)
+      assertSkeletonHistoryAppend(before.formalSkeleton ?? [], next.formalSkeleton ?? [])
+      // Output receipts can only be appended here; the prepared state retains all prior receipts.
+      if (JSON.stringify(before.chapterEventOutputs ?? []) !== JSON.stringify(next.chapterEventOutputs ?? [])) throw conflict()
+      const sources = next.chapters.find((c: { chapterId: number }) => c.chapterId === input.chapterId)?.sources
+      const stageParent = snapshot.parents[2]
+      if (sources?.stage?.id !== (stageParent ? Number(stageParent.key.slice(6)) : undefined)
+        || sources?.stage?.revision !== stageParent?.revision || (sources?.stage && sources.stage.volume !== input.volume)) throw conflict()
+      const items = chapterEventItems(input)
+      const created = items.filter(e => !e.replaces)
+      const replaced = new Set(items.filter(e => e.replaces).map(e => e.eventId))
+      const expectedEvents = [...input.eventHeads.filter(e => !replaced.has(e.id)), ...items.map(e => ({ id: e.eventId, revision: e.eventVersionId }))].sort((a, b) => a.id.localeCompare(b.id))
+      if (!sources || expectedEvents.length > 50_000 || JSON.stringify(sources.events) !== JSON.stringify(expectedEvents)
+        || next.chapters.find((c: { chapterId: number }) => c.chapterId === input.chapterId)?.outlineHash !== chapterContentHash(input.content)
+        || items.some(e => !next.eventChapterPlacements.some((p: { chapterId: number; eventId: string }) => p.chapterId === input.chapterId && p.eventId === e.eventId))) throw conflict()
+      const read = this.eventReadFacade(WORKSPACE_DATABASE_SCHEMA_VERSION, () => {})
+      const previousVersions = new Map<string, StoryEventVersion>()
+      for (const item of items) if (item.replaces) {
+        const state = snapshot.eventStates?.find(s => s.eventId === item.eventId)
+        const source = read.listCanonicalEventVersions(item.eventId).find(v => v.id === item.replaces!.eventVersionId)
+        if (!prior?.some(o => o.chapterId === input.chapterId && chapterEventOutputItems(o).some(e => e.eventId === item.eventId))
+          || state?.latestVersionId !== item.replaces.eventVersionId || state?.lifecycleId !== item.expectedLifecycleId
+          || !source || source.status !== 'approved' || source.phase !== 'planned' || source.granularity !== 'chapter-detail') throw conflict()
+        previousVersions.set(item.eventId, source)
+      }
+      for (const item of items) if (item.refines) {
+        const source = read.listCanonicalEventVersions(item.refines.eventId).find(version => version.id === item.refines!.eventVersionId)
+        if (!source || source.status !== 'approved' || source.phase !== 'planned') throw conflict()
+      }
+      const result = this.writeFormalOutlineInTransaction({ legacyKey: key, parentLegacyKey: targetParent,
+        nodeType: 'chapter', seq: input.chapterId, title: input.title, content: input.content,
+        ...(input.expectedOutlineRevision ? { expectedRevision: input.expectedOutlineRevision } : {}), sourceType: 'manual' })
+      const projectId = String(this.projectRow()!.id)
+      const state = read.eventState()!
+      if (state.order.eventIds.length + created.length > 100_000) throw conflict()
+      for (const item of items) {
+        if (!item.replaces) this.insertCanonicalEventRecord(projectId, { ...item.event, id: item.eventId, status: 'approved', createdAt: input.timestamp, approvedAt: input.timestamp })
+        const version = new CanonicalEventVersions(this.database, projectId, () => item.eventVersionId).append(item.eventId, item.replaces?.eventVersionId ?? null, {
+          content: item.event, status: 'approved', phase: 'planned', granularity: 'chapter-detail', creator: 'author',
+          sources: [{ relation: 'derived-from', source: { kind: 'chapter-outline', id: stored ? String(stored.id) : nodeId, revision: result.outline.currentVersionId } },
+            ...(item.refines ? [{ relation: 'refines' as const, source: { kind: 'event' as const, id: item.refines.eventId, revision: item.refines.eventVersionId } }] : []),
+            ...(item.replaces ? [{ relation: 'supersedes' as const, source: { kind: 'event' as const, id: item.eventId, revision: item.replaces.eventVersionId } },
+              ...previousVersions.get(item.eventId)!.sources.filter(s => s.relation === 'refines')] : [])]
+        }, input.timestamp)
+        if (item.replaces) this.updateCanonicalEventProjection(projectId, item.eventId, version, input.timestamp, true)
+        else this.database.prepare(`INSERT INTO event_lifecycle_versions
+          (id,project_id,event_id,revision,previous_id,expected_event_version_id,state,created_at) VALUES (?,?,?,1,NULL,?,'active',?)`)
+          .run(item.lifecycleId, projectId, item.eventId, item.eventVersionId, input.timestamp)
+      }
+      if (created.length) {
+        const order = JSON.stringify([...state.order.eventIds, ...created.map(e => e.eventId)])
+        this.database.prepare(`INSERT INTO event_display_order_versions
+        (id,project_id,revision,previous_id,event_ids_json,content_hash,created_at) VALUES (?,?,?,?,?,?,?)`)
+          .run(input.orderId, projectId, state.order.revision + 1, state.order.id, order, hashText(order), input.timestamp)
+      }
+      const output: ChapterEventOutput = { operationId: input.operationId, chapterId: input.chapterId, eventId: input.eventId, eventVersionId: input.eventVersionId, requestHash,
+        ...(input.replaces ? { replacesVersionId: input.replaces.eventVersionId } : {}),
+        ...(items.length > 1 ? { additionalEvents: items.slice(1).map(e => ({ eventId: e.eventId, eventVersionId: e.eventVersionId,
+          ...(e.replaces ? { replacesVersionId: e.replaces.eventVersionId } : {}) })) } : {}) }
+      next.chapterEventOutputs = [...(prior ?? []), output]
+      const content = JSON.stringify(next)
+      assertOutlinePlanningStateDocument(content, hashText(content))
+      this.database.prepare(`UPDATE outline_planning_state_documents SET revision=revision+1,content_json=?,content_hash=?,updated_at=? WHERE project_id=? AND content_hash=?`)
+        .run(content, hashText(content), input.timestamp, projectId, input.expectedPlanningHash)
+      this.prepareOutlinePlanningStateMirror(projectId, input.timestamp)
+      this.prepareJsonMirror(projectId, 'canonical_events_json', projectId, '.webnovel/research/events.json', unifiedEventMirrorContent(read), input.timestamp)
+      read.eventState()
+      return output
+    })
   }
 
   writeFormalOutline(input: WorkspaceOutlineWriteInput): { outline: WorkspaceOutlineRecord; mirror: WorkspaceMirrorPlan; insertedVersion: boolean } {
@@ -3303,6 +4014,11 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     })
   }
 
+  private assertNoStagedReview(documentId: string) {
+    const staged = this.database.prepare("SELECT 1 FROM document_review_drafts WHERE document_id = ? AND json_array_length(payload_json, '$.stagedDecisionIds') > 0 LIMIT 1").get(documentId)
+    if (staged) throw new AppError('CONFLICT', '此文档有已保留的 AI 修订，请通过修订保存流程处理，当前草稿仍保留。', { recoverable: true })
+  }
+
   private writeFormalOutlineInTransaction(input: WorkspaceOutlineWriteInput): { outline: WorkspaceOutlineRecord; mirror: WorkspaceMirrorPlan; insertedVersion: boolean } {
     this.assertFormal()
     if (!this.formalOutlineReady()) throw new AppError('FEATURE_UNAVAILABLE', '大纲尚未迁入 SQLite，未执行写入。', { recoverable: true })
@@ -3327,6 +4043,11 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
       const revision = fileBaseline ? hashText(`${input.legacyKey}\u0000${fileBaseline.title}\u0000${fileBaseline.content}`) : current?.revision
       if (input.expectedRevision && revision !== input.expectedRevision) throw new AppError('CONFLICT', '大纲已经更新，未覆盖较新的版本。', { recoverable: true })
       const nodeId = stored ? String(stored.id) : deterministicOutlineId(projectId, input.legacyKey)
+      if (stored && !input.reviewApplicationId) this.assertNoStagedReview(nodeId)
+      if (input.reviewApplicationId) {
+        if (input.sourceType !== 'ai' || !input.expectedRevision) throw new AppError('VALIDATION_ERROR', '修订采用必须核对正式版本。', { recoverable: true })
+        this.assertReviewApplication(input.reviewApplicationId, nodeId, input.title, input.content)
+      }
       let importedExternal = false
       if (fileBaseline?.external && current) {
         if (!input.expectedRevision || input.sourceType === 'ai') throw new AppError('CONFLICT', '大纲已被外部修改，请先重新读取并核对当前稿。', { recoverable: true })
@@ -3379,8 +4100,8 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
       if (changed) {
         versionId = this.id()
         const versionNo = Number(this.scalar(this.database.prepare('SELECT COALESCE(MAX(version_no), 0) + 1 AS value FROM outline_versions WHERE outline_node_id = ?').get(nodeId), 'value'))
-        this.database.prepare(`INSERT INTO outline_versions (id, outline_node_id, version_no, content, content_hash, parent_id, source_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(versionId, nodeId, versionNo, this.storeText(input.content), contentHash, current?.currentVersionId ?? null, input.sourceType ?? 'manual', timestamp)
+        this.database.prepare(`INSERT INTO outline_versions (id, outline_node_id, version_no, content, content_hash, parent_id, source_type, review_application_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(versionId, nodeId, versionNo, this.storeText(input.content), contentHash, current?.currentVersionId ?? null, input.sourceType ?? 'manual', input.reviewApplicationId ?? null, timestamp)
       }
       if (!versionId) throw this.integrityError('SQLite 大纲缺少当前版本。')
       this.database.prepare(`UPDATE outline_nodes SET parent_id = ?, node_type = ?, seq = ?, title = ?, content = ?, content_hash = ?, status = 'draft', current_version_id = ?, updated_at = ? WHERE id = ?`)
@@ -3413,6 +4134,9 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
       }
       const task = this.taskRun(input.taskRunId)
       const artifact = this.generationArtifactForTask(input.taskRunId, input.artifactType)
+      if (artifact && this.database.prepare('SELECT id FROM document_review_sessions WHERE artifact_id = ?').get(artifact.id)) {
+        throw new AppError('CONFLICT', '这份候选已进入正文红字修订，请在原文处逐项处理。', { recoverable: true })
+      }
       if (!task || task.legacyChapterId !== input.legacyChapterId || !artifact || artifact.id !== input.artifactId || !artifact.schemaValid) {
         throw new AppError('CONFLICT', '写作候选不属于当前作品或章节。', { recoverable: true })
       }
@@ -3511,6 +4235,7 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
       const stored = this.row(this.database.prepare(`
         SELECT id, current_body_version_id, confirmed_body_version_id, status FROM chapters WHERE project_id = ? AND legacy_chapter_id = ?
       `).get(projectId, input.legacyChapterId))
+      if (stored && !input.reviewApplicationId) this.assertNoStagedReview(String(stored.id))
       let current = stored ? this.formalChapterRecord(input.legacyChapterId, true) : undefined
       const fileBaseline = current && stored?.status !== 'archived' && this.textAuthority() === 'files-v1'
         ? this.fileWriteBaseline(String(stored!.id), 'body', input.reason === 'restore') : null
@@ -3565,7 +4290,10 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
       if (Boolean(input.sourceTaskRunId) !== Boolean(input.generationArtifactId)) {
         throw new AppError('VALIDATION_ERROR', 'AI 正文版本必须同时记录任务与具体 Artifact。', { recoverable: true })
       }
-      if (input.sourceTaskRunId && input.generationArtifactId) {
+      if (input.reviewApplicationId) {
+        if (input.reason !== 'ai' || !input.expectedRevision || input.sourceTaskRunId || input.generationArtifactId) throw new AppError('VALIDATION_ERROR', '逐处采用与旧整份采用的来源不能混用。', { recoverable: true })
+        this.assertReviewApplication(input.reviewApplicationId, chapterId, input.title, input.content)
+      } else if (input.sourceTaskRunId && input.generationArtifactId) {
         if (input.reason !== 'ai' || !input.expectedRevision) throw new AppError('VALIDATION_ERROR', 'AI 来源只能用于带版本核对的 AI 正文。', { recoverable: true })
         const task = this.taskRun(input.sourceTaskRunId)
         const sourceRow = this.row(this.database.prepare('SELECT * FROM generation_artifacts WHERE id = ? AND task_run_id = ?').get(input.generationArtifactId, input.sourceTaskRunId))
@@ -3589,9 +4317,9 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
         versionId = this.id()
         const versionNo = Number(this.scalar(this.database.prepare('SELECT COALESCE(MAX(version_no), 0) + 1 AS value FROM body_versions WHERE chapter_id = ?').get(chapterId), 'value'))
         this.database.prepare(`
-          INSERT INTO body_versions (id, chapter_id, version_no, content, content_hash, parent_id, restored_from_version_id, source_type, source_task_run_id, generation_artifact_id, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(versionId, chapterId, versionNo, this.storeText(input.content), contentHash, current?.currentVersionId ?? null, input.restoredFromVersionId ?? null, input.reason, input.sourceTaskRunId ?? null, input.generationArtifactId ?? null, timestamp)
+          INSERT INTO body_versions (id, chapter_id, version_no, content, content_hash, parent_id, restored_from_version_id, source_type, source_task_run_id, generation_artifact_id, review_application_id, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(versionId, chapterId, versionNo, this.storeText(input.content), contentHash, current?.currentVersionId ?? null, input.restoredFromVersionId ?? null, input.reason, input.sourceTaskRunId ?? null, input.generationArtifactId ?? null, input.reviewApplicationId ?? null, timestamp)
         this.writeDocumentChunks(projectId, chapterId, versionId, input.content, timestamp)
         this.database.prepare(`INSERT INTO body_version_metadata (version_id, title, reason, label) VALUES (?, ?, ?, ?)`).run(versionId, input.title, input.reason, revisionLabel ?? null)
         this.database.prepare(`
@@ -3628,6 +4356,24 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
       || artifact.taskRunId !== task.id || artifact.baseBodyVersionId !== task.baseBodyVersionId || !task.baseBodyVersionId
       || !task.contentHash) {
       throw new AppError('CONFLICT', '写作候选的任务、作品、章节或基线不一致。', { recoverable: true })
+    }
+    const packageRecord = this.contextPackageForTask(task.id)
+    const alreadyWritten = artifact.status === 'applied' && this.row(this.database.prepare(
+      'SELECT id FROM body_versions WHERE chapter_id = ? AND generation_artifact_id = ? AND source_task_run_id = ?'
+    ).get(chapterId, artifact.id, task.id))
+    if (packageRecord && !alreadyWritten) {
+      const content = JSON.parse(packageRecord.contentJson) as { contexts?: Array<{ content: string }> }
+      const expected = worldbookContextVersion((content.contexts ?? []).map(item => item.content).join('\n'))
+      if (expected) {
+        const entities = this.listEntities().filter(item => item.status === 'approved')
+          .map(item => ({ id: item.id, type: item.entityType, name: item.canonicalName, profile: JSON.parse(item.profileJson) }))
+        const ids = new Set(entities.map(item => item.id))
+        const relations = this.listEntityRelations().filter(item => ids.has(item.subjectEntityId) && ids.has(item.objectEntityId))
+          .map(({ subjectEntityId, objectEntityId, predicate, notes }) => ({ subjectEntityId, objectEntityId, predicate, notes }))
+        if (expected !== worldbookFingerprint(entities, this.worldbookChapterOrder(), relations)) {
+          throw new AppError('CONFLICT', '世界书或章节顺序已变化，请重新核对生成依据；候选仍保留。', { recoverable: true })
+        }
+      }
     }
     const base = this.row(this.database.prepare(`
       SELECT content, content_hash FROM body_versions WHERE id = ? AND chapter_id = ?
@@ -3672,6 +4418,8 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     const project = this.projectRow()
     if (!project) throw this.integrityError('作品数据库缺少项目记录。')
     const projectId = String(project.id)
+    const reviewChapter = this.database.prepare('SELECT id FROM chapters WHERE project_id = ? AND legacy_chapter_id = ?').get(projectId, input.legacyChapterId)
+    if (reviewChapter) this.assertNoStagedReview(String(reviewChapter.id))
     const configuredWindow = Number(project.autosave_merge_window_ms ?? WORKSPACE_AUTOSAVE_CHECKPOINT_WINDOW_MS)
     const mergeWindowMs = input.mergeWindowMs ?? configuredWindow
     if (!Number.isSafeInteger(mergeWindowMs) || mergeWindowMs < 1_000 || mergeWindowMs > 600_000) {
@@ -4332,14 +5080,16 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     this.assertFormal()
     const chapter = this.formalChapterRecord(legacyChapterId)
     if (!chapter) throw new AppError('NOT_FOUND', `第 ${legacyChapterId} 章不存在`, { recoverable: true })
+    const hasReviews = Number(this.database.prepare('PRAGMA user_version').get()?.user_version) >= 45
     return this.rows(this.database.prepare(`
       SELECT versions.id, versions.content, versions.content_hash, versions.created_at, versions.source_type,
-             versions.source_task_run_id, versions.generation_artifact_id,
+             versions.source_task_run_id, versions.generation_artifact_id, ${hasReviews ? 'applications.receipt_json' : 'NULL'} AS review_receipt_json,
              metadata.title, metadata.reason, metadata.label,
              CASE WHEN versions.id = chapters.current_body_version_id THEN 1 ELSE 0 END AS is_current
       FROM body_versions versions
       JOIN chapters ON chapters.id = versions.chapter_id
       JOIN body_version_metadata metadata ON metadata.version_id = versions.id
+      ${hasReviews ? 'LEFT JOIN document_review_applications applications ON applications.id = versions.review_application_id' : ''}
       WHERE chapters.legacy_chapter_id = ?
       ORDER BY versions.version_no DESC
       LIMIT 500
@@ -4377,6 +5127,7 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
       const row = this.row(this.database.prepare(`
         SELECT versions.id, versions.content, versions.content_hash, versions.created_at, versions.source_type,
                versions.source_task_run_id, versions.generation_artifact_id,
+               (SELECT receipt_json FROM document_review_applications WHERE id=versions.review_application_id) AS review_receipt_json,
                metadata.title, metadata.reason, metadata.label,
                CASE WHEN versions.id = chapters.current_body_version_id THEN 1 ELSE 0 END AS is_current
         FROM chapters
@@ -4498,6 +5249,7 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     }
     const projectId = String(this.projectRow()!.id)
     const predicates = ['mirrors.project_id = ?']
+    if (this.hasEventMigrationEvidence()) predicates.push("mirrors.source_type <> 'canonical_events_json' AND NOT (mirrors.source_type = 'workspace_config_json' AND mirrors.source_id = 'timeline')")
     const parameters: Array<string> = [projectId]
     if (pendingOnly) predicates.push("mirrors.status <> 'synced'")
     if (filter?.sourceTypes?.length) {
@@ -4536,6 +5288,16 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
       WHERE ${predicates.join(' AND ')}
       ORDER BY ${pendingOnly ? 'mirrors.updated_at, mirrors.source_type, mirrors.source_id' : 'mirrors.source_type, mirrors.relative_path'}
     `).all(...parameters)).map((row) => this.mirrorPlanFromRow(row, projectId))
+  }
+
+  assertMirrorPlanCurrent(plan: WorkspaceMirrorPlan): void {
+    this.assertFormal()
+    if (plan.sourceType === 'canonical_events_json' || (plan.sourceType === 'workspace_config_json' && plan.sourceId === 'timeline')) this.assertLegacyEventWrite()
+    const row = this.database.prepare(`SELECT source_version_id, content_hash, relative_path FROM mirror_entries
+      WHERE project_id=? AND source_type=? AND source_id=?`).get(String(this.projectRow()!.id), plan.sourceType, plan.sourceId)
+    if (!row || row.source_version_id !== plan.sourceVersionId || row.content_hash !== plan.contentHash || row.relative_path !== plan.relativePath) {
+      throw new AppError('CONFLICT', '可读副本的写入计划已经变化，未覆盖原文件。', { recoverable: true })
+    }
   }
 
   acknowledgeMirror(plan: WorkspaceMirrorPlan, status: WorkspaceMirrorStatus, observedHash?: string, errorCode?: string): void {
@@ -4992,6 +5754,9 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
   }
 
   updateGenerationArtifactStatus(id: string, status: WorkspaceArtifactStatus, metadataJson: string): WorkspaceGenerationArtifactRecord {
+    if (['applied', 'discarded'].includes(status) && this.database.prepare('SELECT id FROM document_review_sessions WHERE artifact_id = ?').get(id)) {
+      throw new AppError('CONFLICT', '这份候选正在原文处逐项审阅，请使用红字修订中的保留或撤销。', { recoverable: true })
+    }
     this.assertOpen()
     assertJsonText(metadataJson, 200_000, 'Artifact 元数据')
     const row = this.row(this.database.prepare(`
@@ -5328,6 +6093,12 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     `).all(projectId)).map((row) => this.characterAliasRecord(row))
   }
 
+  worldbookChapterOrder(): Array<{ id: number; position: number }> {
+    this.assertFormal()
+    return this.database.prepare("SELECT legacy_chapter_id, seq FROM chapters WHERE project_id = ? AND status <> 'archived' ORDER BY seq").all(String(this.projectRow()!.id))
+      .map(row => ({ id: Number(row.legacy_chapter_id), position: Number(row.seq) }))
+  }
+
   upsertEntity(input: WorkspaceEntityInput): WorkspaceEntityWriteResult {
     this.assertFormal()
     if (!['character', 'location', 'item', 'organization', 'world_rule'].includes(input.entityType)) {
@@ -5339,6 +6110,8 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     if (!normalizedName) throw new AppError('VALIDATION_ERROR', '资料对象名称无效。', { recoverable: true })
     const profileJson = input.profileJson ?? '{}'
     assertJsonText(profileJson, 500_000, '资料对象档案')
+    try { readWorldbookProfile(JSON.parse(profileJson)) }
+    catch { throw new AppError('VALIDATION_ERROR', '世界书格式无效，未保存。', { recoverable: true }) }
     if (input.entityType === 'item') assertNoResourceQuantityFields(profileJson)
     const status = input.status ?? 'approved'
     if (!['candidate', 'approved', 'archived'].includes(status)) throw new AppError('VALIDATION_ERROR', '资料对象状态无效。', { recoverable: true })
@@ -5358,7 +6131,10 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
         const idOwner = this.row(this.database.prepare('SELECT project_id FROM entities WHERE id = ?').get(input.id))
         if (idOwner && String(idOwner.project_id) !== projectId) throw new AppError('VALIDATION_ERROR', '资料对象不属于当前作品。', { recoverable: true })
       }
-      this.database.prepare(`
+      const existingId = this.row(this.database.prepare('SELECT id FROM entities WHERE id = ? AND project_id = ?').get(id, projectId))
+      if (existingId) this.database.prepare('UPDATE entities SET entity_type = ?, canonical_name = ?, normalized_name = ?, profile_json = ?, status = ?, updated_at = ? WHERE id = ? AND project_id = ?')
+        .run(input.entityType, canonicalName, normalizedName, profileJson, status, timestamp, id, projectId)
+      else this.database.prepare(`
         INSERT INTO entities (id, project_id, entity_type, canonical_name, normalized_name, profile_json, status, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(project_id, entity_type, normalized_name) DO UPDATE SET canonical_name = excluded.canonical_name,
@@ -5621,6 +6397,7 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
 
   importCanonicalEvents(events: WorkspaceCanonicalEventRecord[], observedMirrorHash?: string): WorkspaceCanonicalEventsWriteResult {
     this.assertFormal()
+    this.assertLegacyEventWrite()
     if (this.formalCanonicalEventsReady()) return { events: this.listCanonicalEvents(), mirror: null }
     assertCanonicalEvents(events)
     const projectId = String(this.projectRow()!.id)
@@ -5630,6 +6407,7 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     const timestamp = this.now().toISOString()
     let mirror!: WorkspaceMirrorPlan
     this.transaction(() => {
+      this.assertLegacyEventWrite()
       for (const event of events) {
         this.insertCanonicalEvent(projectId, event)
       }
@@ -5649,6 +6427,7 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
 
   createCanonicalEvent(event: WorkspaceCanonicalEventRecord): WorkspaceCanonicalEventWriteResult {
     this.assertFormal()
+    this.assertLegacyEventWrite()
     if (!this.formalCanonicalEventsReady()) throw new AppError('FEATURE_UNAVAILABLE', '本书正式事件尚未迁入 SQLite。', { recoverable: true })
     assertCanonicalEvents([event])
     const projectId = String(this.projectRow()!.id)
@@ -5656,6 +6435,7 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     let mirror!: WorkspaceMirrorPlan
     try {
       this.transaction(() => {
+      this.assertLegacyEventWrite()
         const conflict = this.listCanonicalEvents().find((item) => sameCanonicalEventSlot(item, event)
           && normalizeStoryText(item.event) !== normalizeStoryText(event.event))
         if (conflict) {
@@ -5678,11 +6458,13 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
 
   approveCanonicalEvent(id: string): WorkspaceCanonicalEventWriteResult {
     this.assertFormal()
+    this.assertLegacyEventWrite()
     if (!this.formalCanonicalEventsReady()) throw new AppError('FEATURE_UNAVAILABLE', '本书正式事件尚未迁入 SQLite。', { recoverable: true })
     const projectId = String(this.projectRow()!.id)
     const timestamp = this.now().toISOString()
     let mirror: WorkspaceMirrorPlan | null = null
     this.transaction(() => {
+      this.assertLegacyEventWrite()
       const row = this.row(this.database.prepare('SELECT * FROM canonical_events WHERE project_id = ? AND id = ?').get(projectId, id))
       if (!row) throw new AppError('NOT_FOUND', '事件候选不存在或已经移除。', { recoverable: true })
       const versions = this.eventVersions(projectId)
@@ -5722,7 +6504,9 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
 
   baselineCanonicalEventVersions(): StoryEventVersion[] {
     this.assertFormal()
+    this.assertLegacyEventWrite()
     return this.transaction(() => {
+      this.assertLegacyEventWrite()
       const versions = this.eventVersions(String(this.projectRow()!.id))
       return this.listCanonicalEvents().map((event) => versions.baseline(event, event.createdAt))
     })
@@ -5730,10 +6514,12 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
 
   appendCanonicalEventVersion(input: AppendStoryEventVersionInput): WorkspaceCanonicalEventVersionWriteResult {
     this.assertFormal()
+    this.assertLegacyEventWrite()
     assertAppendStoryEventVersionInput(input)
     const projectId = String(this.projectRow()!.id)
     const timestamp = this.now().toISOString()
     return this.transaction(() => {
+      this.assertLegacyEventWrite()
       const row = this.row(this.database.prepare('SELECT * FROM canonical_events WHERE project_id = ? AND id = ?').get(projectId, input.eventId))
       if (!row) throw new AppError('NOT_FOUND', '事件不存在于当前作品。', { recoverable: true })
       this.canonicalEventRecord(row)
@@ -5860,7 +6646,31 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     const content = String(row.content_json)
     const contentHash = String(row.content_hash)
     assertOutlinePlanningStateDocument(content, contentHash)
+    this.assertChapterEventOutputOrigins(content)
     return { content, contentHash, revision: Number(row.revision), updatedAt: String(row.updated_at) }
+  }
+
+  private assertChapterEventOutputOrigins(content: string): void {
+    const outputs = JSON.parse(content).chapterEventOutputs as ChapterEventOutput[] | undefined
+    if (!outputs?.length) return
+    const invalid = this.database.prepare(`SELECT 1 FROM json_each(?) receipt
+      WHERE NOT EXISTS (
+        SELECT 1 FROM canonical_event_versions v
+        JOIN canonical_event_version_seals seal ON seal.version_id=v.id
+        JOIN canonical_event_version_sources source ON source.version_id=v.id
+        JOIN outline_versions ov ON ov.id=source.source_revision
+        JOIN outline_nodes node ON node.id=ov.outline_node_id
+        WHERE v.id=json_extract(receipt.value,'$.eventVersionId') AND v.event_id=json_extract(receipt.value,'$.eventId')
+          AND v.project_id=? AND node.project_id=v.project_id AND node.legacy_key='chapter-'||json_extract(receipt.value,'$.chapterId')
+          AND json_extract(v.payload_json,'$.status')='approved' AND json_extract(v.payload_json,'$.granularity')='chapter-detail'
+          AND source.source_kind='chapter-outline' AND source.source_id=node.id AND source.relation='derived-from'
+          AND (json_extract(receipt.value,'$.replacesVersionId') IS NULL OR EXISTS (
+            SELECT 1 FROM canonical_event_version_sources replaced
+            WHERE replaced.version_id=v.id AND replaced.relation='supersedes' AND replaced.source_kind='event'
+              AND replaced.source_id=v.event_id AND replaced.source_revision=json_extract(receipt.value,'$.replacesVersionId')
+          ))
+      ) LIMIT 1`).get(JSON.stringify(outputs.flatMap(o => chapterEventOutputItems(o).map(e => ({ chapterId: o.chapterId, ...e })))), String(this.projectRow()!.id))
+    if (invalid) throw this.integrityError('章纲输出事件的来源记录不一致，已停止读取。')
   }
 
   replaceOutlinePlanningState(expectedContentHash: string, content: string, contentHash: string): WorkspaceOutlinePlanningStateWriteResult {
@@ -5870,6 +6680,12 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     const projectId = String(this.projectRow()!.id)
     const current = this.outlinePlanningState()
     if (current.contentHash !== expectedContentHash) throw new AppError('CONFLICT', '谋篇工作流已被其他操作更新，请重新读取后再试。', { recoverable: true })
+    assertSkeletonHistoryAppend(JSON.parse(current.content).formalSkeleton ?? [], JSON.parse(content).formalSkeleton ?? [])
+    assertChapterEventOutputsAppend(JSON.parse(current.content).chapterEventOutputs ?? [], JSON.parse(content).chapterEventOutputs ?? [])
+    assertUpstreamReviewAppend(JSON.parse(current.content).upstreamReviewDecisions ?? [], JSON.parse(content).upstreamReviewDecisions ?? [])
+    if (JSON.stringify(JSON.parse(current.content).chapterEventOutputs ?? []) !== JSON.stringify(JSON.parse(content).chapterEventOutputs ?? [])) {
+      throw this.integrityError('章纲输出事件只能通过联合采用追加。')
+    }
     if (current.contentHash === contentHash) return { document: current, mirror: null }
     const timestamp = this.now().toISOString()
     let mirror!: WorkspaceMirrorPlan
@@ -5987,12 +6803,14 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
 
   importWorkspaceConfig(kind: WorkspaceConfigDocumentKind, content: string, contentHash: string, observedMirrorHash?: string) {
     this.assertFormal()
+    if (kind === 'timeline') this.assertLegacyEventWrite()
     assertWorkspaceConfigDocument(kind, content, contentHash)
     if (this.formalWorkspaceConfigReady(kind)) return { document: this.workspaceConfig(kind), mirror: null }
     const projectId = String(this.projectRow()!.id)
     const timestamp = this.now().toISOString()
     let mirror!: WorkspaceMirrorPlan
     this.transaction(() => {
+      if (kind === 'timeline') this.assertLegacyEventWrite()
       this.database.prepare(`
         INSERT INTO workspace_config_documents (project_id, kind, revision, content_json, content_hash, updated_at)
         VALUES (?, ?, 1, ?, ?, ?)
@@ -6016,6 +6834,7 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
 
   replaceWorkspaceConfig(kind: WorkspaceConfigDocumentKind, expectedContentHash: string, content: string, contentHash: string) {
     this.assertFormal()
+    if (kind === 'timeline') this.assertLegacyEventWrite()
     assertWorkspaceConfigDocument(kind, content, contentHash)
     const projectId = String(this.projectRow()!.id)
     const current = this.workspaceConfig(kind)
@@ -6024,6 +6843,7 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     const timestamp = this.now().toISOString()
     let mirror!: WorkspaceMirrorPlan
     this.transaction(() => {
+      if (kind === 'timeline') this.assertLegacyEventWrite()
       const changed = this.database.prepare(`
         UPDATE workspace_config_documents
         SET revision = revision + 1, content_json = ?, content_hash = ?, updated_at = ?
@@ -6729,6 +7549,7 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
   close(): void {
     if (this.closed) return
     this.closed = true
+    this.snapshotEventVersions.clear()
     this.database.close()
   }
 
@@ -7007,6 +7828,10 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
 
   private insertCanonicalEvent(projectId: string, event: WorkspaceCanonicalEventRecord): void {
     this.assertLegacyEventSignatureAvailable(projectId, event.id, storyEventSignature(event))
+    this.insertCanonicalEventRecord(projectId, event)
+  }
+
+  private insertCanonicalEventRecord(projectId: string, event: WorkspaceCanonicalEventRecord): void {
     this.database.prepare(`
       INSERT INTO canonical_events (
         id, project_id, time_ref, location_text, event_text, result_text, confidence, status, conflict_group_id,
@@ -7021,12 +7846,20 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
   }
 
   private eventVersions(projectId: string): CanonicalEventVersions {
+    if (this.readSchemaVersion !== undefined) {
+      let reader = this.snapshotEventVersions.get(projectId)
+      if (!reader) {
+        reader = new CanonicalEventVersions(this.database, projectId, this.id, true)
+        this.snapshotEventVersions.set(projectId, reader)
+      }
+      return reader
+    }
     return new CanonicalEventVersions(this.database, projectId, this.id)
   }
 
-  private updateCanonicalEventProjection(projectId: string, eventId: string, version: StoryEventVersion, timestamp: string): void {
+  private updateCanonicalEventProjection(projectId: string, eventId: string, version: StoryEventVersion, timestamp: string, unified = false): void {
     const content = version.content
-    this.assertLegacyEventSignatureAvailable(projectId, eventId, storyEventSignature(content))
+    if (!unified) this.assertLegacyEventSignatureAvailable(projectId, eventId, storyEventSignature(content))
     this.database.prepare(`UPDATE canonical_events SET time_ref = ?, location_text = ?, event_text = ?, result_text = ?, confidence = ?,
       status = ?, event_signature = ?, slot_signature = ?, approved_at = ? WHERE project_id = ? AND id = ?`)
       .run(content.time, content.location, content.event, content.result ?? null, content.confidence, version.status,
@@ -7037,6 +7870,10 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     this.database.prepare('DELETE FROM canonical_event_evidence_refs WHERE event_id = ?').run(eventId)
     const evidence = this.database.prepare('INSERT INTO canonical_event_evidence_refs (event_id, ordinal, source_id, excerpt) VALUES (?, ?, ?, ?)')
     content.evidenceRefs.forEach((item, ordinal) => evidence.run(eventId, ordinal, item.sourceId, item.excerpt))
+  }
+
+  private assertLegacyEventWrite(): void {
+    if (this.hasEventMigrationEvidence()) throw new AppError('CONFLICT', '本书事件已进入统一版本记录，旧保存入口已停用，请重新读取事件。', { recoverable: true })
   }
 
   private assertLegacyEventSignatureAvailable(projectId: string, eventId: string, signature: string): void {
@@ -7267,11 +8104,44 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     }
   }
 
-  private formalChapterRows(currentFiles = false): WorkspaceChapterRecord[] {
+  private async readCurrentList(kind: 'body' | 'outline'): Promise<Array<{ row: Record<string, unknown>; current: ReturnType<SqliteWorkspaceDatabase['currentFile']> }>> {
+    const snapshot = () => {
+      const rows = kind === 'body' ? this.chapterReadRows() : this.outlineReadRows()
+      const statement = this.database.prepare('SELECT * FROM manuscript_file_heads WHERE document_id = ? AND kind = ?')
+      const heads = rows.map(row => {
+        const head = this.row(statement.get(String(kind === 'body' ? row.document_id : row.id), kind))
+        if (!head) throw this.integrityError('当前稿件缺少文件身份记录。')
+        return head
+      })
+      return { rows, heads, projectId: this.projectRow()?.id, mode: this.storageMode(), authority: this.textAuthority() }
+    }
+    const before = snapshot(), fingerprint = JSON.stringify(before)
+    const journal = new ManuscriptCommitJournal(this.projectRoot)
+    const current: Array<ReturnType<SqliteWorkspaceDatabase['currentFile']>> = []
+    let next = 0, failure: { error: unknown } | undefined
+    await Promise.all(Array.from({ length: Math.min(8, before.rows.length) }, async () => {
+      while (!failure && next < before.rows.length) {
+        const index = next++, head = before.heads[index]!
+        try {
+          const file = await journal.readCurrentAsync(String(head.relative_path))
+          if (!file) throw new AppError('NOT_FOUND', '当前稿件文件缺失；没有从历史自动覆盖，可在历史中显式恢复。', { recoverable: true })
+          current[index] = { ...file, title: String(head.title), relativePath: String(head.relative_path), external: file.hash !== head.content_hash }
+        } catch (error) { failure ??= { error } }
+      }
+    }))
+    // Every started read has settled. No partial projection or detached file work escapes a failure.
+    if (failure) throw failure.error
+    if (this.fileCommand || JSON.stringify(snapshot()) !== fingerprint) {
+      throw new AppError('CONFLICT', '稿件版本在读取期间变化，请重新读取；原稿未改动。', { recoverable: true })
+    }
+    return before.rows.map((row, index) => ({ row, current: current[index]! }))
+  }
+
+  private chapterReadRows(): Record<string, unknown>[] {
     const project = this.projectRow()
     if (!project) throw this.integrityError('作品数据库缺少项目记录。')
-    const rows = this.rows(this.database.prepare(`
-      SELECT chapters.legacy_chapter_id, chapters.seq, chapters.title, chapters.current_body_version_id,
+    return this.rows(this.database.prepare(`
+      SELECT chapters.id AS document_id, chapters.legacy_chapter_id, chapters.seq, chapters.title, chapters.current_body_version_id,
              bodies.content, bodies.content_hash, mirrors.status AS mirror_status, mirrors.relative_path AS mirror_relative_path
       FROM chapters
       JOIN body_versions bodies ON bodies.id = chapters.current_body_version_id
@@ -7281,10 +8151,14 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
       WHERE chapters.project_id = ? AND chapters.status <> 'archived'
       ORDER BY chapters.seq
     `).all(String(project.id)))
-    return rows.map((row) => this.chapterRecord(row, currentFiles))
   }
 
-  private formalOutlineRows(currentFiles = false): WorkspaceOutlineRecord[] {
+  private formalChapterRows(currentFiles = false): WorkspaceChapterRecord[] {
+    const fileText = currentFiles && this.textAuthority() === 'files-v1'
+    return this.chapterReadRows().map(row => this.chapterRecord(row, currentFiles, fileText))
+  }
+
+  private outlineReadRows(filter?: WorkspaceOutlineFilter): Record<string, unknown>[] {
     const project = this.projectRow()
     if (!project) throw this.integrityError('作品数据库缺少项目记录。')
     return this.rows(this.database.prepare(`
@@ -7297,11 +8171,18 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
       JOIN outline_versions versions ON versions.id = nodes.current_version_id
       JOIN mirror_entries mirrors ON mirrors.project_id = nodes.project_id AND mirrors.source_type = 'outline_markdown' AND mirrors.source_id = nodes.id
       WHERE nodes.project_id = ? AND nodes.status <> 'archived'
+        ${filter ? 'AND metadata.planning_kind = ?' : ''}
+        ${filter?.seq !== undefined ? 'AND nodes.seq = ?' : ''}
       ORDER BY CASE metadata.planning_kind WHEN 'summary' THEN 0 WHEN 'volume' THEN 1 WHEN 'stage' THEN 2 ELSE 3 END, nodes.seq
-    `).all(String(project.id))).map((row) => this.outlineRecord(row, currentFiles))
+    `).all(String(project.id), ...(filter ? [filter.nodeType] : []), ...(filter?.seq !== undefined ? [filter.seq] : [])))
   }
 
-  private formalOutlineRecord(legacyKey: string, includeArchived = false): WorkspaceOutlineRecord | undefined {
+  private formalOutlineRows(currentFiles = false, filter?: WorkspaceOutlineFilter): WorkspaceOutlineRecord[] {
+    const fileText = currentFiles && this.textAuthority() === 'files-v1'
+    return this.outlineReadRows(filter).map(row => this.outlineRecord(row, currentFiles, fileText))
+  }
+
+  private formalOutlineRecord(legacyKey: string, includeArchived = false, currentFiles: boolean | 'unchanged-source' = false): WorkspaceOutlineRecord | undefined {
     const row = this.row(this.database.prepare(`
       SELECT nodes.*, parents.legacy_key AS parent_legacy_key, mirrors.status AS mirror_status, mirrors.relative_path AS mirror_relative_path,
         metadata.planning_kind, metadata.goal_text, metadata.entry_state_text, metadata.exit_state_text,
@@ -7313,14 +8194,16 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
       JOIN mirror_entries mirrors ON mirrors.project_id = nodes.project_id AND mirrors.source_type = 'outline_markdown' AND mirrors.source_id = nodes.id
       WHERE nodes.project_id = ? AND nodes.legacy_key = ? ${includeArchived ? '' : "AND nodes.status <> 'archived'"}
     `).get(String(this.projectRow()?.id ?? ''), legacyKey))
-    return row ? this.outlineRecord(row) : undefined
+    return row ? this.outlineRecord(row, currentFiles) : undefined
   }
 
-  private outlineRecord(row: Record<string, unknown>, currentFiles = false): WorkspaceOutlineRecord {
+  private outlineRecord(row: Record<string, unknown>, currentFiles: boolean | 'unchanged-source' = false, fileText?: boolean, providedCurrent?: ReturnType<SqliteWorkspaceDatabase['currentFile']>): WorkspaceOutlineRecord {
     const nodeType = String(row.planning_kind) as WorkspaceOutlineRecord['nodeType']
     const mirrorStatus = String(row.mirror_status) as WorkspaceMirrorStatus
     if (!['summary', 'volume', 'stage', 'chapter'].includes(nodeType) || !['pending', 'synced', 'conflict', 'failed'].includes(mirrorStatus)) throw this.integrityError('大纲记录状态无效。')
-    const current = currentFiles && this.textAuthority() === 'files-v1' && !this.fileCommand ? this.currentFile(String(row.id), 'outline') : null
+    // Joint-adoption parents are read-only sources, including during replay. Only the
+    // target outline uses its journaled pre-write baseline after file replacement.
+    const current = currentFiles && (fileText ?? this.textAuthority() === 'files-v1') && (!this.fileCommand || currentFiles === 'unchanged-source') ? providedCurrent ?? this.currentFile(String(row.id), 'outline') : null
     const title = current?.title ?? String(row.title)
     const content = current?.content ?? this.readStoredText(row.content, row.content_hash)
     const contentHash = current?.hash ?? String(row.content_hash)
@@ -7404,9 +8287,11 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
     return row ? this.chapterRecord(row, currentFiles) : undefined
   }
 
-  private chapterRecord(row: Record<string, unknown>, currentFiles = false): WorkspaceChapterRecord {
+  private chapterRecord(row: Record<string, unknown>, currentFiles = false, fileText?: boolean, providedCurrent?: ReturnType<SqliteWorkspaceDatabase['currentFile']>): WorkspaceChapterRecord {
     const legacyChapterId = Number(row.legacy_chapter_id)
-    const current = currentFiles && this.textAuthority() === 'files-v1' && !this.fileCommand ? this.currentChapterFile(legacyChapterId) : null
+    const current = currentFiles && (fileText ?? this.textAuthority() === 'files-v1') && !this.fileCommand
+      ? providedCurrent ?? (row.document_id ? this.currentFile(String(row.document_id), 'body') : this.currentChapterFile(legacyChapterId))
+      : null
     const title = current?.title ?? String(row.title)
     const content = current?.content ?? this.readStoredText(row.content, row.content_hash)
     const mirrorStatus = String(row.mirror_status) as WorkspaceMirrorStatus
@@ -8314,6 +9199,7 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
       wordCount: countWords(content),
       createdAt,
       reason,
+      ...(row.review_receipt_json ? { reviewedSource: { kind: 'inline-review' as const, application: JSON.parse(String(row.review_receipt_json)) } } : {}),
       label: row.label ? String(row.label) : null,
       isCurrent: Number(row.is_current) === 1,
       sourceTaskRunId: row.source_task_run_id ? String(row.source_task_run_id) : null,
@@ -8349,6 +9235,11 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
         this.transaction(() => {
           if (migration.version === 40) this.validateReadSchema(39)
           if (migration.version === 42) this.validateReadSchema(41)
+          if (migration.version === 43) this.validateReadSchema(42)
+          if (migration.version === 44) this.validateReadSchema(43)
+          if (migration.version === 45) this.validateReadSchema(44)
+          if (migration.version === 46) this.validateReadSchema(45)
+          if (migration.version === 47) this.validateReadSchema(46)
           if (rebuildTasks) this.rebuildTaskRuns()
           else if (rebuildConfig) this.rebuildWorkspaceConfigDocuments()
           else if (rebuildEvents) this.rebuildCanonicalEventIdentities()
@@ -8416,9 +9307,11 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
   private validateSchema(expectedVersion = WORKSPACE_DATABASE_SCHEMA_VERSION): void {
     const version = Number(this.scalar(this.database.prepare('PRAGMA user_version').get(), 'user_version'))
     const storedMigrations = this.rows(this.database.prepare('SELECT version, name, checksum FROM schema_migrations ORDER BY version').all())
-    const tables = this.rows(this.database.prepare(`SELECT name FROM sqlite_schema WHERE type = 'table'`).all()).map((row) => String(row.name)).sort()
-    const views = this.rows(this.database.prepare(`SELECT name FROM sqlite_schema WHERE type = 'view'`).all()).map((row) => String(row.name)).sort()
-    const triggers = this.rows(this.database.prepare(`SELECT name FROM sqlite_schema WHERE type = 'trigger'`).all()).map((row) => String(row.name)).sort()
+    // Fresh for this synchronous validation only; never retain a trusted catalog across opens.
+    const catalog = this.rows(this.database.prepare('SELECT type, name, sql FROM sqlite_schema').all())
+    const names = (type: string) => catalog.filter(row => row.type === type).map(row => String(row.name))
+    const tables = names('table'), views = names('view'), triggers = names('trigger')
+    const definitions = new Map(catalog.map(row => [`${row.type}:${row.name}`, typeof row.sql === 'string' ? row.sql : null]))
     if (version !== expectedVersion
       || migrations.filter(migration => migration.version <= expectedVersion).some((migration) => {
         const stored = storedMigrations.find((entry) => Number(entry.version) === migration.version)
@@ -8436,8 +9329,14 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
       })
     }
     if (expectedVersion >= 39) assertCanonicalEventIdentitySchema(this.database)
-    if (expectedVersion >= 40) assertEventMigrationReceiptSchema(this.database, expectedVersion)
-    if (expectedVersion >= 41) assertManuscriptTextSchema(this.database, expectedVersion)
+    if (expectedVersion >= 40) assertEventMigrationReceiptSchema(this.database, expectedVersion, definitions)
+    if (expectedVersion >= 41) assertManuscriptTextSchema(this.database, expectedVersion, definitions)
+    if (expectedVersion >= 43) assertEventStateSchema(this.database, definitions)
+    if (expectedVersion >= 44) assertEventOperationSchema(this.database, definitions)
+    if (expectedVersion >= 45) assertReviewSchema(definitions, reviewMigrationSql, expectedVersion)
+    if (expectedVersion >= 46) assertReviewSchema(definitions, annotationMigrationSql, expectedVersion)
+    if (expectedVersion >= 47) assertReviewSchema(definitions, reviewRecoveryMigrationSql, expectedVersion)
+    if (expectedVersion >= 48) assertEventSettlementSchema(this.database, definitions)
   }
 
   private assertConnectionSettings(): void {
@@ -8718,8 +9617,10 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
         switch (command.name) {
           case 'writeFormalChapter': this.writeFormalChapter(...command.args); break
           case 'writeFormalOutline': this.writeFormalOutline(...command.args); break
+          case 'adoptChapterEvent': this.adoptChapterEvent(...command.args); break
           case 'appendFormalOutlineChildren': this.appendFormalOutlineChildren(...command.args); break
           case 'applyWritingAgentArtifact': this.applyWritingAgentArtifact(...command.args); break
+          case 'saveReviewedDraft': this.saveReviewedDraft(...command.args); break
           case 'createFormalChapter': this.createFormalChapter(...command.args); break
           case 'startChapterFromOutline': this.startChapterFromOutline(...command.args); break
           case 'stageAutosaveCheckpoint': this.stageAutosaveCheckpoint(...command.args); break
@@ -9229,6 +10130,16 @@ function assertOutlinePlanningStateDocument(content: string, contentHash: string
     throw new AppError('VALIDATION_ERROR', '谋篇工作流不是有效 JSON。', { recoverable: true, cause: error })
   }
   const item = parsed as Record<string, unknown>
+  if (item?.chapterStoryContracts !== undefined) {
+    if (!Array.isArray(item.chapterStoryContracts) || item.chapterStoryContracts.length > 50_000 || new Set(item.chapterStoryContracts.map(r => r?.chapterId)).size !== item.chapterStoryContracts.length) throw new Error('写作约束账本无效')
+    for (const r of item.chapterStoryContracts) {
+      if (!r || !Number.isSafeInteger(r.chapterId) || r.chapterId < 1 || r.chapterId > 1_000_000 || typeof r.outlineHash !== 'string' || !/^[a-f0-9]{64}$/.test(r.outlineHash)) throw new Error('写作约束账本无效')
+      assertPlanningSources(r.sources)
+      decodeChapterStoryConstraints(r.constraints)
+    }
+  }
+  if (item?.formalSkeleton !== undefined) assertSkeletonHistory(item.formalSkeleton)
+  if (item?.chapterEventOutputs !== undefined) assertChapterEventOutputs(item.chapterEventOutputs)
   const arrays = ['assignments', 'volumes', 'chapterPlacements', 'manuscriptStarts', 'eventChapterPlacements', 'chapters', 'chapterConfirmations', 'outlineReviewAcknowledgements', 'planningConfirmations']
   if (!item || Array.isArray(item) || item.version !== 1 || !item.total || typeof item.total !== 'object' || Array.isArray(item.total)
     || arrays.some((field) => !Array.isArray(item[field]))) {

@@ -1,0 +1,161 @@
+import assert from 'node:assert/strict'
+import { mkdtemp, mkdir, realpath, writeFile, readFile, readdir } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { resolve, join } from 'node:path'
+import { _electron } from 'playwright'
+
+const root = await realpath(await mkdtemp(join(tmpdir(), 'lanjian-workflow-polish-')))
+const output = resolve(process.env.WORKFLOW_POLISH_OUTPUT || '../.trellis/tasks/09-21-v3-cinematic-boot-archive/research/10-01-workflow-polish-native')
+await mkdir(output, { recursive: true })
+const env = { ...process.env, LANJIAN_USER_DATA_PATH: join(root, 'profile'), LANJIAN_GLOBAL_MODEL_DATA_PATH: join(root, 'models') }
+delete env.ELECTRON_RUN_AS_NODE; delete env.ELECTRON_RENDERER_URL
+const app = await _electron.launch({ args: [resolve('out/main/index.js')], env })
+const page = await app.firstWindow(), owner = await app.browserWindow(page)
+page.setDefaultTimeout(20000)
+const checks = [], errors = [], samples = {}
+page.on('pageerror', e => errors.push(e.message))
+async function capture(name) {
+  await page.screenshot({ animations: 'allow' })
+  const png = await owner.evaluate(async win => (await win.webContents.capturePage()).toPNG().toString('base64'))
+  await writeFile(join(output, name + '.png'), Buffer.from(png, 'base64'))
+}
+try {
+  await owner.evaluate(win => { win.setContentSize(1440, 900); win.show(); win.focus() })
+  await page.waitForFunction(() => !!window.novelDesktop)
+  await page.evaluate(async () => {
+    await window.companionSettings.update({ voice: { mute: true, textModel: false, preload: false } })
+    await window.novelDesktop.companionVoice.configure({ textModel: false, speechModel: false, preload: false, voice: 'ningguang' })
+    localStorage.setItem('lanjian-loading-v1', JSON.stringify({ theme: 'impact', bootStyle: 'brief', bootPalette: 'dark' }))
+    localStorage.setItem('lanjian-theme', 'moye')
+  })
+  const book = await page.evaluate(async root => {
+    const { project } = await window.novelDesktop.projects.create({ parentPath: root, name: '流程布局验证', title: '流程布局验证' })
+    const chapter = await window.novelDesktop.chapters.create()
+    await window.novelDesktop.chapters.update(chapter.id, { title: '第一章', content: '分步导航不应修改这份正文。', expectedRevision: chapter.revision })
+    return project
+  }, root)
+  const bodies = []
+  for (const name of await readdir(join(book.path, '正文'))) if (name.endsWith('.md')) {
+    const path = join(book.path, '正文', name); bodies.push({ path, bytes: await readFile(path) })
+  }
+  await page.reload(); await page.getByTestId('app-boot-enter').click(); await page.getByTestId('app-boot').waitFor({ state: 'hidden' })
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  const settings = page.locator('.library-preferences-dialog')
+  await settings.getByTestId('theme-moye').waitFor({ state: 'attached' })
+  await settings.evaluate(e => { window.retainedTheme = e.querySelector('[data-testid="theme-moye"]') })
+  await page.getByTestId('library-settings-opening').click()
+  assert.equal(await settings.locator('.loader-preferences').isVisible(), true)
+  assert.equal(await settings.locator('.theme-settings').isVisible(), false)
+  await page.getByTestId('library-settings-sound').click()
+  assert.equal(await settings.locator('.companion-voice-settings').isVisible(), true)
+  await page.getByTestId('library-settings-appearance').click()
+  assert.equal(await settings.evaluate(e => window.retainedTheme === e.querySelector('[data-testid="theme-moye"]')), true)
+  await capture('01-library-categories')
+  await page.getByTestId('library-global-models').click()
+  await page.locator('.global-models-dialog[open]').waitFor()
+  await page.getByTestId('library-models-return').click()
+  assert.equal(await settings.evaluate(e => e.open), true)
+  await settings.getByRole('button', { name: '关闭外观设置', exact: true }).click()
+  checks.push('library-categories-retain-controls-and-global-model-return')
+
+  await page.getByTestId('library-all-works').click()
+  await page.locator('.work-item-open').filter({ hasText: book.title }).click()
+  await page.getByTestId('manuscript-input').waitFor(); await page.getByTestId('workspace-loading').waitFor({ state: 'hidden' })
+  await page.getByTestId('chapter-transfer-toggle').click(); await page.getByTestId('continue-manuscript-files').click()
+  const form = page.locator('.import-workpage')
+  await form.waitFor()
+  assert.equal(await page.getByTestId('import-next-step').isDisabled(), true)
+  const source = join(root, '核对书稿.txt')
+  await writeFile(source, Array.from({ length: 16 }, (_, i) => `第${i + 1}章 灯下核对${i + 1}\n${'只有确认后才能成为正文。'.repeat(40)}`).join('\n\n'))
+  await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, source)
+  await page.getByTestId('add-continuation-documents').click()
+  const role = page.locator('[data-testid^="manifest-role-"]')
+  await role.waitFor()
+  assert.equal(await page.getByTestId('import-next-step').isDisabled(), true)
+  await role.selectOption('manuscript')
+  await page.getByTestId('import-next-step').click()
+  await form.locator('.chapter-preview').waitFor()
+  assert.equal(await form.locator('.creation-defaults').isVisible(), false)
+  const firstChapter = form.locator('.chapter-select input').first()
+  await firstChapter.uncheck()
+  await form.locator('.import-scroll').evaluate(e => { e.scrollTop = 300; window.importScroll = e.scrollTop; window.retainedChapter = e.querySelector('.chapter-select input') })
+  await page.getByTestId('import-step-2').click()
+  const title = form.locator('.import-fields label').filter({ hasText: '作品名' }).locator('input')
+  await title.fill('保留的导入标题')
+  await form.locator('.creation-defaults input[type=checkbox]').check()
+  await form.locator('.creation-defaults input[type=checkbox]').evaluate(e => { window.retainedManual = e })
+  await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, root)
+  await form.locator('.path-row button').click()
+  await page.getByTestId('import-step-1').click()
+  assert.equal(await firstChapter.isChecked(), false)
+  assert.equal(await firstChapter.evaluate(e => e === window.retainedChapter), true)
+  assert.equal(await form.locator('.import-scroll').evaluate(e => Math.abs(e.scrollTop - window.importScroll) < 1), true)
+  await page.getByTestId('import-step-2').click()
+  assert.equal(await title.inputValue(), '保留的导入标题')
+  assert.equal(await form.locator('.creation-defaults input[type=checkbox]').evaluate(e => e === window.retainedManual && e.checked), true)
+  samples.checkbox = await form.locator('.creation-manual-choice').evaluate(e => {
+    const input = e.querySelector('input').getBoundingClientRect(), text = e.querySelector('span').getBoundingClientRect()
+    return { width: input.width, height: input.height, gap: text.left - input.right }
+  })
+  assert.ok(samples.checkbox.width <= 18 && samples.checkbox.height <= 18 && samples.checkbox.gap < 14)
+  await page.getByTestId('import-step-3').click()
+  assert.match(await form.locator('.import-review').innerText(), /保留的导入标题/)
+  assert.equal(await form.getByRole('button', { name: '按清单建立作品' }).isEnabled(), true)
+  await capture('02-import-confirmation')
+  checks.push('actual-file-preview-explicit-role-selection-retained-chapters-name-model-and-scroll')
+
+  await owner.evaluate(win => { win.setContentSize(1100, 760); win.webContents.setZoomFactor(1.25) })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.getByTestId('import-step-1').click()
+  samples.compact = await form.evaluate(e => {
+    const box = e.getBoundingClientRect(), area = e.querySelector('.import-scroll').getBoundingClientRect()
+    const next = e.querySelector('[data-testid="import-next-step"]'), r = next.getBoundingClientRect()
+    return { left: box.left, right: box.right, bottom: box.bottom, viewport: innerWidth, height: innerHeight, reviewHeight: area.height,
+      hit: next.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)), focus: document.activeElement.className }
+  })
+  assert.ok(samples.compact.left >= 0 && samples.compact.right <= samples.compact.viewport + 1 && samples.compact.bottom <= samples.compact.height + 1)
+  assert.ok(samples.compact.reviewHeight > 230); assert.equal(samples.compact.hit, true)
+  assert.equal(samples.compact.focus, 'import-step-heading')
+  await capture('03-import-compact-review')
+  await page.keyboard.press('Escape'); await form.waitFor({ state: 'detached' })
+  checks.push('compact-step-review-has-space-and-keyboard-exit')
+
+  await page.locator('[data-nav-parent="settings"]').click()
+  await page.getByTestId('settings-category-data').click()
+  await page.getByTestId('settings-nav-project').click()
+  await page.getByTestId('workspace-backup-section').waitFor()
+  assert.equal(await page.getByTestId('sqlite-shadow-section').isVisible(), false)
+  await page.getByTestId('data-page-storage').click()
+  assert.equal(await page.getByTestId('sqlite-shadow-section').isVisible(), true)
+  assert.equal(await page.getByTestId('workspace-backup-section').isVisible(), false)
+  await page.getByTestId('data-page-diagnostics').click()
+  assert.equal(await page.getByText('一致性能力校验', { exact: true }).isVisible(), true)
+  await page.getByTestId('data-page-backup').click()
+  assert.equal(await page.getByTestId('workspace-backup-section').isVisible(), true)
+  await capture('04-data-subpages')
+  checks.push('data-subpages-isolate-backup-storage-diagnostics-with-existing-actions')
+
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await page.getByTestId('open-quick-chapter').click()
+  const quick = page.getByTestId('quick-chapter-open')
+  await quick.evaluate(async e => { await Promise.allSettled(e.getAnimations().map(a => a.finished)) })
+  await quick.evaluate(e => {
+    e.close(); e.showModal()
+    e.querySelector('input').focus()
+  })
+  await page.waitForTimeout(250)
+  assert.equal(await quick.evaluate(e => e.open && e.contains(document.activeElement)), true)
+  await page.keyboard.press('Escape')
+  await quick.waitFor({ state: 'hidden' })
+  checks.push('native-quick-open-close-event-cannot-steal-reopened-focus')
+  for (const body of bodies) assert.deepEqual(await readFile(body.path), body.bytes)
+  assert.equal((await page.evaluate(() => window.novelDesktop.projects.list())).projects.length, 1)
+  assert.deepEqual(errors, [])
+  checks.push('no-creation-adoption-or-model-call-and-byte-identical-manuscript')
+  await writeFile(join(output, 'verification.json'), JSON.stringify({ checks, samples, errors, root }, null, 2))
+  console.log(JSON.stringify({ checks, samples, errors, output }))
+} catch (error) {
+  await capture('failure').catch(() => {})
+  await writeFile(join(output, 'failure.json'), JSON.stringify({ error: String(error.stack || error), checks, samples, errors, root }, null, 2))
+  console.error(error); process.exitCode = 1
+} finally { await app.close() }

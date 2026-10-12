@@ -1,0 +1,56 @@
+{
+  "apiVersion": 1,
+  "id": "personal.genre-review",
+  "name": "仙侠一致性审阅",
+  "version": "1.0.0",
+  "description": "按作者关注点检查境界、代价与事件因果，生成审阅建议。",
+  "runtime": "declarative",
+  "entry": "recipe.json",
+  "capabilities": [
+    "author.ask",
+    "assets.read",
+    "model.generate"
+  ],
+  "tools": [
+    {
+      "id": "review",
+      "description": "按作者关注点检查境界、代价与事件因果，生成审阅建议。",
+      "effect": "derive",
+      "capabilities": [
+        "author.ask",
+        "assets.read",
+        "model.generate"
+      ],
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 12000
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 100000
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    }
+  ],
+  "assets": [
+    "guidance.txt"
+  ]
+}

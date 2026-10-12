@@ -35,7 +35,10 @@ test('loads the opening workspace through one call to every provider and reuses 
   const dependencies = {
     projects: {
       currentPath: tracked('currentPath', summaryA.path),
-      currentSummary: tracked('currentSummary', summaryA),
+      currentSummary: async (options: { includeManuscript?: boolean }) => {
+        assert.deepEqual(options, { includeManuscript: false })
+        return tracked('currentSummary', summaryA)()
+      },
       migrationPreview: tracked('migration', {})
     },
     documents: {
@@ -82,7 +85,7 @@ test('loads the opening workspace through one call to every provider and reuses 
     'chapters', 'outlines', 'timeline', 'realms', 'powerSystem', 'cheatSystem', 'systemTemplate', 'foundation',
     'aiSettings', 'researchSettings', 'migration', 'sources', 'events', 'planningDraft', 'importRecoveries', 'continuation'
   ]) assert.equal(calls.get(name), 1, `${name} should be read once`)
-  assert.equal(calls.get('currentPath'), 4)
+  assert.equal(calls.get('currentPath'), 7) // includes scope checks before/after the recovery boundary
   assert.equal(calls.get('currentSummary'), 2)
 })
 

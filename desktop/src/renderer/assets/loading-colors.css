@@ -1,0 +1,14 @@
+/* Only the new dossier opening adopts the existing UI/work-loader palette.
+ * The original impact opening and workspace animations keep their own colours. */
+.cinematic-boot.cinematic-boot {
+  --cinema-paper:var(--color-paper,#f3f0e8);
+  --cinema-ink:var(--color-ink,#1d2220);
+  --cinema-accent:var(--color-orange,#e99a35);
+  color:var(--cinema-ink);
+}
+.cinematic-boot[data-palette="light"] {
+  --cinema-paper:#f3f0e8;--cinema-ink:#1d2220;--cinema-accent:#e99a35;
+}
+.cinematic-boot[data-palette="dark"] {
+  --cinema-paper:#202522;--cinema-ink:#eeefe7;--cinema-accent:#e9ab59;
+}

@@ -25,6 +25,16 @@ export type EventMigrationDecisionPlan = {
 }
 export type EventMigrationInspection = ReturnType<typeof inspectEventMigrationSources>
 
+/** Reviewed source order; a linked identity occupies its first occurrence's slot.
+ * Row indices refer to the retained target, including links to a later row. */
+export function eventMigrationDisplayOrder(plan: EventMigrationDecisionPlan): readonly number[] {
+  const targets = new Set<number>()
+  for (const row of plan.rows) {
+    if (row.ref.source === 'events' || row.ref.source === 'timeline') targets.add(row.targetRowIndex ?? row.rowIndex)
+  }
+  return Object.freeze([...targets])
+}
+
 /** The same exact decisions are revalidated before conversion and receipt recovery. */
 export function eventMigrationDecisionsInput(plan: EventMigrationDecisionPlan): EventMigrationDecisionsInput {
   return { fingerprint: plan.sourceFingerprint,

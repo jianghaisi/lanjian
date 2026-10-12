@@ -28,8 +28,7 @@ function reposition(x = position.value.x, y = position.value.y) {
   const editor = document.querySelector('.manuscript-editor .cm-scroller')?.getBoundingClientRect()
   const chapterAction = document.querySelector('.archive-new-chapter')?.getBoundingClientRect()
   const composer = document.querySelector('.agent-composer')?.getBoundingClientRect()
-  const statusbar = document.querySelector('.studio > .statusbar')?.getBoundingClientRect()
-  const bottom = Math.min(innerHeight, chapterAction?.top || innerHeight, composer?.top || innerHeight, statusbar?.height ? statusbar.top : innerHeight)
+  const bottom = Math.min(innerHeight, chapterAction?.top || innerHeight, composer?.top || innerHeight)
   // Focus mode has no safe side strip. Keep the top-bar recovery control instead.
   available.value = !editor || editor.left >= box.width + 16 || innerWidth - editor.right >= box.width + 16
   position.value = placeCompanion(x, y, box.width, box.height, { width: innerWidth, height: bottom }, editor)

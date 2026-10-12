@@ -4,7 +4,7 @@ import { normalizeRetrievalText } from '../domain/retrieval-text'
 import type { Chapter, ContextFactEvidence, ContextFactPackView } from '../../../../contracts/index'
 
 type ProjectPort = {
-  currentSummary: () => Promise<{ id: string; path: string }>
+  currentSummary: (options: { includeManuscript: false }) => Promise<{ id: string; path: string }>
   currentPath: () => Promise<string>
 }
 type DocumentPort = {
@@ -48,8 +48,9 @@ export class LocalRetrievalService {
     }
   }
 
-  async build(input: { chapterId?: number; chapterPosition?: number; queryParts: string[] }): Promise<ContextFactPackView> {
-    const project = await this.projects.currentSummary()
+  async build(input: { chapterId?: number; chapterPosition?: number; queryParts: string[]; signal?: AbortSignal }): Promise<ContextFactPackView> {
+    input.signal?.throwIfAborted()
+    const project = await this.projects.currentSummary({ includeManuscript: false })
     if (!samePath(project.path, await this.projects.currentPath())) throw projectChanged()
     const chapterId = input.chapterId
     const chapterPosition = input.chapterPosition
@@ -63,6 +64,7 @@ export class LocalRetrievalService {
           ? this.chunks.searchCurrentDocumentChunksBefore(project.path, chapterId, queryTerms, 800)
           : this.chunks.currentDocumentChunksBefore(project.path, chapterId, 800))).flatMap((chunk) => scoreChunk(chunk, chapterPosition, queryTerms))
       : (await this.currentChapters(project.path)).filter((chapter) => chapter.position < chapterPosition && chapter.content.trim()).flatMap((chapter) => scoreChapter(chapter, chapterPosition, queryTerms))
+    input.signal?.throwIfAborted()
     if (!samePath(project.path, await this.projects.currentPath())) throw projectChanged()
     ranked.sort(compareEvidence)
     const evidence: ContextFactEvidence[] = []

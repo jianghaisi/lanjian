@@ -4,6 +4,7 @@ import CharacterAtlas from '../../characters/components/CharacterAtlas.vue'
 import WorldMap from '../../world-map/components/WorldMap.vue'
 import ChronicleHeader from './ChronicleHeader.vue'
 import ChronicleEvents from './ChronicleEvents.vue'
+import EventMigrationPanel from './EventMigrationPanel.vue'
 import StudioIcon from '../../../ui/StudioIcon.vue'
 import { toRefs } from 'vue'
 
@@ -11,6 +12,8 @@ const props = defineProps({ scope: { type: Object, required: true } })
 const {
   addTimeline,
   adoptTimelineCandidate,
+  archiveTimelineEvent,
+  archivedUnifiedEvents,
   approvedEvents,
   busy,
   chapterPosition,
@@ -23,18 +26,26 @@ const {
   characterLinesLoading,
   characterPointDetails,
   chronicleMapLocation,
+  closeEventMigration,
+  commitEventMigration,
   current,
   discardTimelineCandidate,
   expandedTimelineEntry,
+  eventMigrationBusy,
+  eventMigrationError,
+  eventMigrationState,
+  eventProjection,
   foreshadowDraft,
   foreshadowLedger,
   generateTimelineCandidates,
   loadCharacterLines,
   loadTimelineVolume,
   moveTimelineEvent,
+  migrationReady,
   oneOffConnections,
   openCharacterAtlasChapter,
   openChronicleMap,
+  openEventMigration,
   openForeshadowChapter,
   openForeshadows,
   openTimelineVolumeInOutline,
@@ -46,6 +57,8 @@ const {
   removeTimelineEvent,
   researchEventsIssue,
   reviewCanonicalEvents,
+  restoreTimelineEvent,
+  retryEventMirror,
   saveTimeline,
   selectWorkspaceLeaf,
   selectedCharacterLine,
@@ -59,11 +72,14 @@ const {
   timelineAiGenerating,
   timelineEntryId,
   timelineMode,
+  unifiedEventMode,
+  unifiedEventCandidates,
   timelineVolumeCards,
   timelineVolumeContent,
   timelineVolumeError,
   timelineVolumeLoading,
   updateChronicleField,
+  toggleMigrationAcknowledgement,
   volumeLineRange,
   volumeLineStatus,
   worldMapAdopting,
@@ -84,7 +100,7 @@ const {
 
 <template>
   <div
-    class="structured-editor timeline-editor timeline-workbench"
+    class="structured-editor timeline-editor timeline-workbench archive-page"
     :class="{
       'character-atlas-workbench': timelineMode === 'characters',
       'world-map-workbench': timelineMode === 'map'
@@ -92,6 +108,8 @@ const {
   >
     <ChronicleHeader v-if="timelineMode === 'events'">
       <div v-if="timelineMode === 'events'" class="timeline-primary-actions">
+        <button v-if="!unifiedEventMode" class="control-button secondary" type="button" data-testid="open-event-migration" :disabled="busy || eventMigrationBusy" @click="openEventMigration">统一事件迁移</button>
+        <button v-else-if="eventProjection?.mirror && eventProjection.mirror.status !== 'synced'" class="control-button secondary" type="button" data-testid="retry-event-mirror" :disabled="busy || eventMigrationBusy" @click="retryEventMirror">重试事件镜像</button>
         <button
           class="control-button secondary"
           type="button"
@@ -109,6 +127,18 @@ const {
         </button>
       </div>
     </ChronicleHeader>
+    <EventMigrationPanel
+      v-if="timelineMode === 'events' && eventMigrationState"
+      :state="eventMigrationState"
+      :busy="eventMigrationBusy"
+      :error="eventMigrationError"
+      :ready="migrationReady(eventMigrationState)"
+      @close="closeEventMigration"
+      @commit="commitEventMigration"
+      @page="eventMigrationState.page = $event"
+      @acknowledge="toggleMigrationAcknowledgement"
+    />
+    <p v-else-if="timelineMode === 'events' && eventMigrationError" class="chronicle-warning" role="alert">{{ eventMigrationError }}</p>
     <header
       v-if="!['map', 'events'].includes(timelineMode)"
       class="timeline-workbench-header chronicle-auxiliary-heading"
@@ -162,7 +192,9 @@ const {
       :key="current.path"
       :formal="approvedEvents"
       :direct="timeline"
-      :candidates="timelineAiCandidates"
+      :candidates="unifiedEventMode ? [...unifiedEventCandidates, ...timelineAiCandidates] : timelineAiCandidates"
+      :archived="archivedUnifiedEvents"
+      :unified="unifiedEventMode"
       :selected="expandedTimelineEntry"
       :busy="busy"
       :issue="Boolean(researchEventsIssue)"
@@ -178,6 +210,8 @@ const {
       @chapter="openCharacterAtlasChapter"
       @move="moveTimelineEvent"
       @remove="removeTimelineEvent"
+      @archive="archiveTimelineEvent"
+      @restore="restoreTimelineEvent"
       @adopt="adoptTimelineCandidate"
       @discard="discardTimelineCandidate"
     />

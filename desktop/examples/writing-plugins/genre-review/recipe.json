@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "tools": [{
+    "id": "review",
+    "steps": [
+      { "id": "choice", "call": "interaction.request", "args": { "question": { "questions": [{ "id": "focus", "prompt": "这次仙侠审阅更关注哪一项？", "mode": "single", "required": true, "options": [{ "id": "realm", "label": "境界与力量代价" }, { "id": "cause", "label": "事件因果与伏笔" }] }] } } },
+      { "id": "guidance", "call": "assets.readText", "args": { "path": "guidance.txt" } },
+      { "id": "review", "call": "model.generate", "args": { "instruction": { "$join": [{ "$ref": "steps.guidance.text" }, "\n作者关注点：", { "$ref": "steps.choice.answers.0" }] }, "draft": { "$ref": "input.text" } } }
+    ],
+    "result": { "text": { "$ref": "steps.review.text" } }
+  }]
+}

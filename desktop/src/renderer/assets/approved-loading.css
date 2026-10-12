@@ -25,6 +25,16 @@
   gap: .75rem;
   font-size: .625rem;
 }
+/* Explicit tracks anchor the footer; reserve action height before models resolve. */
+.app-boot > .boot-header { grid-row: 1; grid-column: 1; }
+.app-boot > .boot-body { grid-row: 2; grid-column: 1; }
+.app-boot > .boot-footer { grid-row: 3; grid-column: 1; min-block-size: 4rem; flex-wrap: nowrap; }
+.boot-footer > span { white-space: nowrap; }
+.boot-footer .boot-actions { flex: none; }
+.boot-footer .boot-actions button { white-space: nowrap; }
+@container (max-width: 34rem) {
+  .boot-footer > span { display: none; }
+}
 .archive-header button,
 .boot-actions button {
   min-block-size: 2.5em;
@@ -112,8 +122,6 @@
 .archive-tree li:not(:last-child)::after { inset-inline-start: .8125rem; top: calc(50% + .875rem); bottom: calc(-50% + .875rem); }
 .archive-phase-meter { margin-block-start: .75rem; }
 .archive-footnote { margin-block: .75rem 0; font-size: .6875rem; }
-.archive-slow { margin-block-start: .75rem; padding: .75em 1em; font-size: .75rem; }
-.archive-slow p { margin-block-start: .5em; }
 .archive-error { padding: .75em 1em; font-size: .75rem; }
 .archive-error p { margin-block-end: .5em; }
 .archive-error button { padding: .5em 1em; font-size: .75rem; }
@@ -133,7 +141,6 @@
   .archive-tree li > div { padding-block: .25rem; }
   .archive-eyebrow { margin-block-end: .5rem; }
   .archive-footnote, .archive-phase-meter { margin-block-start: .5rem; }
-  .archive-slow p { display: none; }
   .has-error .archive-tree li:not(.active) { display: none; }
 }
 @container (max-width: 46rem) {

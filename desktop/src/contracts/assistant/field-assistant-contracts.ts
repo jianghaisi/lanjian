@@ -1,4 +1,6 @@
 import { localOutputOverride } from '../models/local-model-contracts'
+import type { CreativePolicyRecord } from '@lanjian/writing-plugin-contracts'
+import { decodeCreativePolicyRecords } from '../writing-plugins/creative-policy'
 /** Field candidates are draft edits. They never carry a generic object path or approval tool. */
 export type FieldValue = string | number | boolean
 export type FieldKind = 'text' | 'markdown' | 'json' | 'number' | 'boolean' | 'enum'
@@ -10,14 +12,17 @@ export type FieldTarget = {
 export type FieldRequest = { operationId: string; target: FieldTarget; instruction: string; model?: string; connectionId?: string; maxTokensOverride?: number }
 export type FieldContext = { target: FieldTarget; context: string; fingerprint: string; model: string; connectionId: string }
 export type FieldCandidate = {
+  creativePolicy?: CreativePolicyRecord[]
   id: string; operationId: string; target: FieldTarget; before: FieldValue; after: FieldValue
   dependencyFingerprint: string; model: string; connectionId: string; createdAt: string
-  status: 'candidate' | 'applied' | 'undone'; appliedAt?: string
+  status: 'candidate' | 'applied' | 'undone' | 'rejected'; appliedAt?: string
 }
-export type FieldTask = { id: string; target: FieldTarget; status: 'running' | 'completed' | 'failed' | 'cancelled'; createdAt: string; updatedAt: string; error?: string; candidate?: FieldCandidate }
+export type FieldTask = { id: string; target: FieldTarget; status: 'running' | 'completed' | 'failed' | 'cancelled'; createdAt: string; updatedAt: string; error?: string; candidate?: FieldCandidate; rawResult?: string }
 export type FieldApplicationInput = { candidateId: string; target: FieldTarget }
 export type FieldApplicationPermit = { token: string; candidateId: string; target: FieldTarget; value: FieldValue }
 export type FieldAssistantApi = {
+  runs?: import('./assistant-run-contracts').AssistantRunsApi
+  reject?(taskId: string): Promise<FieldTask>
   conversation(input:import('./assistant-conversation-contracts').AssistantConversationRequest):Promise<import('./assistant-conversation-contracts').AssistantConversationResult>
   cancelConversation(operationId:string):Promise<boolean>
   conversationProgress?(operationId:string):Promise<import('./assistant-conversation-contracts').AssistantConversationProgress|null>
@@ -65,14 +70,14 @@ export function decodeFieldRequest(value: unknown): FieldRequest {
   return {...localOutputOverride(v.maxTokensOverride,v.connectionId),operationId: id(v.operationId), target: decodeFieldTarget(v.target), instruction, ...(v.model === undefined ? {} : {model:string(v.model)}), ...(v.connectionId === undefined ? {} : {connectionId:id(v.connectionId)})}
 }
 export function decodeFieldCandidate(value: unknown): FieldCandidate {
-  const v = record(value, ['id','operationId','target','before','after','dependencyFingerprint','model','connectionId','createdAt','status','appliedAt'])
-  if (!['candidate','applied','undone'].includes(String(v.status))) return invalid()
-  return {id:id(v.id),operationId:id(v.operationId),target:decodeTarget(v.target, true),before:scalar(v.before),after:scalar(v.after),dependencyFingerprint:id(v.dependencyFingerprint),model:string(v.model),connectionId:string(v.connectionId),createdAt:string(v.createdAt),status:v.status as FieldCandidate['status'],...(v.appliedAt === undefined ? {} : {appliedAt:string(v.appliedAt)})}
+  const v = record(value, ['id','operationId','target','before','after','dependencyFingerprint','model','connectionId','createdAt','status','appliedAt','creativePolicy'])
+  if (!['candidate','applied','undone','rejected'].includes(String(v.status))) return invalid()
+  return {id:id(v.id),operationId:id(v.operationId),target:decodeTarget(v.target, true),before:scalar(v.before),after:scalar(v.after),dependencyFingerprint:id(v.dependencyFingerprint),model:string(v.model),connectionId:string(v.connectionId),createdAt:string(v.createdAt),status:v.status as FieldCandidate['status'],...(v.appliedAt === undefined ? {} : {appliedAt:string(v.appliedAt)}),...(v.creativePolicy === undefined ? {} : {creativePolicy:decodeCreativePolicyRecords(v.creativePolicy)})}
 }
 export function decodeFieldTask(value: unknown): FieldTask {
-  const v = record(value, ['id','target','status','createdAt','updatedAt','error','candidate'])
+  const v = record(value, ['id','target','status','createdAt','updatedAt','error','candidate','rawResult'])
   if (!['running','completed','failed','cancelled'].includes(String(v.status))) return invalid()
-  return {id:id(v.id),target:decodeTarget(v.target, true),status:v.status as FieldTask['status'],createdAt:string(v.createdAt),updatedAt:string(v.updatedAt),...(v.error === undefined ? {} : {error:string(v.error,500)}),...(v.candidate === undefined ? {} : {candidate:decodeFieldCandidate(v.candidate)})}
+  return {id:id(v.id),target:decodeTarget(v.target, true),status:v.status as FieldTask['status'],createdAt:string(v.createdAt),updatedAt:string(v.updatedAt),...(v.error === undefined ? {} : {error:string(v.error,500)}),...(v.candidate === undefined ? {} : {candidate:decodeFieldCandidate(v.candidate)}),...(v.rawResult === undefined ? {} : {rawResult:string(v.rawResult,2_000_000)})}
 }
 export function decodeFieldContext(value: unknown): FieldContext {
   const v = record(value,['target','context','fingerprint','model','connectionId','maxTokensOverride'])
@@ -92,6 +97,7 @@ export const decodeFieldAcknowledgementArgs = (args: unknown[]): [{token:string;
   if(args.length!==1)return invalid();const v=record(args[0],['token','action']);if(v.action!=='applied'&&v.action!=='undone')return invalid();return [{token:id(v.token),action:v.action}]
 }
 export const fieldAssistantResultDecoders = {
+  'assistant:reject-field': decodeFieldTask,
   'assistant:application-model':decodeApplicationAssistantModel,
   'assistant:save-application-model':decodeApplicationAssistantModel,
   'assistant:preview-field': decodeFieldContext, 'assistant:start-field':decodeFieldTask, 'assistant:field-task':decodeFieldTask, 'assistant:cancel-field':decodeFieldTask,

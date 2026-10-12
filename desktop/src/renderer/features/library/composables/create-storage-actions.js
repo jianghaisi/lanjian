@@ -105,11 +105,29 @@ export function createLibraryStorageActions(ports) {
     ports.notice(`《${result.projectName}》备份已完成并校验`)
   }
 
-  async function exportManuscript() {
+  async function exportSelectedChapters(selection) {
+    const book = ports.current.value
+    if (!book) throw new Error('请先打开要导出的作品。')
+    const request = ports.workspaceRequests.capture(book)
+    const input = selection ? { workItemId: selection.workItemId, workItemPath: selection.workItemPath, chapterIds: [...selection.chapterIds] } : undefined
+    if (input && (input.workItemId !== book.id || input.workItemPath !== book.path)) {
+      throw new Error('作品已切换，请重新选择导出章节。')
+    }
     await ports.flushChapterSave()
-    const result = await ports.guard(() => ports.desktop.projects.exportManuscript())
-    if (!result) return
-    ports.notice(`整书阅读稿已导出：${result.chapterCount} 章`)
+    if (!ports.workspaceRequests.isCurrent(request, ports.current.value)) {
+      throw new Error('保存期间作品已切换，请重新选择导出章节。')
+    }
+    const result = input
+      ? await ports.desktop.projects.exportManuscript(input)
+      : await ports.desktop.projects.exportManuscript()
+    if (result && ports.workspaceRequests.isCurrent(request, ports.current.value)) {
+      ports.notice(`阅读稿已导出：${result.chapterCount} 章，共 ${result.characterCount.toLocaleString()} 字符`)
+    }
+    return result
+  }
+
+  async function exportManuscript() {
+    return ports.guard(() => exportSelectedChapters())
   }
 
   return {
@@ -124,6 +142,7 @@ export function createLibraryStorageActions(ports) {
     rebuildReadableMirrors,
     rollbackSqliteStorage,
     createWorkspaceBackup,
-    exportManuscript
+    exportManuscript,
+    exportSelectedChapters
   }
 }

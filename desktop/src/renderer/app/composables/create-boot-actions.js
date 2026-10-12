@@ -4,15 +4,27 @@ import { nextTick } from 'vue'
 export function createAppBootActions(ports) {
   function dismissOpening() {
     const wasVisible = ports.opening.value
-    const shouldReconcileLibrary = wasVisible && !ports.bootPreview.value && ports.projectsLoaded.value
+    const wasPreview = ports.bootPreview.value
+    const shouldReconcileLibrary = wasVisible && !wasPreview && ports.projectsLoaded.value
     ports.opening.value = false
     ports.bootPreview.value = false
+    if (wasVisible && !wasPreview && ports.desktop?.app.platform === 'browser') {
+      const requested = new URLSearchParams(location.search).get('book')
+      if (requested) {
+        const project = ports.projects.value.find(item => item.id === requested)
+        const destination = new URL(location.href)
+        destination.searchParams.delete('book')
+        history.replaceState(null, '', destination.pathname + destination.search + destination.hash)
+        if (project) void nextTick(() => ports.openProject(project))
+        else ports.notice('未找到这部作品，请从当前账户的书库选择。')
+      }
+    }
     if (shouldReconcileLibrary) void ports.refreshProjects().catch(() => undefined)
     if (wasVisible)
       void nextTick(() => {
         const target = ports.openingReturnFocus?.isConnected
           ? ports.openingReturnFocus
-          : document.querySelector('[data-library-view="all"], .project-title-return')
+          : document.querySelector('[data-library-view="all"], .book-library:not(:disabled)')
         ports.openingReturnFocus = null
         if (!ports.opening.value && !ports.workspaceOpening.value) target?.focus({ preventScroll: true })
       })
@@ -33,13 +45,13 @@ export function createAppBootActions(ports) {
       await ports.refreshProjects()
       ports.bootPhase.value = 'editor'
       await nextTick()
-      await document.fonts?.ready
+      if (ports.desktop?.app.platform !== 'browser') await document.fonts?.ready
       // Preferences were restored during setup; the next render makes them visible.
       ports.bootPhase.value = 'session'
       await nextTick()
       ports.bootPhase.value = 'ready'
     } catch {
-      ports.bootError.value = '本地作品清单未能读取，请重试。原作品文件没有改动。'
+      ports.bootError.value = ports.desktop?.app.platform === 'browser' ? '账户书库未能读取，请重试。作品没有改动。' : '本地作品清单未能读取，请重试。原作品文件没有改动。'
       ports.notice(ports.bootError.value)
     } finally {
       ports.loading.value = false

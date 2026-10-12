@@ -47,6 +47,7 @@ export interface ManuscriptAuthority {
   active(workItemId: string): Promise<boolean>
   validate(workItemId: string): Promise<void>
   chapters(workItemId: string): Promise<Chapter[]>
+  chapter?(workItemId: string, id: number): Promise<Chapter>
   manuscriptRevision(workItemId: string): Promise<string>
   updateChapter(workItemId: string, id: number, data: {
     title?: string
@@ -73,6 +74,8 @@ export interface ManuscriptAuthority {
   restoreChapter(workItemId: string, id: number): Promise<Chapter>
   outlineActive(workItemId: string): Promise<boolean>
   outlines(workItemId: string): Promise<OutlineList>
+  outline?(workItemId: string, volume: OutlineVolume): Promise<import('../../../../contracts/index').OutlineDocument>
+  chapterOutline?(workItemId: string, chapterId: number): Promise<ChapterOutlineDocument>
   getPlannedChapter(workItemId: string, chapterId: number): Promise<PlannedChapterOutline>
   updatePlannedChapter(workItemId: string, input: PlannedChapterOutlineUpdate): Promise<PlannedChapterOutline>
   startPlannedChapter(workItemId: string, input: PlannedChapterStartInput): Promise<PlannedChapterStartResult>

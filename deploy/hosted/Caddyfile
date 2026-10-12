@@ -1,0 +1,4 @@
+{$LANJIAN_PUBLIC_ORIGIN} {
+    encode zstd gzip
+    reverse_proxy app:43130
+}

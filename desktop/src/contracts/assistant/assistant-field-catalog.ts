@@ -337,6 +337,7 @@ export const assistantFieldCatalog: Readonly<Record<string, FieldSpec>> = {
     "save": "draft",
     "maxLength": 100000
   },
+  "AppShell.chapter.storyContent": { label: "故事章纲", kind: "markdown", scope: "either", group: "谋篇", save: "draft", maxLength: 100000 },
   "AppShell.chapter.entryState": {
     "label": "进入状态",
     "kind": "markdown",
@@ -742,7 +743,7 @@ export const assistantFieldCatalog: Readonly<Record<string, FieldSpec>> = {
     "group": "当前表单",
     "save": "draft",
     "min": 280,
-    "max": 460,
+    "max": 720,
     "step": 4
   },
   "AppShell.realTrialDraft.notes": {

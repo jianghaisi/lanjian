@@ -19,12 +19,14 @@ import { safePersistedErrorMessage } from '../../../platform/errors/safe-persist
 import type { WritingAgentToolGrant } from './agent-tool-registry'
 import { createTaskContractSnapshot, isLegacyTaskContract } from '../domain/task-template-contract'
 import { taskRunHasLegacyPause } from '../domain/task-run-lifecycle'
+import { decodeWritingAgentRecovery, missingWritingAgentRecovery, type WritingAgentRecovery } from '../domain/writing-agent-recovery'
 
 type Checkpoint = {
   version: 1
   phase: 'queued' | 'resuming' | 'preparing' | 'model' | 'streaming' | 'paused' | 'approval' | 'failed' | 'cancelled'
   workItemId: string
   request: WritingAgentRequest
+  recovery?: WritingAgentRecovery
   streamedCharacters?: number
   dismissedAt?: string
   toolGrant?: WritingAgentToolGrant
@@ -34,7 +36,7 @@ type Checkpoint = {
   }
 }
 
-type ActiveTask = { controller: AbortController; workItemPath: string; request: WritingAgentRequest; streamedContent: string }
+type ActiveTask = { taskId: string; controller: AbortController; workItemPath: string; request: WritingAgentRequest; streamedContent: string }
 type ModelConfigResolver = (input: { workItemPath: string; request: WritingAgentRequest }) => Promise<string | undefined>
 
 const activeWritingStatuses = ['queued', 'resuming', 'preparing', 'running', 'streaming']
@@ -55,7 +57,10 @@ export class WritingAgentTaskService {
   ) {}
 
   async start(input: WritingAgentTaskStart): Promise<WritingAgentTask> {
-    const [summary, workItemPath] = await Promise.all([this.projects.currentSummary(), this.projects.currentPath()])
+    if (!this.projects.executionIdentity) return this.projects.runInCurrentBook(() => this.start(input))
+    const [summary, workItemPath] = await Promise.all([this.projects.currentSummary({ includeManuscript: false }), this.projects.currentPath()])
+    if (input.request.expectedWorkItemId && input.request.expectedWorkItemId !== summary.id)
+      throw new AppError('CONFLICT', '当前作品已切换，请返回发起任务的作品后重新核对。', { recoverable: true })
     await this.ensureInitialized(workItemPath)
     const existingTasks = await this.withDatabase(workItemPath, (database) => database.recentTaskRuns('writing_agent', input.request.chapterId, 50))
     const duplicate = await this.withDatabase(workItemPath, (database) => database.taskRunByOperationKey(input.operationId))
@@ -93,6 +98,13 @@ export class WritingAgentTaskService {
     if (!task) throw new AppError('NOT_FOUND', 'AI 任务不存在或不属于当前作品。', { recoverable: true })
     return this.snapshot(workItemPath, task)
   }
+  /** Read-only reconciliation of a main-issued handoff operation after interruption. */
+  async byOperation(operationId: string): Promise<WritingAgentTask | null> {
+    const workItemPath = await this.projects.currentPath()
+    const task = await this.withDatabase(workItemPath, database => database.taskRunByOperationKey(operationId))
+    if (!task || task.taskType !== 'writing_agent') return null
+    return this.snapshot(workItemPath, task)
+  }
 
   async recent(chapterId: number): Promise<WritingAgentTask[]> {
     const workItemPath = await this.projects.currentPath()
@@ -106,7 +118,10 @@ export class WritingAgentTaskService {
   async cancel(taskId: string): Promise<WritingAgentTask> {
     const workItemPath = await this.projects.currentPath()
     await this.ensureInitialized(workItemPath)
-    const active = this.active.get(taskId)
+    const active = this.active.get(this.activeKey(workItemPath, taskId))
+    if (active && resolve(active.workItemPath) !== resolve(workItemPath)) {
+      throw new AppError('NOT_FOUND', 'AI 任务不存在或不属于当前作品。', { recoverable: true })
+    }
     active?.controller.abort()
     const task = await this.withDatabaseWrite(workItemPath, (database) => {
       const current = database.taskRun(taskId)
@@ -137,7 +152,10 @@ export class WritingAgentTaskService {
   async pause(taskId: string): Promise<WritingAgentTask> {
     const workItemPath = await this.projects.currentPath()
     await this.ensureInitialized(workItemPath)
-    const active = this.active.get(taskId)
+    const active = this.active.get(this.activeKey(workItemPath, taskId))
+    if (active && resolve(active.workItemPath) !== resolve(workItemPath)) {
+      throw new AppError('NOT_FOUND', 'AI 任务不存在或不属于当前作品。', { recoverable: true })
+    }
     active?.controller.abort()
     const task = await this.withDatabaseWrite(workItemPath, (database) => {
       const current = database.taskRun(taskId)
@@ -162,6 +180,7 @@ export class WritingAgentTaskService {
   }
 
   async resume(taskId: string, operationId: string): Promise<WritingAgentTask> {
+    if (!this.projects.executionIdentity) return this.projects.runInCurrentBook(() => this.resume(taskId, operationId))
     const workItemPath = await this.projects.currentPath()
     await this.ensureInitialized(workItemPath)
     const original = await this.withDatabase(workItemPath, (database) => database.taskRun(taskId))
@@ -183,6 +202,7 @@ export class WritingAgentTaskService {
       throw new AppError('CONFLICT', '当前章节已有写作任务，请先停止或等待完成。', { recoverable: true })
     }
     const newId = this.id()
+    this.assertRecoveryAvailable(checkpoint)
     const modelConfigId = await this.modelConfigId(workItemPath, checkpoint.request)
     const queued = await this.withDatabaseWrite(workItemPath, (database) => database.createTaskRun({
       id: newId,
@@ -202,6 +222,7 @@ export class WritingAgentTaskService {
   }
 
   async retry(taskId: string, operationId: string): Promise<WritingAgentTask> {
+    if (!this.projects.executionIdentity) return this.projects.runInCurrentBook(() => this.retry(taskId, operationId))
     const workItemPath = await this.projects.currentPath()
     await this.ensureInitialized(workItemPath)
     const original = await this.withDatabase(workItemPath, (database) => database.taskRun(taskId))
@@ -212,7 +233,15 @@ export class WritingAgentTaskService {
     const checkpoint = this.checkpoint(original)
     if (isLegacyTaskContract(original.taskContract)) throw new AppError('CONFLICT', '这条旧任务没有可验证的冻结契约，请从当前正文重新发起。', { recoverable: true })
     if (checkpoint.dismissedAt) throw new AppError('CONFLICT', '这条失败记录已经删除，不能再重试。', { recoverable: true })
+    const duplicate = await this.withDatabase(workItemPath, (database) => database.taskRunByOperationKey(operationId))
+    if (duplicate) {
+      if (duplicate.taskType !== 'writing_agent' || duplicate.parentTaskRunId !== original.id || JSON.stringify(this.checkpoint(duplicate).request) !== JSON.stringify(checkpoint.request)) {
+        throw new AppError('CONFLICT', '这次重试标识已经用于另一条任务。', { recoverable: true })
+      }
+      return this.snapshot(workItemPath, duplicate)
+    }
     const newId = this.id()
+    this.assertRecoveryAvailable(checkpoint)
     const modelConfigId = await this.modelConfigId(workItemPath, checkpoint.request)
     const queued = await this.withDatabaseWrite(workItemPath, (database) => {
       const latest = database.taskRun(taskId)
@@ -331,8 +360,9 @@ export class WritingAgentTaskService {
   }
 
   async cancelAll(): Promise<void> {
-    const tasks = [...this.active.entries()]
-    for (const [taskId, active] of tasks) {
+    const tasks = [...this.active.values()]
+    for (const active of tasks) {
+      const { taskId } = active
       active.controller.abort()
       await this.withDatabaseWrite(active.workItemPath, (database) => {
         const current = database.taskRun(taskId)
@@ -355,20 +385,26 @@ export class WritingAgentTaskService {
   }
 
   private launch(workItemPath: string, taskId: string, request: WritingAgentRequest): void {
-    if (this.active.has(taskId)) return
+    const key = this.activeKey(workItemPath, taskId)
+    if (this.active.has(key)) return
     const controller = new AbortController()
-    const active: ActiveTask = { controller, workItemPath, request, streamedContent: '' }
-    this.active.set(taskId, active)
-    void this.execute(workItemPath, taskId, request, controller).finally(() => this.active.delete(taskId))
+    const active: ActiveTask = { taskId, controller, workItemPath, request, streamedContent: '' }
+    this.active.set(key, active)
+    void this.execute(workItemPath, taskId, request, controller).finally(() => this.active.delete(key))
   }
 
+  private activeKey(workItemPath: string, taskId: string): string { return JSON.stringify([resolve(workItemPath), taskId]) }
+
   private async execute(workItemPath: string, taskId: string, request: WritingAgentRequest, controller: AbortController): Promise<void> {
+    let preparedRun: WritingAgentPreparedRun | undefined
     let streamedContent = ''
     let lastFlushedLength = 0
     let lastFlushedAt = 0
     const flushPartial = async (force = false): Promise<void> => {
       if (!streamedContent || (!force && streamedContent.length - lastFlushedLength < 512 && Date.now() - lastFlushedAt < 200)) return
-      await this.withDatabaseWrite(workItemPath, (database) => {
+      await this.withDatabaseWrite(workItemPath, async (database) => {
+        if (preparedRun) await this.runner.assertRunAuthorized?.(preparedRun)
+        controller.signal.throwIfAborted()
         const task = database.taskRun(taskId)
         if (!task || !['running', 'streaming'].includes(task.status)) return
         const checkpoint = this.checkpoint(task)
@@ -393,25 +429,38 @@ export class WritingAgentTaskService {
       lastFlushedAt = Date.now()
     }
     try {
-      await this.withDatabaseWrite(workItemPath, (database) => {
+      const checkpoint = await this.withDatabaseWrite(workItemPath, (database) => {
         const task = database.taskRun(taskId)
         if (!task || !['queued', 'resuming'].includes(task.status)) throw new AppError('CONFLICT', 'AI 任务已经变化，未重复执行。', { recoverable: true })
         const checkpoint = this.checkpoint(task)
         database.transitionTaskRun({ id: taskId, status: 'preparing', checkpointJson: JSON.stringify({ ...checkpoint, phase: 'preparing' }) })
+        return { ...checkpoint, restoring: Boolean(task.parentTaskRunId) }
       })
-      const prepared = await this.runner.prepare(request)
+      if (checkpoint.restoring) this.assertRecoveryAvailable(checkpoint)
+      const prepared = checkpoint.restoring && this.runner.restore
+        ? await this.runner.restore(request, checkpoint.recovery, controller.signal)
+        : await this.runner.prepare(request, controller.signal)
+      preparedRun = prepared
       controller.signal.throwIfAborted()
       await this.freezeContextPackage(workItemPath, taskId, prepared)
+      controller.signal.throwIfAborted()
       const turn = await this.runner.run(request, controller.signal, prepared, async (_delta, content) => {
+        // Stop receiving text immediately, even while the stop write is queued.
+        if (controller.signal.aborted) return
         streamedContent = content
-        const active = this.active.get(taskId)
+        const active = this.active.get(this.activeKey(workItemPath, taskId))
         if (active) active.streamedContent = content
         await flushPartial()
       })
       if (controller.signal.aborted) return
+      if (turn.workItemId !== prepared.workItemId || turn.chapterId !== request.chapterId) {
+        throw new AppError('CONFLICT', '模型结果不属于任务绑定的作品或章节，未保存候选。', { recoverable: true })
+      }
       await flushPartial(true)
       const content = JSON.stringify(turn)
-      await this.withDatabaseWrite(workItemPath, (database) => {
+      await this.withDatabaseWrite(workItemPath, async (database) => {
+        await this.runner.assertRunAuthorized?.(prepared)
+        controller.signal.throwIfAborted()
         const task = database.taskRun(taskId)
         if (!task || !['running', 'streaming'].includes(task.status)) return
         const checkpoint = this.checkpoint(task)
@@ -433,7 +482,9 @@ export class WritingAgentTaskService {
         }))
       })
     } catch (error) {
-      if (controller.signal.aborted || isAbortError(error)) return
+      // Only this task's stop signal proves an intentional pause/cancellation.
+      // A dependency can abort independently and must leave a retryable failure.
+      if (controller.signal.aborted) return
       await flushPartial(true).catch(() => undefined)
       await this.withDatabaseWrite(workItemPath, (database) => {
         const task = database.taskRun(taskId)
@@ -473,6 +524,12 @@ export class WritingAgentTaskService {
   }
 
   private async freezeContextPackage(workItemPath: string, taskId: string, prepared: WritingAgentPreparedRun): Promise<void> {
+    const request = await this.withDatabase(workItemPath, database => {
+      const task = database.taskRun(taskId)
+      if (!task) throw new AppError('NOT_FOUND', 'AI 任务不存在。', { recoverable: true })
+      return this.checkpoint(task).request
+    })
+    const recovery = await this.runner.snapshotForRecovery?.(request, prepared)
     // Keep task recovery compatible with pre-compiler prepared runs: only the
     // service boundary may supply the fallback, and it still creates the same
     // immutable, budgeted package before a model request can start.
@@ -509,9 +566,10 @@ export class WritingAgentTaskService {
     const characterCount = prepared.contexts.reduce((total, item) => total + item.content.length, 0)
     const estimatedTokens = contextCompilation.budget.usedInputTokens
     const tokenBudget = contextCompilation.budget.availableInputTokens
-    await this.withDatabaseWrite(workItemPath, (database) => {
+    await this.withDatabaseWrite(workItemPath, async (database) => {
+      await this.runner.assertRunAuthorized?.(prepared)
       const task = database.taskRun(taskId)
-      if (!task || task.status !== 'preparing') return
+      if (!task || task.status !== 'preparing') throw new AppError('CONFLICT', 'AI 任务已停止，未发送模型请求。', { recoverable: true })
       database.createContextPackage({
         id: `${taskId}-context`,
         taskRunId: taskId,
@@ -541,6 +599,7 @@ export class WritingAgentTaskService {
           checkpointJson: JSON.stringify({
             ...checkpoint,
             phase: 'model',
+            ...(recovery ? { recovery } : {}),
             toolGrant: prepared.toolGrant,
             plan: {
               version: 1,
@@ -600,6 +659,14 @@ export class WritingAgentTaskService {
     }
   }
 
+  private assertRecoveryAvailable(checkpoint: Checkpoint): void {
+    // Historical test adapters omit the main recovery port; production owns it.
+    if (!this.runner.restore) return
+    if (!checkpoint.recovery) return missingWritingAgentRecovery()
+    const recovery = decodeWritingAgentRecovery(checkpoint.recovery)
+    if (recovery.workItemId !== checkpoint.workItemId || recovery.chapterId !== checkpoint.request.chapterId) return missingWritingAgentRecovery()
+  }
+
   private async ensureInitialized(workItemPath: string): Promise<void> {
     const key = resolve(workItemPath)
     if (this.initializedPaths.has(key)) return
@@ -613,13 +680,25 @@ export class WritingAgentTaskService {
   }
 
   private async withDatabase<T>(workItemPath: string, operation: (database: WorkspaceDatabasePort) => T | Promise<T>): Promise<T> {
-    const database = await this.databases.openExisting(workItemPath)
-    if (!database) throw new AppError('FEATURE_UNAVAILABLE', 'AI 任务数据库不可用。', { recoverable: true })
-    try { return await operation(database) } finally { database.close() }
+    // Even a status query uses a writable connection whose close may checkpoint
+    // WAL. Keep its whole lifetime outside byte-verified snapshot acquisition.
+    return this.writes.run(workItemPath, async () => {
+      if (this.projects.executionIdentity && resolve(await this.projects.currentPath()) !== resolve(workItemPath)) {
+        throw new AppError('CONFLICT', '任务存储与绑定作品不一致。', { recoverable: true })
+      }
+      const database = await this.databases.openExisting(workItemPath)
+      if (!database) throw new AppError('FEATURE_UNAVAILABLE', 'AI 任务数据库不可用。', { recoverable: true })
+      try { return await operation(database) } finally { database.close() }
+    })
   }
 
   private async withDatabaseWrite<T>(workItemPath: string, operation: (database: WorkspaceDatabasePort) => T | Promise<T>): Promise<T> {
-    return this.writes.run(workItemPath, () => this.withDatabase(workItemPath, operation))
+    try {
+      return await this.withDatabase(workItemPath, operation)
+    } catch (error) {
+      if (isAppError(error)) throw error
+      throw new AppError('STORAGE_ERROR', 'AI 任务数据暂时无法保存，请检查存储空间和文件权限后重试。', { recoverable: true, cause: error })
+    }
   }
 
   private async modelConfigId(workItemPath: string, request: WritingAgentRequest): Promise<string | undefined> {
@@ -650,10 +729,6 @@ function decodeTurn(content: string, checkpoint: Checkpoint): WritingAgentTurn |
 
 function hashText(value: string): string {
   return createHash('sha256').update(value).digest('hex')
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError'
 }
 
 function safeErrorMessage(error: unknown): string {

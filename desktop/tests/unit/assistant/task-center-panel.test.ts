@@ -5,7 +5,7 @@ import { parse, compileScript } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import { renderToString } from '@vue/server-renderer'
 
-async function loadComponent() {
+async function loadComponent(domTransitions = true) {
   const source = await readFile(new URL('../../../src/renderer/features/assistant/components/TaskCenterPanel.vue', import.meta.url), 'utf8')
   const { descriptor } = parse(source)
   // Compile the actual presentation component; no app, IPC or author database is mounted.
@@ -13,7 +13,11 @@ async function loadComponent() {
     .replace(/import\s*\{([^}]+)\}\s*from\s*['"]vue['"];?/g,
       (_, names: string) => `const { ${names.replace(/\s+as\s+/g, ': ')} } = Vue;`)
     .replace('export default', 'return')
-  return new Function('Vue', compiled)(Vue)
+  // The custom host tests business actions without DOM geometry; native smoke covers motion.
+  const runtime = domTransitions ? Vue : { ...Vue, TransitionGroup: {
+    setup(_props: unknown, { slots }: any) { return () => Vue.h('div', slots.default?.()) }
+  } }
+  return new Function('Vue', compiled)(runtime)
 }
 
 async function render(items: unknown[], loading = false) {
@@ -45,20 +49,31 @@ test('modern paused tasks retain the usable continue control', async () => {
   const html = await render([{ ...item, detail: '现代暂停任务', actions: ['resume', 'view', 'cancel'] }])
   assert.match(html, /task-center-resume-legacy-paused/)
   assert.match(html, /已暂停/)
+  assert.match(html, /data-running="false"/)
+  assert.doesNotMatch(html, /data-running="true"/)
+})
+
+test('running feedback follows the task status and stops on failure', async () => {
+  assert.match(await render([{ ...item, status: 'running' }]), /data-running="true"/)
+  const failed = await render([{ ...item, status: 'failed', actions: ['retry'] }])
+  assert.match(failed, /data-running="false"/)
+  assert.match(failed, /未完成/)
+  assert.doesNotMatch(failed, /已完成|<svg/)
 })
 
 test('refresh keeps a dedicated contrast boundary and announces its disabled loading state', async () => {
   const html = await render([], true)
-  assert.match(html, /class="task-center-refresh"[^>]*disabled[^>]*aria-busy="true"[^>]*data-testid="refresh-task-center"[^>]*>读取中/)
+  assert.match(html, /class="task-center-refresh"[^>]*disabled[^>]*aria-busy="true"[^>]*data-testid="refresh-task-center"[^>]*><span[^>]*aria-hidden="true"[^>]*>↻<\/span>读取中/)
   const idle = await render([])
-  assert.match(idle, /class="task-center-refresh"[^>]*aria-busy="false"[^>]*>刷新/)
+  assert.match(idle, /class="task-center-refresh"[^>]*aria-busy="false"[^>]*><span[^>]*aria-hidden="true"[^>]*>↻<\/span>刷新/)
   const { descriptor } = parse(await readFile(new URL('../../../src/renderer/features/assistant/components/TaskCenterPanel.vue', import.meta.url), 'utf8'))
   assert.equal(descriptor.styles[0]?.scoped, true)
   assert.match(descriptor.styles[0].content, /\.task-center-refresh:hover:not\(:disabled\)[\s\S]*color: var\(--color-ink/)
   assert.match(descriptor.styles[0].content, /\.task-center-refresh:disabled\s*\{[^}]*opacity: 1/)
 })
 
-test('resuming child is shown as active while its paused parent remains available in all history', async () => {
+test('task history retains continued parents and shows acknowledged completion before filtered departure', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
   type Node = { text: string; props: Record<string, unknown>; children: Node[]; parent?: Node }
   const node = (text = ''): Node => ({ text, props: {}, children: [] })
   const renderer = Vue.createRenderer<Node, Node>({
@@ -80,7 +95,9 @@ test('resuming child is shown as active while its paused parent remains availabl
   const child = { ...item, id: 'child', status: 'resuming', actions: ['pause', 'view', 'cancel'], attempt: 2 }
   const parent = { ...item, id: 'parent', hasContinuation: true, actions: ['view'] }
   const root = node()
-  const app = renderer.createApp(await loadComponent(), { items: [child, parent], onAction: (...args: unknown[]) => events.push(args) })
+  const records = Vue.ref([child, parent])
+  const component = await loadComponent(false)
+  const app = renderer.createApp({ render: () => Vue.h(component, { items: records.value, onAction: (...args: unknown[]) => events.push(args) }) })
   app.mount(root)
   const flatten = (target: Node): Node[] => [target, ...target.children.flatMap(flatten)]
   const find = (id: string) => flatten(root).find(target => target.props['data-testid'] === id)
@@ -109,5 +126,26 @@ test('resuming child is shown as active while its paused parent remains availabl
     assert.equal(find('task-center-cancel-parent'), undefined)
     assert.equal(find('task-center-retry-child'), undefined)
     assert.equal(find('task-center-resume-child'), undefined)
+    await click('task-filter-attention')
+    records.value = [{ ...child, status: 'succeeded', actions: ['view'] }, parent]
+    await Vue.nextTick()
+    assert.ok(find('task-center-item-child'), 'new completion should be readable before departure')
+    assert.match(text(), /已完成/)
+    assert.doesNotMatch(text(), /1 项等待处理/)
+    t.mock.timers.tick(1000)
+    await Vue.nextTick()
+    assert.equal(find('task-center-item-child'), undefined)
+    await click('task-filter-all')
+    assert.ok(find('task-center-item-child'), 'completed record remains in authoritative history')
+    await click('task-filter-attention')
+    records.value = [{ ...child, status: 'running' }, parent]
+    await Vue.nextTick()
+    records.value = [{ ...child, status: 'succeeded' }, parent]
+    await Vue.nextTick()
+    records.value = [{ ...child, status: 'failed', actions: ['retry'] }, parent]
+    await Vue.nextTick()
+    t.mock.timers.tick(1000)
+    await Vue.nextTick()
+    assert.ok(find('task-center-retry-child'), 'an earlier completion timeout cannot retire a newer failure')
   } finally { app.unmount() }
 })

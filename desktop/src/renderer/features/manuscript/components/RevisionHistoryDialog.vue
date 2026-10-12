@@ -1,6 +1,6 @@
 <script setup>
 import StudioIcon from '../../../ui/StudioIcon.vue'
-import { toRefs } from 'vue'
+import { onBeforeUnmount, onMounted, ref, toRefs } from 'vue'
 
 const props = defineProps({ scope: { type: Object, required: true } })
 const {
@@ -23,11 +23,38 @@ const {
   selectedRevisionId,
   showRevisions
 } = toRefs(props.scope)
+
+const ledger = ref(null)
+const returnTarget = document.activeElement
+onMounted(() => ledger.value?.querySelector('[aria-label="关闭历史版本"]')?.focus({ preventScroll: true }))
+onBeforeUnmount(() => {
+  const ownsFocus = document.activeElement === document.body || ledger.value?.contains(document.activeElement)
+  if (ownsFocus && returnTarget instanceof HTMLElement && returnTarget.isConnected) {
+    returnTarget.focus({ preventScroll: true })
+  }
+})
+function handleKeydown(event) {
+  if (event.defaultPrevented || event.isComposing) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    showRevisions.value = false
+  } else if (event.key === 'Tab') {
+    const controls = [...ledger.value.querySelectorAll('button, input, select, textarea, a[href], summary, [tabindex]')]
+      .filter(element => element.tabIndex >= 0 && !element.disabled && !element.closest('[inert]') && element.getClientRects().length)
+    const boundary = event.shiftKey ? controls[0] : controls.at(-1)
+    if (document.activeElement === boundary) {
+      event.preventDefault()
+      const destination = event.shiftKey ? controls.at(-1) : controls[0]
+      destination?.focus()
+    }
+  }
+}
 </script>
 
 <template>
   <div class="modal-backdrop revision-backdrop" @click.self="showRevisions = false">
-    <section class="revision-ledger" role="dialog" aria-modal="true" aria-labelledby="revision-title">
+    <section ref="ledger" class="revision-ledger" role="dialog" aria-modal="true" aria-labelledby="revision-title" @keydown="handleKeydown">
       <header>
         <div>
           <p class="eyebrow">落笔有痕 · 本地留档</p>
@@ -65,6 +92,7 @@ const {
             :key="revision.id"
             type="button"
             :class="{ selected: selectedRevision?.id === revision.id }"
+            :aria-pressed="selectedRevision?.id === revision.id"
             :data-revision-current="revision.isCurrent ? 'true' : 'false'"
             @click="selectedRevisionId = revision.id"
           >
@@ -100,7 +128,11 @@ const {
               </button>
             </div>
           </header>
-          <div v-if="revisionViewMode === 'changes'" class="revision-diff" data-testid="revision-diff">
+          <details v-if="selectedRevision.reviewedSource" class="revision-review-source">
+            <summary>逐处保留的 AI 修订 · {{ selectedRevision.reviewedSource.application.sourceLinks.reduce((count, source) => count + source.blockIds.length, 0) }} 处</summary>
+            <p v-for="source in selectedRevision.reviewedSource.application.sourceLinks" :key="source.artifactId">生成任务 {{ source.taskId }} · 保留 {{ source.blockIds.length }} 处。保存稿可能包含作者后续修改。</p>
+          </details>
+          <div v-if="revisionViewMode === 'changes'" :key="`changes-${selectedRevision.id}`" class="revision-diff revision-preview-arrive" data-testid="revision-diff">
             <div class="revision-diff-legend">
               <span><i class="historical"></i>这一版</span><span><i class="current"></i>当前正文</span>
               <b v-if="revisionDiffSummary.blocks || revisionDiffSummary.titleChanged"
@@ -134,7 +166,7 @@ const {
               <p>所选历史稿与当前正文一致。</p>
             </div>
           </div>
-          <div v-else class="revision-full-preview">
+          <div v-else :key="`full-${selectedRevision.id}`" class="revision-full-preview revision-preview-arrive">
             <div>
               <span>这一版全文</span><small>{{ selectedRevision.word_count }} 字</small>
             </div>

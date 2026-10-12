@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import BrandLogo from '../../../ui/BrandLogo.vue'
+import { useWorkspaceLoadingSounds } from '../../../app/composables/useWorkspaceLoadingSounds'
 
 type WorkspaceLoadingPhase = 'switch' | 'database' | 'workspace' | 'chapter' | 'recovery' | 'ready'
-const props = withDefaults(defineProps<{ title: string; phase: WorkspaceLoadingPhase; slow: boolean; theme?: 'standard' | 'impact'; reducedMotion?: boolean; preview?: boolean; error?: string; sidebarWidth?: number }>(), { theme: 'impact', reducedMotion: false, preview: false, error: '', sidebarWidth: 248 })
+const props = withDefaults(defineProps<{ title: string; phase: WorkspaceLoadingPhase; slow: boolean; theme?: 'standard' | 'impact'; reducedMotion?: boolean; preview?: boolean; error?: string; sidebarWidth?: number; quick?: boolean }>(), { theme: 'impact', reducedMotion: false, preview: false, quick: false, error: '', sidebarWidth: 248 })
 defineEmits<{ cancel: []; retry: [] }>()
+useWorkspaceLoadingSounds(() => ({ phase: props.phase, error: props.error, impact: props.theme === 'impact', quick: props.quick, reduced: props.reducedMotion }))
 const cancelButton = ref<HTMLButtonElement | null>(null)
 const archiveStage = ref<HTMLElement | null>(null)
 const progressLine = ref<HTMLElement | null>(null)
@@ -36,7 +38,7 @@ function moveProgressLine() {
   line.style.transitionDuration = '0ms'
   line.style.left = `${currentLeft}px`
   line.getBoundingClientRect()
-  line.style.transitionDuration = `${props.phase === 'ready' ? LINE_COMPLETION_DURATION_MS : LINE_PATROL_DURATION_MS}ms`
+  line.style.transitionDuration = `${props.quick ? 160 : props.phase === 'ready' ? LINE_COMPLETION_DURATION_MS : LINE_PATROL_DURATION_MS}ms`
   line.style.left = props.phase === 'ready'
     ? 'calc(100% - 2px)'
     : `${lineMovingForward.value ? progressPercent.value : LINE_START_PERCENT}%`
@@ -77,12 +79,12 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="workspace-loading" role="dialog" aria-modal="true" aria-labelledby="workspace-loading-title" data-testid="workspace-loading" :data-loading-phase="phase" :data-loader-progress="progressPercent" :data-loader-theme="theme" :class="[theme, { 'reduce-motion': reducedMotion, 'has-error': !!error, 'is-ready': phase === 'ready' }]" @keydown.esc.stop.prevent="$emit('cancel')">
+  <section class="workspace-loading" role="dialog" aria-modal="true" aria-labelledby="workspace-loading-title" data-testid="workspace-loading" :data-loading-phase="phase" :data-loading-quick="quick" :data-loader-progress="progressPercent" :data-loader-theme="theme" :class="[theme, { 'quick-entry': quick, 'reduce-motion': reducedMotion, 'has-error': !!error, 'is-ready': phase === 'ready' }]" @keydown.esc.stop.prevent="$emit('cancel')">
     <div class="archive-diagonal" aria-hidden="true"></div><div ref="progressLine" class="archive-beam" data-testid="workspace-progress-line" aria-hidden="true" @transitionend="continueProgressPatrol"></div>
     <header class="archive-header">
       <BrandLogo />
       <span class="archive-channel">作品档案 / ARCHIVE ACCESS</span><span v-if="preview" class="archive-preview" data-testid="workspace-loading-preview">动画预览 · 非真实载入</span>
-      <button ref="cancelButton" type="button" data-testid="cancel-workspace-loading" @click="$emit('cancel')">{{ preview ? '关闭预览' : '返回我的作品' }} <span aria-hidden="true">↗</span></button>
+      <button ref="cancelButton" type="button" data-testid="cancel-workspace-loading" data-sound="back" @click="$emit('cancel')">{{ preview ? '关闭预览' : '返回我的作品' }} <span aria-hidden="true">↗</span></button>
     </header>
     <div class="archive-body">
       <aside ref="archiveStage" class="archive-stage" :style="sidebarHandoffStyle" aria-label="正在打开的作品">
@@ -108,7 +110,6 @@ onMounted(() => {
         </ol>
         <div class="archive-phase-meter" aria-hidden="true"><i v-for="(_, index) in steps" :key="index" :class="{ complete: isComplete(index), active: index === activeIndex }"></i></div>
         <section v-if="error" class="archive-error" role="alert"><p>{{ error }}</p><button type="button" data-testid="workspace-loading-retry" @click="$emit('retry')">重新尝试</button></section>
-        <section v-if="slow" class="archive-slow" role="status"><b>这部作品需要多一点时间</b><p>大型作品首次读取或后台任务收尾可能稍慢。你可以返回作品库；不会因此清空正文。</p></section>
         <p class="archive-footnote">进度只取自真实载入阶段；完成后用一秒将档案交接到写作边栏。</p>
       </main>
     </div>
@@ -139,7 +140,7 @@ onMounted(() => {
 .tree-node { position: relative; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--color-line, #d8d6cf); font: 11px/1 monospace; background: var(--color-paper, #f3f0e8); }.archive-tree li > div { display: grid; gap: 4px; padding-block: 8px; }.archive-tree b { font-size: 13px; font-weight: 500; }.archive-tree small { font-size: 11px; line-height: 1.5; }.tree-status { font-size: 10px; white-space: nowrap; }
 .archive-tree li.complete { color: var(--color-jade, #287a68); }.complete .tree-node { border-color: var(--color-jade, #287a68); }.archive-tree li.active { color: var(--color-ink, #1d2220); }.active .tree-node { background: var(--color-ink, #1d2220); border-color: var(--color-ink, #1d2220); color: var(--color-surface, #faf9f5); }.active .tree-status { padding: 4px 6px; background: color-mix(in srgb, var(--color-orange, #e99a35) 11%, var(--color-paper, #f3f0e8)); color: var(--color-ink, #1d2220); }
 .active:not(.complete) .tree-node::before { content: ''; position: absolute; inset: -4px; border-top: 2px solid var(--color-orange, #e99a35); animation: archive-signal 1.8s ease-in-out infinite; }
-.archive-slow { margin-top: 16px; padding: 12px 16px; border-left: 3px solid var(--color-orange, #e99a35); background: color-mix(in srgb, var(--color-orange, #e99a35) 6%, var(--color-paper, #f3f0e8)); font-size: 12px; }.archive-slow p { margin: 8px 0 0; line-height: 1.7; color: var(--color-muted, #626b65); }.archive-footnote { margin: 16px 0 0; font-size: 11px; color: var(--color-muted, #626b65); line-height: 1.7; }
+.archive-footnote { margin: 16px 0 0; font-size: 11px; color: var(--color-muted, #626b65); line-height: 1.7; }
 .archive-footer { display: flex; justify-content: space-between; gap: 16px; padding: 12px 32px; border-top: 1px solid var(--color-line, #d8d6cf); color: var(--color-muted, #626b65); font-size: 10px; letter-spacing: .1em; }
 @keyframes archive-signal { 50% { opacity: .2; } }
 @media (max-width: 860px) { .archive-body { grid-template-columns: minmax(230px, .85fr) minmax(360px, 1.2fr); }.archive-stage, .archive-progress { padding: 24px; }.archive-channel { display: none; }.archive-header { justify-content: space-between; } }
@@ -163,11 +164,12 @@ onMounted(() => {
 .archive-header,.archive-footer{border-color:color-mix(in srgb,var(--loader-line) 78%,transparent);background:color-mix(in srgb,var(--loader-canvas) 95%,transparent)}.archive-preview{border-color:var(--loader-orange);color:color-mix(in srgb,var(--loader-orange) 62%,var(--loader-ink))}
 .archive-stage,.impact .archive-stage{color:var(--loader-dossier-ink);background:var(--loader-dossier);box-shadow:0 30px 80px color-mix(in srgb,var(--loader-dossier) 22%,transparent)}.archive-stage-label,.archive-book small,.archive-stage-note,.archive-dossier-meta{color:var(--loader-dossier-muted)}.archive-book h2{color:var(--loader-dossier-ink)}.archive-progress h1,.archive-tree li.active{color:var(--loader-ink)}.archive-dossier-meta{border-color:color-mix(in srgb,var(--loader-dossier-ink) 14%,transparent)}
 .archive-eyebrow{color:color-mix(in srgb,var(--loader-orange) 64%,var(--loader-ink))}.archive-current>span,.archive-tree-head,.archive-tree li,.archive-footnote,.archive-footer{color:color-mix(in srgb,var(--loader-muted) 80%,var(--loader-ink))}.archive-tree-head,.archive-footer{border-color:var(--loader-line)}.archive-tree li.active{animation:archive-phase-enter .16s ease-out both}.archive-tree li.complete{color:var(--loader-jade)}.archive-tree li:not(:last-child):after{border-color:var(--loader-line)}.tree-node{color:color-mix(in srgb,var(--loader-muted) 80%,var(--loader-ink));background:var(--loader-canvas);border-color:var(--loader-line)}.active .tree-node{color:var(--loader-surface);background:var(--loader-ink);border-color:var(--loader-ink)}
-.archive-phase-meter i{background:color-mix(in srgb,var(--loader-ink) 10%,transparent)}.archive-phase-meter i.complete{background:var(--loader-jade)}.archive-watermark{color:color-mix(in srgb,var(--loader-ink) 8%,transparent)}.archive-slow{background:color-mix(in srgb,var(--loader-orange) 6%,var(--loader-canvas))}.archive-error{border-color:var(--loader-danger);background:color-mix(in srgb,var(--loader-danger) 7%,var(--loader-canvas));color:var(--loader-danger)}.archive-error button{border-color:var(--loader-danger);background:var(--loader-surface);color:var(--loader-danger)}
+.archive-phase-meter i{background:color-mix(in srgb,var(--loader-ink) 10%,transparent)}.archive-phase-meter i.complete{background:var(--loader-jade)}.archive-watermark{color:color-mix(in srgb,var(--loader-ink) 8%,transparent)}.archive-error{border-color:var(--loader-danger);background:color-mix(in srgb,var(--loader-danger) 7%,var(--loader-canvas));color:var(--loader-danger)}.archive-error button{border-color:var(--loader-danger);background:var(--loader-surface);color:var(--loader-danger)}
 @keyframes archive-phase-enter{from{opacity:.72}to{opacity:1}}
 @media(max-width:950px){.archive-body{gap:28px;padding:32px}.archive-stage{padding:32px 24px}.archive-book h2{font-size:30px}.archive-stage-label,.archive-dossier-meta{left:24px;right:24px}.archive-progress h1{font-size:25px}}@media(max-width:700px){.archive-body{display:block;padding:24px;overflow:auto}.archive-stage,.impact .archive-stage{min-height:240px;margin-bottom:24px;max-height:none;padding:72px 24px 65px}.archive-book h2,.impact .archive-book h2{font-size:27px}.archive-stage-note{display:none!important}.archive-diagonal{display:none!important}.archive-progress{padding:0}.archive-header{flex-wrap:wrap;min-height:72px}.archive-preview{order:3;width:100%}.archive-tree li{min-height:55px}}@media(max-height:700px) and (min-width:701px){.archive-body{align-items:start;padding-block:24px}.archive-stage,.impact .archive-stage{min-height:340px}.archive-progress{align-self:start;padding:0}.archive-tree li{min-height:49px}.archive-current{margin-block:16px}.archive-stage-label{display:flex}.archive-book{order:initial}}
 .reduce-motion *,.reduce-motion *:before,.reduce-motion *:after{animation:none!important;transition:none!important}.reduce-motion .archive-beam{display:none}
 @media (prefers-reduced-motion: reduce){.archive-beam{display:none}}
+.quick-entry :is(.archive-stage,.archive-stage:before,.archive-seal,.archive-progress,.archive-current,.archive-tree li){animation-duration:.16s!important;animation-delay:0s!important}
 </style>
 
 <style scoped src="../../../assets/approved-loading.css"></style>

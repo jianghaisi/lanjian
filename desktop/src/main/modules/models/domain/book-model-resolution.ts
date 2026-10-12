@@ -28,6 +28,8 @@ export type BookModelSnapshot = {
   settings: BookModelSettings
   storage: BookModelStorage
   fileHash: string | null
+  /** Original portable document bytes, retained only for explicit edit recovery. */
+  recoveryContent?: string
   assertCurrent(): Promise<void>
 }
 export interface BookModelSourceReader { capture(bookRoot: string): Promise<BookModelSnapshot> }

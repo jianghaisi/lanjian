@@ -1,9 +1,24 @@
 <script setup>
-defineProps({ name: { type: String, required: true }, size: { type: Number, default: 20 } })
+import { MessagesSquare, ClipboardList, FolderOpen, Globe, History, ListTree, FilePenLine, BookOpen } from '@lucide/vue'
+
+defineProps({ name: { type: String, required: true, validator: value => ['book', 'list', 'nav-group', 'nav-definition', 'nav-materials', 'nav-foundation', 'nav-chronicle', 'nav-planning', 'nav-manuscript', 'manuscript', 'definition', 'research', 'world', 'events', 'outline', 'settings', 'spark', 'plus', 'message', 'menu', 'folder', 'save', 'history', 'undo', 'redo', 'trash', 'restore', 'panel', 'close', 'arrow', 'chevron-right', 'search'].includes(value) }, size: { type: Number, default: 20 } })
+
+const navigationIcons = {
+  book: BookOpen,
+  list: ListTree,
+  'nav-group': MessagesSquare,
+  'nav-definition': ClipboardList,
+  'nav-materials': FolderOpen,
+  'nav-foundation': Globe,
+  'nav-chronicle': History,
+  'nav-planning': ListTree,
+  'nav-manuscript': FilePenLine
+}
 </script>
 
 <template>
-  <svg :width="size" :height="size" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+  <component v-if="navigationIcons[name]" :is="navigationIcons[name]" :size="size" :stroke-width="1.5" aria-hidden="true" />
+  <svg v-else :width="size" :height="size" viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
       <template v-if="name === 'manuscript'">
         <path d="M5.5 3.5h9l4 4v13h-13z"/><path d="M14.5 3.5v4h4M8.5 11h7M8.5 14.5h7M8.5 18h4.5"/>
@@ -31,6 +46,12 @@ defineProps({ name: { type: String, required: true }, size: { type: Number, defa
       </template>
       <template v-else-if="name === 'plus'">
         <path d="M12 5v14M5 12h14"/>
+      </template>
+      <template v-else-if="name === 'message'">
+        <path d="M5 4.5h14a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1-1.5 1.5H9l-5.5 3V6A1.5 1.5 0 0 1 5 4.5Z"/><path d="M8 9h8M8 13h5"/>
+      </template>
+      <template v-else-if="name === 'menu'">
+        <path d="M4 6h16M4 12h16M4 18h16"/>
       </template>
       <template v-else-if="name === 'folder'">
         <path d="M3.5 6.5h6l2-2h9v15h-17z"/><path d="M3.5 9h17"/>
@@ -68,6 +89,7 @@ defineProps({ name: { type: String, required: true }, size: { type: Number, defa
       <template v-else-if="name === 'search'">
         <circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 4.5 4.5"/>
       </template>
+      <template v-else><circle cx="12" cy="12" r="8"/><path d="M10 9a2 2 0 1 1 3 1.7c-1 .5-1 1-1 2M12 16h.01"/></template>
     </g>
   </svg>
 </template>

@@ -52,7 +52,6 @@ watch(() => [props.mode, props.selectedChapter, props.selectedVolume, props.sele
 
 <template>
   <aside ref="host" class="planning-sidebar" aria-label="谋篇目录">
-    <header class="planning-sidebar-heading"><div><h2>谋篇</h2><small>STORY PLANNING</small></div><span>{{ chapters.length }} 章</span></header>
     <label class="planning-search"><StudioIcon name="search" :size="15"/><input v-assist-field="{ id: 'AppShell.outlineChapterSearch', read: () => query, write: value => { query = String(value) } }" v-model="query" type="search" placeholder="查找大纲、卷名、章节" aria-label="搜索全部大纲"></label>
     <nav class="planning-directory" aria-label="大纲文档">
       <section class="planning-group">

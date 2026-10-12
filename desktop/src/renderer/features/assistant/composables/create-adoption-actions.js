@@ -111,7 +111,7 @@ export function createAssistantAdoptionActions(ports) {
     }
   }
 
-  async function applyWritingAgentTurn(turnId, acceptedChangeIds) {
+  async function applyWritingAgentTurn(turnId, acceptedChangeIds, mode) {
     if (ports.writingAgentApplyingTurnId.value) return
     const turn = ports.writingAgentTurns.value.find((item) => item.id === turnId)
     const candidate = turn?.result?.candidate
@@ -120,6 +120,17 @@ export function createAssistantAdoptionActions(ports) {
       return ports.notice('正文、章节或作品已经变化，这份旧候选不能再采用')
     }
     if (!turn.taskId) return ports.notice('这份候选缺少持久任务记录，不能写入正式正文')
+    if (mode === 'inline' || ports.manuscriptEditor?.value?.hasReview?.(turn.taskId)) {
+      const failedReview = Boolean(turn.result.proposal && !turn.result.proposal.report.passed)
+      if (failedReview && !window.confirm('这份候选未通过章纲检查，仍要逐处核对其中的修改吗？')) return
+      try {
+        await ports.manuscriptEditor.value?.flush?.()
+        if (!(await ports.flushChapterSaveSafely())) return
+        await ports.manuscriptEditor.value?.openReview?.(turn.taskId, failedReview)
+        ports.notice('请在原文下方逐处保留或撤销红字建议')
+      } catch (error) { ports.notice(error?.message || '修订暂时无法打开，候选仍然保留') }
+      return
+    }
     const accepted = Array.isArray(acceptedChangeIds) ? acceptedChangeIds : []
     if (candidate.diff && accepted.length === 0) {
       try {

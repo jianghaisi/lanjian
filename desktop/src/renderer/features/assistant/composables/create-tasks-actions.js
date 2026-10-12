@@ -1,9 +1,17 @@
 // Explicit live ports preserve the existing book/request scope and draft ownership.
 export function createAssistantTasksActions(ports) {
+  const polling = new Map()
+  const running = task => ['queued', 'resuming', 'preparing', 'running', 'streaming'].includes(task.status)
+  function captureBook() {
+    const path = ports.current.value?.path, generation = ports.chapterSelectionGeneration
+    return () => ports.current.value?.path === path && ports.chapterSelectionGeneration === generation
+  }
   function syncWritingAgentTask(task) {
+    if (task.workItemId !== ports.current.value?.id || task.chapterId !== ports.selectedId.value) return
     const index = ports.writingAgentTasks.value.findIndex((item) => item.id === task.id)
     if (index >= 0) ports.writingAgentTasks.value.splice(index, 1, task)
     else ports.writingAgentTasks.value = [...ports.writingAgentTasks.value, task]
+    ports.writingAgentRunning.value = ports.writingAgentTasks.value.some(running)
     if (task.turn && task.artifact?.status === 'complete') {
       const conversation = {
         id: task.turn.id,
@@ -42,6 +50,9 @@ export function createAssistantTasksActions(ports) {
       ports.writingAgentRunning.value = tasks.some((task) =>
         ['queued', 'resuming', 'preparing', 'running', 'streaming'].includes(task.status)
       )
+      for (const task of tasks.filter(task => ['queued', 'resuming', 'preparing', 'running', 'streaming'].includes(task.status))) {
+        void pollWritingAgentTask(task.id).catch(() => undefined)
+      }
     } catch {
       if (
         ports.workspaceRequests.isCurrent(request, ports.current.value) &&
@@ -106,6 +117,7 @@ export function createAssistantTasksActions(ports) {
     if (!ports.selectedId.value) return
     const chapterId = ports.selectedId.value
     const workItemId = ports.current.value?.id
+    const isCurrent = captureBook()
     const requestId = ++ports.writingAgentContextPreviewRequest
     ports.writingAgentContextPreviewBusy.value = true
     try {
@@ -115,6 +127,7 @@ export function createAssistantTasksActions(ports) {
         : null
       const preview = await ports.desktop.ai.previewWritingAgentContext({
         chapterId,
+        expectedWorkItemId: workItemId,
         message: input.message?.trim() || '预览本次写作上下文',
         currentDraft: ports.chapterContent.value,
         ...(input.model ? { model: input.model } : {}),
@@ -127,6 +140,7 @@ export function createAssistantTasksActions(ports) {
       })
       if (
         requestId === ports.writingAgentContextPreviewRequest &&
+        isCurrent() &&
         ports.current.value?.id === workItemId &&
         ports.selectedId.value === chapterId
       )
@@ -134,6 +148,7 @@ export function createAssistantTasksActions(ports) {
     } catch (error) {
       if (
         requestId === ports.writingAgentContextPreviewRequest &&
+        isCurrent() &&
         ports.current.value?.id === workItemId &&
         ports.selectedId.value === chapterId
       )
@@ -141,6 +156,7 @@ export function createAssistantTasksActions(ports) {
     } finally {
       if (
         requestId === ports.writingAgentContextPreviewRequest &&
+        isCurrent() &&
         ports.current.value?.id === workItemId &&
         ports.selectedId.value === chapterId
       )
@@ -149,8 +165,10 @@ export function createAssistantTasksActions(ports) {
   }
 
   async function runWritingAgent(input) {
+    const isCurrent = captureBook()
     if (!ports.selectedId.value || ports.writingAgentRunning.value) return
     await ports.manuscriptEditor.value?.flush?.()
+    if (!isCurrent()) return
     const selection = ports.manuscriptEditor.value?.selectionSnapshot?.() || null
     const insertionAnchor = ports.manuscriptInsertionAnchor.value
       ? ports.manuscriptEditor.value?.insertionAnchorSnapshot?.() || ports.manuscriptInsertionAnchor.value
@@ -161,9 +179,10 @@ export function createAssistantTasksActions(ports) {
     ports.writingAgentRunning.value = true
     try {
       const task = await ports.desktop.ai.startWritingAgent({
-        operationId: crypto.randomUUID(),
+        operationId: input.operationId || crypto.randomUUID(),
         request: {
           chapterId,
+          expectedWorkItemId: workItemId,
           message: input.message,
           currentDraft: baseDraft,
           ...(input.expectedContextHash ? { expectedContextHash: input.expectedContextHash } : {}),
@@ -176,13 +195,14 @@ export function createAssistantTasksActions(ports) {
           ...(insertionAnchor ? { insertionAnchor } : {})
         }
       })
+      if (!isCurrent()) return
       syncWritingAgentTask(task)
       const completed = await pollWritingAgentTask(task.id)
       if (!completed || ports.current.value?.id !== workItemId || ports.selectedId.value !== chapterId) return
       if (completed.status === 'succeeded' && completed.turn) {
         ports.notice(
           completed.turn.candidate
-            ? '写作 Agent 已生成正文候选，等待你确认'
+            ? '红字修订已放在原文下方，可逐处保留或撤销'
             : completed.turn.chapterCardOptions?.length
               ? '助笔已整理章卡候选；选择一种走法后仍需逐项核对'
               : '写作 Agent 已完成只读回答'
@@ -192,53 +212,76 @@ export function createAssistantTasksActions(ports) {
       else if (completed.status === 'failed' || completed.status === 'interrupted')
         ports.notice(completed.error?.message || '写作 Agent 本次任务没有完成，可以重试')
     } catch (error) {
+      if (!isCurrent()) return
       if (ports.current.value?.id === workItemId) ports.notice(error?.message || '写作 Agent 本次任务没有完成，请重试')
     } finally {
-      ports.writingAgentRunning.value = ports.writingAgentTasks.value.some((task) =>
+      if (isCurrent()) ports.writingAgentRunning.value = ports.writingAgentTasks.value.some((task) =>
         ['queued', 'resuming', 'preparing', 'running', 'streaming'].includes(task.status)
       )
     }
   }
 
-  async function pollWritingAgentTask(taskId) {
+  function pollWritingAgentTask(taskId) {
+    const key = JSON.stringify([ports.current.value?.path, ports.chapterSelectionGeneration, taskId])
+    if (!polling.has(key)) polling.set(key, pollTask(taskId).finally(() => polling.delete(key)))
+    return polling.get(key)
+  }
+  async function pollTask(taskId) {
+    const path = ports.current.value?.path, selection = ports.chapterSelectionGeneration
+    const isCurrent = () => ports.current.value?.path === path && ports.chapterSelectionGeneration === selection
     let task = ports.writingAgentTasks.value.find((item) => item.id === taskId)
     while (task && ['queued', 'resuming', 'preparing', 'running', 'streaming'].includes(task.status)) {
       await new Promise((resolve) => window.setTimeout(resolve, 180))
+      if (!isCurrent()) return null
       task = await ports.desktop.ai.writingAgentTask(taskId)
+      if (!isCurrent()) return null
       syncWritingAgentTask(task)
     }
-    return task
+    if (isCurrent() && task?.status === 'succeeded' && task.turn?.candidate && (!task.turn.proposal || task.turn.proposal.report.passed)) {
+      await ports.manuscriptEditor?.value?.openReview?.(task.id)
+    }
+    return isCurrent() ? task : null
   }
 
   async function cancelWritingAgentTask(taskId = '') {
+    const isCurrent = captureBook()
     const task = typeof taskId === 'string' && taskId ? { id: taskId } : ports.activeWritingAgentTask.value
     if (!task) return
     try {
-      syncWritingAgentTask(await ports.desktop.ai.cancelWritingAgentTask(task.id))
+      const cancelled = await ports.desktop.ai.cancelWritingAgentTask(task.id)
+      if (!isCurrent()) return
+      syncWritingAgentTask(cancelled)
       ports.writingAgentRunning.value = false
       ports.notice('正在停止生成；已有正文不会改变')
     } catch (error) {
+      if (!isCurrent()) return
       ports.notice(error?.message || '停止任务失败，请重试')
     }
   }
 
   async function pauseWritingAgentTask(taskId = '') {
+    const isCurrent = captureBook()
     const task = typeof taskId === 'string' && taskId ? { id: taskId } : ports.activeWritingAgentTask.value
     if (!task) return
     try {
-      syncWritingAgentTask(await ports.desktop.ai.pauseWritingAgentTask(task.id))
+      const paused = await ports.desktop.ai.pauseWritingAgentTask(task.id)
+      if (!isCurrent()) return
+      syncWritingAgentTask(paused)
       ports.writingAgentRunning.value = false
       ports.notice('任务已暂停；现有片段已保留，正文没有改变')
     } catch (error) {
+      if (!isCurrent()) return
       ports.notice(error?.message || '暂停任务失败，请重试')
     }
   }
 
   async function resumeWritingAgentTask(taskId) {
+    const isCurrent = captureBook()
     if (ports.writingAgentRunning.value) return
     ports.writingAgentRunning.value = true
     try {
       const task = await ports.desktop.ai.resumeWritingAgentTask(taskId, crypto.randomUUID())
+      if (!isCurrent()) return
       syncWritingAgentTask(task)
       const completed = await pollWritingAgentTask(task.id)
       if (completed?.status === 'succeeded') ports.notice('暂停的任务已在新一轮中完成，候选等待你确认')
@@ -246,27 +289,31 @@ export function createAssistantTasksActions(ports) {
       else if (completed?.status === 'failed' || completed?.status === 'interrupted')
         ports.notice(completed.error?.message || '继续任务没有完成')
     } catch (error) {
+      if (!isCurrent()) return
       ports.notice(error?.message || '暂停的任务无法继续')
     } finally {
-      ports.writingAgentRunning.value = ports.writingAgentTasks.value.some((task) =>
+      if (isCurrent()) ports.writingAgentRunning.value = ports.writingAgentTasks.value.some((task) =>
         ['queued', 'resuming', 'preparing', 'running', 'streaming'].includes(task.status)
       )
     }
   }
 
   async function retryWritingAgentTask(taskId) {
+    const isCurrent = captureBook()
     if (ports.writingAgentRunning.value) return
     ports.writingAgentRunning.value = true
     try {
       const task = await ports.desktop.ai.retryWritingAgentTask(taskId, crypto.randomUUID())
+      if (!isCurrent()) return
       syncWritingAgentTask(task)
       const completed = await pollWritingAgentTask(task.id)
       if (completed?.status === 'succeeded') ports.notice('AI 任务重试完成，候选已恢复到对话中')
       else if (completed?.status === 'failed') ports.notice(completed.error?.message || '重试仍未完成')
     } catch (error) {
+      if (!isCurrent()) return
       ports.notice(error?.message || 'AI 任务无法重试')
     } finally {
-      ports.writingAgentRunning.value = ports.writingAgentTasks.value.some((task) =>
+      if (isCurrent()) ports.writingAgentRunning.value = ports.writingAgentTasks.value.some((task) =>
         ['queued', 'resuming', 'preparing', 'running', 'streaming'].includes(task.status)
       )
     }

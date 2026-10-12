@@ -3,9 +3,37 @@ import {
   isSameManuscriptSaveTarget
 } from '../../../../contracts/manuscript/manuscript-save-identity'
 import { supersededSave } from '../services/manuscript-save-queue'
+import { measureManuscript } from '../../../../contracts/manuscript/manuscript-metrics'
 
 // Explicit live ports preserve the existing book/request scope and draft ownership.
 export function createManuscriptPersistenceActions(ports) {
+  let savedInfoSequence = 0
+
+  async function refreshSavedChapterInfo() {
+    const saved = ports.lastSavedChapter
+    if (!ports.current.value || !saved.id || saved.id !== ports.selectedId.value) return false
+    const request = ports.workspaceRequests.capture(ports.current.value)
+    const generation = ports.chapterSelectionGeneration
+    const sequence = ++savedInfoSequence
+    try {
+      const loaded = await ports.desktop.chapters.get(saved.id)
+      if (
+        sequence !== savedInfoSequence || generation !== ports.chapterSelectionGeneration ||
+        !ports.workspaceRequests.isCurrent(request, ports.current.value) ||
+        ports.selectedId.value !== saved.id || ports.lastSavedChapter !== saved ||
+        loaded.id !== saved.id || loaded.revision !== saved.revision ||
+        loaded.bodyVersionId !== saved.bodyVersionId || !isSameManuscriptDraft(loaded, saved)
+      ) return false
+      const index = ports.chapters.value.findIndex(item => item.id === saved.id && item.revision === saved.revision)
+      if (index < 0) return false
+      // Only file metadata belongs to this read; newer input and catalog edits stay intact.
+      ports.chapters.value.splice(index, 1, { ...ports.chapters.value[index], storageMode: loaded.storageMode, mirrorStatus: loaded.mirrorStatus })
+      return true
+    } catch {
+      return false
+    }
+  }
+
   async function newChapter() {
     if (ports.chapterOrderIssue.value) return ports.notice('章节顺序账本待核对，暂不能新建章节')
     if (!(await ports.prepareOutlineLeave())) return
@@ -121,6 +149,9 @@ export function createManuscriptPersistenceActions(ports) {
     clearAutosaveTimer()
     const id = ports.selectedId.value
     if (!id || (!chapterIsDirty() && !(reason !== 'autosave' && ports.activeAutosaveCheckpoint))) return null
+    const previousChapter = ports.chapters.value.find(item => item.id === id)
+    if (!previousChapter || !ports.current.value) return null
+    const request = ports.workspaceRequests.capture(ports.current.value)
     const workItemId = ports.current.value?.id
     const workItemPath = ports.current.value?.path
     const saveTarget = { workItemId, workItemPath, chapterId: id }
@@ -138,8 +169,17 @@ export function createManuscriptPersistenceActions(ports) {
     }
     const recoverySnapshot = ports.manuscriptRecoveryStore.read(workItemId, id) || writeCurrentRecoverySnapshot()
     ports.saveState.value = 'saving'
+    const reviewEditor = ports.manuscriptEditor.value
     const operation = ports.manuscriptSaves.enqueue(
       async () => {
+        const reviewed = await reviewEditor?.saveReviewedDraft?.(snapshot)
+        if (reviewed) {
+          const saved = reviewed.snapshot
+          const chapter = { ...previousChapter, title: saved.title, content: saved.content,
+            revision: saved.revision, bodyVersionId: saved.versionId,
+            word_count: measureManuscript(saved.content).wordCount, mirrorStatus: undefined }
+          return { storageMode: chapter.storageMode, checkpoint: null, chapter, reviewed: true }
+        }
         if (reason === 'autosave') {
           return ports.desktop.chapters.stageAutosave(id, {
             title: snapshot.title,
@@ -170,14 +210,18 @@ export function createManuscriptPersistenceActions(ports) {
       const result = await operation
       if (result === supersededSave) return null
       const chapter = result.chapter
-      const currentTarget = isSameManuscriptSaveTarget(saveTarget, {
+      const currentTarget = ports.workspaceRequests.isCurrent(request, ports.current.value) && isSameManuscriptSaveTarget(saveTarget, {
         workItemId: ports.current.value?.id,
         workItemPath: ports.current.value?.path,
         chapterId: ports.selectedId.value
       })
       if (!currentTarget) return chapter
       const index = ports.chapters.value.findIndex((item) => item.id === chapter.id)
-      if (index >= 0) ports.chapters.value.splice(index, 1, chapter)
+      if (index >= 0) ports.chapters.value.splice(index, 1, result.reviewed
+        ? { ...ports.chapters.value[index], title: chapter.title, content: chapter.content, revision: chapter.revision,
+            bodyVersionId: chapter.bodyVersionId, word_count: chapter.word_count, mirrorStatus: undefined }
+        : chapter)
+      const confirmed = result.reviewed ? chapter : snapshot
       if (ports.selectedId.value === id) {
         if (reason === 'autosave' && result.storageMode === 'sqlite' && result.checkpoint) {
           ports.activeAutosaveCheckpoint = result.checkpoint
@@ -211,15 +255,15 @@ export function createManuscriptPersistenceActions(ports) {
           ports.activeAutosaveCheckpoint = null
           ports.lastSavedChapter = {
             id,
-            title: snapshot.title,
-            content: snapshot.content,
+            title: confirmed.title,
+            content: confirmed.content,
             revision: chapter.revision ?? null,
             bodyVersionId: chapter.bodyVersionId ?? null
           }
           ports.lastSavedAt.value = new Date()
           if (recoverySnapshot) ports.manuscriptRecoveryStore.clearIfSnapshotMatches(recoverySnapshot)
         }
-        if (isSameManuscriptDraft(snapshot, { title: ports.chapterTitle.value, content: ports.chapterContent.value })) {
+        if (isSameManuscriptDraft(confirmed, { title: ports.chapterTitle.value, content: ports.chapterContent.value })) {
           if (!(reason === 'autosave' && result.storageMode === 'sqlite' && result.checkpoint))
             ports.saveState.value = 'saved'
           ports.manuscriptSaveError.value = null
@@ -235,6 +279,7 @@ export function createManuscriptPersistenceActions(ports) {
           scheduleAutosave()
         }
       }
+      if (result.reviewed) void refreshSavedChapterInfo()
       if (settlementJobId) {
         try {
           if (settlementJobId.kind === 'writingAgent') await ports.desktop.ai.settleWritingAgent(settlementJobId.id)
@@ -246,11 +291,11 @@ export function createManuscriptPersistenceActions(ports) {
           ports.notice(`正文已保存；后续状态未结算：${error?.message || '请稍后重试'}`)
         }
       }
-      if (announce) ports.notice('章节已保存到本地')
+      if (announce) ports.notice(ports.desktop?.app?.platform === 'browser' ? '章节已保存到账户书库' : '章节已保存到本地')
       return chapter
     } catch (error) {
       if (
-        isSameManuscriptSaveTarget(saveTarget, {
+        ports.workspaceRequests.isCurrent(request, ports.current.value) && isSameManuscriptSaveTarget(saveTarget, {
           workItemId: ports.current.value?.id,
           workItemPath: ports.current.value?.path,
           chapterId: ports.selectedId.value
@@ -346,6 +391,7 @@ export function createManuscriptPersistenceActions(ports) {
   }
 
   return {
+    refreshSavedChapterInfo,
     newChapter,
     saveChapter,
     chapterIsDirty,

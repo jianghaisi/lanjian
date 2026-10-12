@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
-import { createReadStream, rmSync, rmdirSync } from 'node:fs'
-import { copyFile, mkdtemp, stat } from 'node:fs/promises'
+import { createReadStream, createWriteStream, rmSync, rmdirSync } from 'node:fs'
+import { mkdtemp, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pipeline } from 'node:stream/promises'
 import { AppError } from '../../../core/errors/app-error'
+import { isChangingWorkspaceSnapshot, workspaceSnapshotConflict as changedSnapshot } from '../../../core/errors/workspace-snapshot-error'
 import { WORKSPACE_DATABASE_RELATIVE_PATH } from '../../../core/ports/workspace-database'
 import { canonicalDirectory, projectExistingPath, projectTargetPath } from '../../../platform/storage/project-path'
 
@@ -35,10 +37,10 @@ export async function eventReadSnapshot(workItemId: string, afterCopy?: (private
   })
   const before = await inspect()
   if (!before.database) {
-    if (before.wal || before.journal) throw changedSnapshot()
+    if (before.wal || before.journal) throw changedSnapshot('recovery-required')
     return null
   }
-  if (before.journal && before.journal.size > 0) throw changedSnapshot()
+  if (before.journal && before.journal.size > 0) throw changedSnapshot('recovery-required')
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'lanjian-event-read-'))
   const path = join(temporaryRoot, 'snapshot.sqlite')
   let disposed = false
@@ -52,8 +54,10 @@ export async function eventReadSnapshot(workItemId: string, afterCopy?: (private
     try { rmdirSync(temporaryRoot) } catch { /* do not remove unrecognized contents */ }
   }
   try {
-    await copyFile(await containedSource(root, sourcePaths.database), path)
-    if (before.wal) await copyFile(await containedSource(root, sourcePaths.wal), `${path}-wal`)
+    // Windows CopyFile can temporarily deny writable opens of its source.
+    // Stream with normal read sharing; the byte checks below still reject races.
+    await pipeline(createReadStream(await containedSource(root, sourcePaths.database)), createWriteStream(path, { flags: 'wx' }))
+    if (before.wal) await pipeline(createReadStream(await containedSource(root, sourcePaths.wal)), createWriteStream(`${path}-wal`, { flags: 'wx' }))
     await afterCopy?.(path)
     const copied = { database: await fileStamp(path), wal: await fileStamp(`${path}-wal`) }
     // Two source observations plus the actual copied bytes must agree. This rejects
@@ -78,7 +82,7 @@ export async function eventReadSnapshot(workItemId: string, afterCopy?: (private
 export async function stableEventReadSnapshot(workItemId: string) {
   for (let attempt = 0; ; attempt += 1) {
     try { return await eventReadSnapshot(workItemId) } catch (error) {
-      if (!(error instanceof AppError) || error.code !== 'CONFLICT' || attempt >= 2) throw error
+      if (!isChangingWorkspaceSnapshot(error) || attempt >= 2) throw error
     }
   }
 }
@@ -107,8 +111,4 @@ async function fileStamp(path: string): Promise<FileStamp> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
     throw error
   }
-}
-
-function changedSnapshot(): AppError {
-  return new AppError('CONFLICT', '作品数据库正在变化或需要恢复，请稍后重新核对事件；未修改作品文件。', { recoverable: true })
 }

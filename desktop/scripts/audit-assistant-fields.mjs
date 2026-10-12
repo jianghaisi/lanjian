@@ -31,6 +31,9 @@ for(const path of await files(resolve('src'))){
         if(!classification&&internal.test(file))classification=file.includes('DesktopPetWindow')?'auxiliary: standalone companion controls':'protected: assistant instructions, routing or candidate approval'
         if(!classification&&file.endsWith('PlainTextEditor.vue'))classification='wrapper: explicit assistant-field prop or protected prose'
         if(!classification&&file.endsWith('ManuscriptEditor.vue')&&node.tag==='PlainTextEditor')classification='prose: existing versioned writing-agent adoption'
+        if(!classification&&/\/writing-plugins\/components\/(WritingPluginSettings|BookPluginComposition|PluginFilters|PersonalPlugins|PluginDraftEditor|PluginWorkflowEditor|PluginMarket)\.vue$/.test(file))classification='protected: plugin authoring, discovery, composition and permission approval'
+        if(!classification&&file.endsWith('/characters/components/WorldbookEntryEditor.vue'))classification='protected: author-owned lore disclosure and private notes'
+        if(!classification&&file.endsWith('SettingsWorkbench.vue')&&/^worldbook(Search|Type)$/.test(expr))classification='protected: worldbook discovery filters'
         if(!classification&&file.endsWith('OutlineRecoveryShelf.vue'))classification='protected: recovery object identity'
         if(!classification&&file.endsWith('CompanionSettings.vue')&&expr==='projectSpecific')classification='protected: preference scope decision'
         if(!classification&&file.endsWith('AppShell.vue')&&/eventPlacementValue|selectedChapterVolume|selectedChapterStage|chapter\.(volumeId|stageId)/.test(expr))classification='protected: formal event or chapter assignment'
@@ -44,5 +47,7 @@ for(const path of await files(resolve('src'))){
 const unclassified=inventory.filter(x=>x.classification==='UNCLASSIFIED')
 const missingCapabilities=inventory.flatMap(item=>{const id=item.adapter?.match(/\bid\s*:\s*['"]([^'"]+)['"]/)?.[1];return id&&!assistantFieldCatalog[id]?[{file:item.file,line:item.line,id}]:[]})
 const report={scannedAt:new Date().toISOString(),summary:{inputs:inventory.length,registered:inventory.filter(x=>x.classification==='registered'||x.classification==='semantic group').length,unclassified:unclassified.length,missingCapabilities:missingCapabilities.length},inventory}
-await writeFile('../.trellis/tasks/09-10-v3-workspace-consistency-and-assistant/research/input-binding-audit.json',JSON.stringify(report,null,2))
+const outputFlag=process.argv.indexOf('--output')
+if(outputFlag>=0&&!process.argv[outputFlag+1])throw new Error('--output requires a report file')
+await writeFile(outputFlag>=0?process.argv[outputFlag+1]:'../.trellis/tasks/09-10-v3-workspace-consistency-and-assistant/research/input-binding-audit.json',JSON.stringify(report,null,2))
 console.log(JSON.stringify(report.summary));if(unclassified.length||missingCapabilities.length){console.log(JSON.stringify({unclassified,missingCapabilities},null,2));process.exitCode=1}

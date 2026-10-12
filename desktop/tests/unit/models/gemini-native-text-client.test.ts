@@ -5,6 +5,8 @@ import { AppError } from '../../../src/main/core/errors/app-error'
 import { extractFinalText, geminiEndpoint } from '../../../src/main/modules/models/adapters/gemini-native-text-client'
 import { AiClient } from '../../../src/main/modules/models/application/ai-client'
 import { completeStructured } from '../../../src/main/modules/assistant/application/structured-response-repair'
+import { catalogTextSupport, decodeCatalogEntry } from '../../../src/contracts/models/model-catalog-metadata'
+import { modelCapabilities } from '../../../src/contracts/models/generation-parameters'
 
 test('Gemini native dispatch uses owned paths and x-goog-api-key while filtering thoughts', async t => {
   const requests: Array<{ method: string; url: string; authorization: string | null; key: string | null; body?: any }> = []
@@ -67,13 +69,35 @@ test('Gemini native dispatch uses owned paths and x-goog-api-key while filtering
   assert.deepEqual(requests[1].body.generationConfig, { temperature: 0.7, topP: 0.9, maxOutputTokens: 4096 })
 
   const beforeTool = requests.length
-  await assert.rejects(ai.prepareToolConversation('outline'), (error: unknown) => {
-    assert.ok(error instanceof AppError)
-    assert.equal(error.code, 'FEATURE_UNAVAILABLE')
-    assert.match(error.message, /不支持工具调用/)
-    return true
-  })
+  assert.equal((await ai.prepareToolConversation('outline')).model, 'gemini-3.8-flash-high')
   assert.equal(requests.length, beforeTool)
+})
+
+test('Gemini native completion retries transport failures through the existing SSE endpoint', async t => {
+  const urls: string[] = []
+  const connection = {
+    kind: 'gemini-native' as const, connectionId: 'native', connectionName: 'Gemini 原生',
+    baseUrl: 'https://native.example.test/v1', apiKey: 'synthetic-native-key',
+    profile: { connectionId: 'native', model: 'gemini-3.8-flash-high', temperature: 1, topP: .95, maxTokens: 16384 }
+  }
+  const ai = new AiClient({ resolve: async () => connection, resolveConnection: async () => connection })
+  t.mock.method(globalThis, 'fetch', async (url: string | URL | Request, init?: RequestInit) => {
+    urls.push(String(url))
+    assert.equal(new Headers(init?.headers).get('x-goog-api-key'), 'synthetic-native-key')
+    if (!String(url).includes(':streamGenerateContent')) throw new TypeError('synthetic transport failure')
+    return new Response([
+      `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: '恢复后的' }] } }] })}`,
+      '',
+      `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: '完整正文' }] }, finishReason: 'STOP' }] })}`,
+      '', ''
+    ].join('\n'), { headers: { 'Content-Type': 'text/event-stream' } })
+  })
+  const prepared = await ai.prepareCompletion('prose')
+  assert.equal((await prepared.complete('继续正文')).content, '恢复后的完整正文')
+  assert.deepEqual(urls, [
+    'https://native.example.test/v1/models/gemini-3.8-flash-high:generateContent',
+    'https://native.example.test/v1/models/gemini-3.8-flash-high:streamGenerateContent?alt=sse'
+  ])
 })
 
 test('Gemini native endpoint preserves an explicit gateway API version', () => {
@@ -127,4 +151,87 @@ test('Gemini native structured repair stays on one captured connection', async t
   assert.deepEqual(value, { value: '已修复' })
   assert.equal(resolves, 1)
   assert.equal(sends, 2)
+})
+
+function catalogClient() {
+  const config = { kind: 'gemini-native' as const, connectionId: 'native', connectionName: 'test',
+    baseUrl: 'https://fixture.invalid/v1beta', apiKey: 'synthetic-native-key',
+    profile: { connectionId: 'native', model: '', temperature: 0, topP: 1, maxTokens: 128 } }
+  return new AiClient({ resolve: async () => config, resolveConnection: async () => config })
+}
+
+test('native gateway null metadata remains unknown; explicit false, zero and empty methods stay authoritative', async t => {
+  const fields = ['displayName', 'supportedGenerationMethods', 'inputTokenLimit', 'outputTokenLimit', 'temperature', 'maxTemperature', 'topP', 'thinking']
+  const nulls = Object.fromEntries(fields.map(key => [key, null]))
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ models: [
+    { name: 'gemini-3.8-flash', ...nulls },
+    { name: 'explicit', ...nulls, thinking: false, temperature: 0, topP: 0, supportedGenerationMethods: [] }
+  ], nextPageToken: null }))
+  const result = await catalogClient().listCatalog()
+  assert.ok('entries' in result)
+  assert.deepEqual(result.entries, [{ id: 'gemini-3.8-flash' }, { id: 'explicit', supportedGenerationMethods: [], temperature: 0, topP: 0, thinking: false }])
+  assert.equal(catalogTextSupport(result.entries[0]), 'unknown')
+  assert.equal(catalogTextSupport(result.entries[1]), 'unsupported')
+  const caps = modelCapabilities({ protocol: 'gemini-native', baseUrl: 'https://fixture.invalid/v1', model: 'gemini-3.8-flash', metadata: result.entries[0] })
+  assert.equal(caps.temperature, 'unknown'); assert.equal(caps.thinking.status, 'unknown')
+  assert.equal(caps.maxOutputTokens, undefined)
+  assert.throws(() => decodeCatalogEntry({ id: 'ipc-cannot-bypass', thinking: null }), 'only the remote adapter normalizes missing values; IPC stays strict')
+})
+
+test('native null compatibility does not discard malformed non-null model constraints', async t => {
+  let metadata: Record<string, unknown> = {}
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ models: [{ name: 'writer', ...metadata }] }))
+  for (const invalid of [{ name: null }, { displayName: '' }, { inputTokenLimit: 0 }, { outputTokenLimit: '2048' }, { temperature: -1 }, { thinking: 'false' }, { supportedGenerationMethods: {} }]) {
+    metadata = invalid
+    await assert.rejects(catalogClient().listModels(), (error: unknown) => error instanceof AppError)
+  }
+})
+
+test('native catalog follows every page with exact gateway aliases, deduplicates and encodes cursor', async t => {
+  const paths: string[] = []
+  t.mock.method(globalThis, 'fetch', async (url: string | URL | Request) => {
+    paths.push(String(url))
+    return Response.json(paths.length === 1
+      ? { models: [{ name: 'models/gemini-base' }], nextPageToken: 'next/+?=' }
+      : { models: [{ name: 'models/gemini-base' }, { name: 'models/gemini-3.8-flash-high' }, { name: 'models/gemini-3.8-flash-low' }] })
+  })
+  assert.deepEqual(await catalogClient().listModels(), { models: ['gemini-base', 'gemini-3.8-flash-high', 'gemini-3.8-flash-low'] })
+  assert.deepEqual(paths, ['https://fixture.invalid/v1beta/models', 'https://fixture.invalid/v1beta/models?pageToken=next%2F%2B%3F%3D'])
+})
+
+for (const reason of ['loop', 'bad-token', 'second-page-failure', 'oversized', 'malformed-model'] as const) {
+  test(`native catalog rejects ${reason} instead of returning a partial list`, async t => {
+    let calls = 0
+    t.mock.method(globalThis, 'fetch', async () => {
+      calls++
+      if (calls === 1) return Response.json({ models: [{ name: 'models/first' }], nextPageToken: 'next' })
+      if (reason === 'second-page-failure') return new Response('', { status: 503 })
+      return Response.json({ models: reason === 'oversized' ? Array.from({ length: 2000 }, (_, i) => ({ name: `models/m${i}` }))
+        : reason === 'malformed-model' ? [{ id: 'ignored-would-hide-model' }] : [{ name: 'models/second' }],
+        ...(reason === 'loop' ? { nextPageToken: 'next' } : reason === 'bad-token' ? { nextPageToken: 1 } : {}) })
+    })
+    await assert.rejects(catalogClient().listModels(), (error: unknown) => error instanceof AppError)
+    assert.equal(calls, 2)
+  })
+}
+
+test('native catalog cancellation between pages stops before sending the next request', async t => {
+  const controller = new AbortController(); let calls = 0
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++; controller.abort()
+    return Response.json({ models: [{ name: 'models/first' }], nextPageToken: 'next' })
+  })
+  await assert.rejects(catalogClient().listModels(undefined, controller.signal), { name: 'AbortError' })
+  assert.equal(calls, 1)
+})
+
+
+test('New API gateway null nextPageToken terminates with custom model names unchanged', async t => {
+  let calls = 0
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++
+    return Response.json({ models: [{ name: 'gemini-3.8-flash-high' }], nextPageToken: null })
+  })
+  assert.deepEqual(await catalogClient().listModels(), { models: ['gemini-3.8-flash-high'] })
+  assert.equal(calls, 1)
 })

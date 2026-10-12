@@ -1,3 +1,6 @@
+import { useGroupWorkspaceNavigation } from '../features/group-chat/composables/use-group-workspace-navigation'
+import { createWorkspaceRecoveryActions } from '../features/library/composables/create-workspace-recovery-actions.js'
+import { prepareCompositionClose } from '../features/writing-plugins/composition-session'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { WorkspaceRequestGuard } from '../../contracts/library/workspace-request-guard'
 import { createWorldMapWorkspace } from '../features/world-map/composables/world-map-workspace'
@@ -26,6 +29,7 @@ import { createCharactersForeshadowActions } from '../features/characters/compos
 import { createTimelineProjectionsActions } from '../features/timeline/composables/create-projections-actions.js'
 import { createReviewFindingsActions } from '../features/review/composables/create-findings-actions.js'
 import { createAppFeedbackActions } from './composables/create-feedback-actions.js'
+import { useUiSounds } from './composables/useUiSounds'
 import { createLibraryProjectsActions } from '../features/library/composables/create-projects-actions.js'
 import { createLibraryImportsActions } from '../features/library/composables/create-imports-actions.js'
 import { createLibraryOpeningActions } from '../features/library/composables/create-opening-actions.js'
@@ -43,6 +47,7 @@ import { createAssistantTasksActions } from '../features/assistant/composables/c
 import { createAssistantAdoptionActions } from '../features/assistant/composables/create-adoption-actions.js'
 import { createPlanningOutlinesActions } from '../features/planning/composables/create-outlines-actions.js'
 import { createTimelineEditingActions } from '../features/timeline/composables/create-editing-actions.js'
+import { createEventMigrationActions } from '../features/timeline/composables/create-migration-actions.js'
 import { createWorldbuildingFoundationActions } from '../features/worldbuilding/composables/create-foundation-actions.js'
 import { createAssistantContextActions } from '../features/assistant/composables/create-context-actions.js'
 import { createCharactersEntitiesActions } from '../features/characters/composables/create-entities-actions.js'
@@ -74,6 +79,8 @@ export function useWorkspaceController() {
   const {
     refreshOneOffConnections,
     refreshModelAssignments,
+    modelReturnLabel,
+    returnFromModelSettings,
     openLibraryModels,
     closeLibraryModels,
     handleActivitybarPointerDown,
@@ -97,6 +104,9 @@ export function useWorkspaceController() {
     activitySelected,
     goToWorkflowStep
   } = createAppNavigationActions({
+    get groupWorkspace() { return groupWorkspace },
+    get workspaceRequests() { return workspaceRequests },
+    get clearModelLoadIssue() { return clearModelLoadIssue },
     get current() {
       return current
     },
@@ -409,6 +419,12 @@ export function useWorkspaceController() {
     },
     get embeddedWritingAgent() {
       return embeddedWritingAgent
+    },
+    get syncWritingAgentTask() {
+      return syncWritingAgentTask
+    },
+    get pollWritingAgentTask() {
+      return pollWritingAgentTask
     }
   })
 
@@ -416,6 +432,9 @@ export function useWorkspaceController() {
 
   const { dismissOpening, replayOpening, initializeBoot, saveAppearancePreferences, resetAppearancePreferences } =
     createAppBootActions({
+      get desktop() { return desktop },
+      get projects() { return projects },
+      get openProject() { return openProject },
       get opening() {
         return opening
       },
@@ -808,6 +827,7 @@ export function useWorkspaceController() {
   })
 
   const { notice, guard } = createAppFeedbackActions({
+    beginSoundResult: () => useUiSounds().beginResult(),
     get toast() {
       return toast
     },
@@ -817,6 +837,12 @@ export function useWorkspaceController() {
   })
 
   const {
+    openBookTabs,
+    bookDraftConflicts,
+    resolveBookDraftConflict,
+    selectBookTab,
+    closeBookTab,
+    openBackgroundTask,
     refreshProjects,
     chooseCreateFolder,
     openCreateProject,
@@ -832,8 +858,57 @@ export function useWorkspaceController() {
     openSystemTrash,
     closeProject,
     prepareWorkItemTransition,
-    activateWorkItem
+    activateWorkItem,
+    invalidateWorkspaceSnapshot
   } = createLibraryProjectsActions({
+    afterCreate: () => groupWorkspace.show(),
+    get openTxtImport() { return openTxtImport },
+    get outlineStorageFeedback() { return outlineStorageFeedback },
+    get refreshWorkflow() { return refreshWorkflow },
+    get chapterTitle() { return chapterTitle },
+    get chapterContent() { return chapterContent },
+    get manuscriptConflict() { return manuscriptConflict },
+    get sqliteStorageStatus() { return sqliteStorageStatus },
+    get suppressManuscriptAutosave() { return suppressManuscriptAutosave },
+    set suppressManuscriptAutosave(value) { suppressManuscriptAutosave = value },
+    get sessionWorkspaceFields() {
+      return { chapters, selectedId, chapterTitle, chapterContent, chapterOutline, chapterPlanning,
+        lastSavedChapterOutline, totalOutline, lastSavedTotalOutline, selectedVolume, volumeOutline,
+        lastSavedVolumeOutline, stageOutlines, selectedStage, stageTitle, stageOutline,
+        lastSavedStageTitle, lastSavedStageOutline, standaloneOutlineEntries,
+        bookProfile, foundation, realms, powerSystem, cheatSystem, systemTemplate,
+        profileSavedSnapshot, profileSaveProgress, ai, researchSettings, sqliteStorageStatus, migrationPreview,
+        eventProjection, unifiedEvents, archivedUnifiedEvents, unifiedEventCandidates, timeline, canonicalEvents,
+        sourceCards, planningDraft, promptProfile, promptDraft, workspaceBootstrapIssues,
+        importRecoveries, continuationAnalysis, continuationManifestId, continuationBlockedReason,
+        writingAgentTasks, writingAgentTurns, manuscriptRecoveryItems, autoBackupStatus, autoBackupDraft,
+        ideas, saveState, lastSavedAt, outlineMode, materialSection, preparationMode }
+    },
+    get openTaskCenter() { return openTaskCenter },
+    get manuscriptEditor() { return manuscriptEditor },
+    get sessionNavigation() { return ['outlineMode', 'materialSection', 'preparationMode'] },
+    async restoreBookJobs(path) {
+      const generation = workspaceRefreshGeneration
+      const valid = () => current.value?.path === path && workspaceRefreshGeneration === generation
+      const tasks = await desktop.ai.backgroundTasks().catch(() => [])
+      if (!valid()) return
+      for (const [kind, field, read, poll] of [
+        ['自动谋篇', planningJob, id => desktop.planning.job(id), pollAutomaticPlanning],
+        ['章节安排', planningSkeletonJob, id => desktop.planning.chapterSkeletonJob(id), pollPlanningChapterSkeleton],
+        ['详细章纲', planningDetailJob, id => desktop.planning.chapterDetailJob(id), pollPlanningChapterDetail]
+      ]) {
+        const task = tasks.find(task => task.bookPath === path && task.kind === kind && task.status === 'running')
+        if (!task) continue
+        const value = await read(task.taskId).catch(() => null)
+        if (!valid()) return
+        field.value = value
+        if (value) poll()
+      }
+    },
+    get sessionFields() {
+      return { bookProfile, foundation, realms, powerSystem, cheatSystem, systemTemplate,
+        outlineMode, materialSection, preparationMode }
+    },
     get desktop() {
       return desktop
     },
@@ -1051,6 +1126,8 @@ export function useWorkspaceController() {
 
   const { openTxtImport, addContinuationDocuments, moveManifestFile, chooseTxtDestination, commitTxtImport } =
     createLibraryImportsActions({
+      get importProject() { return importProject },
+      get workspaceRequests() { return workspaceRequests },
       get txtImportEntry() {
         return txtImportEntry
       },
@@ -1216,6 +1293,8 @@ export function useWorkspaceController() {
   })
 
   const { resetWorkItemTransientState, loadWorkspace } = createLibraryWorkspaceLoadingActions({
+    get findingHistory() { return findingHistory },
+    get outlinePlanning() { return outlinePlanning },
     get resetPlannedChapter() {
       return resetPlannedChapter
     },
@@ -1657,6 +1736,27 @@ export function useWorkspaceController() {
     get timeline() {
       return timeline
     },
+    get eventProjection() {
+      return eventProjection
+    },
+    get unifiedEvents() {
+      return unifiedEvents
+    },
+    get archivedUnifiedEvents() {
+      return archivedUnifiedEvents
+    },
+    get unifiedEventCandidates() {
+      return unifiedEventCandidates
+    },
+    get eventMigrationState() {
+      return eventMigrationState
+    },
+    get eventMigrationBusy() {
+      return eventMigrationBusy
+    },
+    get eventMigrationError() {
+      return eventMigrationError
+    },
     get realms() {
       return realms
     },
@@ -1765,6 +1865,9 @@ export function useWorkspaceController() {
     get canonicalEvents() {
       return canonicalEvents
     },
+    get recoverEventOperation() {
+      return recoverEventOperation
+    },
     get syncPromptDraft() {
       return syncPromptDraft
     },
@@ -1819,6 +1922,8 @@ export function useWorkspaceController() {
     openContinuationChapterOutlineAdoption,
     confirmContinuationChapterOutlineAdoption
   } = createLibraryContinuationActions({
+    get workspaceRequests() { return workspaceRequests },
+    get current() { return current },
     get recoveryBusyId() {
       return recoveryBusyId
     },
@@ -2002,6 +2107,8 @@ export function useWorkspaceController() {
   })
 
   const { refreshWorkflow } = createLibraryWorkflowActions({
+    get chapterTitle() { return chapterTitle },
+    get chapterContent() { return chapterContent },
     get workspaceRefreshGeneration() {
       return workspaceRefreshGeneration
     },
@@ -2113,13 +2220,35 @@ export function useWorkspaceController() {
   })
 
   const {
+    workspaceRecoveryBusy, workspaceRecoveryFeedback, recheckWorkspaceIssues,
+    workspaceIssueDiagnostic, copyWorkspaceIssueDiagnostic, clearModelLoadIssue
+  } = createWorkspaceRecoveryActions({
+    get desktop() { return desktop },
+    get current() { return current },
+    get workspaceRequests() { return workspaceRequests },
+    get workspaceBootstrapIssues() { return workspaceBootstrapIssues },
+    get ai() { return ai },
+    get modelSettingsDirty() { return modelSettingsDirty },
+    get eventProjection() { return eventProjection },
+    get unifiedEvents() { return unifiedEvents },
+    get archivedUnifiedEvents() { return archivedUnifiedEvents },
+    get unifiedEventCandidates() { return unifiedEventCandidates },
+    get appVersion() { return appVersion },
+    get invalidateWorkspaceSnapshot() { return invalidateWorkspaceSnapshot }
+  })
+
+  const {
     decideFactChanges,
     extractCurrentChapterFacts,
     pollFactExtraction,
     cancelFactExtraction,
     retryFactExtraction,
-    revealBootstrapIssue
+    revealBootstrapIssue,
+    dispose: disposeReviewFacts
   } = createReviewFactsActions({
+    get current() { return current },
+    get workspaceRequests() { return workspaceRequests },
+    get chapterSelectionGeneration() { return chapterSelectionGeneration },
     get factReviewBusy() {
       return factReviewBusy
     },
@@ -2332,6 +2461,7 @@ export function useWorkspaceController() {
   const {
     newChapter,
     saveChapter,
+    refreshSavedChapterInfo,
     chapterIsDirty,
     clearAutosaveTimer,
     clearAutosaveFinalizeTimer,
@@ -2343,6 +2473,8 @@ export function useWorkspaceController() {
     flushManuscriptWhenInactive,
     handleDocumentVisibilityChange
   } = createManuscriptPersistenceActions({
+    get workspaceRequests() { return workspaceRequests },
+    get chapterSelectionGeneration() { return chapterSelectionGeneration },
     get chapterOrderIssue() {
       return chapterOrderIssue
     },
@@ -2474,6 +2606,8 @@ export function useWorkspaceController() {
     flushChapterSave,
     flushChapterSaveSafely
   } = createManuscriptRecoveryActions({
+    get workspaceRequests() { return workspaceRequests },
+    get chapterSelectionGeneration() { return chapterSelectionGeneration },
     get manuscriptRecoveryStore() {
       return manuscriptRecoveryStore
     },
@@ -3008,6 +3142,9 @@ export function useWorkspaceController() {
     renameOutlineVolume,
     generateChapterOutline
   } = createPlanningOutlinesActions({
+    get manuscriptEditor() {
+      return manuscriptEditor
+    },
     get outlineNavigationGeneration() {
       return outlineNavigationGeneration
     },
@@ -3216,13 +3353,31 @@ export function useWorkspaceController() {
     reviewCanonicalEvents,
     saveTimeline,
     createEventCandidate,
-    approveCanonicalEvent
+    approveCanonicalEvent,
+    archiveTimelineEvent,
+    restoreTimelineEvent,
+    recoverEventOperation
   } = createTimelineEditingActions({
     get expandedTimelineEntry() {
       return expandedTimelineEntry
     },
     get timeline() {
       return timeline
+    },
+    get eventProjection() {
+      return eventProjection
+    },
+    get unifiedEvents() {
+      return unifiedEvents
+    },
+    get archivedUnifiedEvents() {
+      return archivedUnifiedEvents
+    },
+    get unifiedEventCandidates() {
+      return unifiedEventCandidates
+    },
+    get unifiedEventMode() {
+      return unifiedEventMode
     },
     get timelineAiCandidates() {
       return timelineAiCandidates
@@ -3503,11 +3658,14 @@ export function useWorkspaceController() {
     cancelPlanningChapterDetail,
     openPlanningChapterDetailAdoption,
     confirmPlanningChapterDetailAdoption,
+    refreshJointChapterAdoption,
     markPlanningCharacterSeedsEdited,
     markPlanningWorldSeedEdited,
     markPlanningPowerSystemEdited,
     markPlanningCheatSystemEdited
   } = createPlanningGenerationActions({
+    get current() { return current },
+    get workspaceRefreshGeneration() { return workspaceRefreshGeneration },
     get planningPollTimer() {
       return planningPollTimer
     },
@@ -3885,6 +4043,7 @@ export function useWorkspaceController() {
     restorePlannedOutlineRecovery,
     discardPlannedOutlineRecovery
   } = createPlanningChapterOutlineActions({
+    get outlineEditor() { return outlineEditor },
     get outlineRecoveryDrafts() {
       return outlineRecoveryDrafts
     },
@@ -4257,8 +4416,11 @@ export function useWorkspaceController() {
     rebuildReadableMirrors,
     rollbackSqliteStorage,
     createWorkspaceBackup,
+    exportSelectedChapters,
     exportManuscript
   } = createLibraryStorageActions({
+    get current() { return current },
+    get workspaceRequests() { return workspaceRequests },
     get migrationPreview() {
       return migrationPreview
     },
@@ -4450,6 +4612,7 @@ export function useWorkspaceController() {
 
   const {
     localAppearanceDialog,
+    groupChatOpen,
     workspaceLocation,
     activeWorkspaceLeaf,
     activeWorkspaceGroup,
@@ -5125,6 +5288,14 @@ export function useWorkspaceController() {
     timelineVolumeLoading,
     timelineVolumeError,
     canonicalEvents,
+    eventProjection,
+    unifiedEvents,
+    archivedUnifiedEvents,
+    unifiedEventCandidates,
+    unifiedEventMode,
+    eventMigrationState,
+    eventMigrationBusy,
+    eventMigrationError,
     eventDraft,
     approvedEvents,
     timelineEntryCount,
@@ -5136,6 +5307,30 @@ export function useWorkspaceController() {
     get chapters() {
       return chapters
     }
+  })
+
+  const {
+    openEventMigration,
+    closeEventMigration,
+    toggleMigrationAcknowledgement,
+    migrationReady,
+    commitEventMigration,
+    retryEventMirror
+  } = createEventMigrationActions({
+    get desktop() { return desktop },
+    get current() { return current },
+    get workspaceRequests() { return workspaceRequests },
+    get eventProjection() { return eventProjection },
+    get unifiedEvents() { return unifiedEvents },
+    get archivedUnifiedEvents() { return archivedUnifiedEvents },
+    get unifiedEventCandidates() { return unifiedEventCandidates },
+    get unifiedEventMode() { return unifiedEventMode },
+    get timeline() { return timeline },
+    get eventMigrationState() { return eventMigrationState },
+    get eventMigrationBusy() { return eventMigrationBusy },
+    get eventMigrationError() { return eventMigrationError },
+    get notice() { return notice },
+    get refreshWorkflow() { return refreshWorkflow }
   })
 
   const {
@@ -5248,7 +5443,7 @@ export function useWorkspaceController() {
     return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
   }
   const explorerWidth = ref(preferenceNumber('lanjian-explorer-width', 248, 200, 420))
-  const assistantWidth = ref(preferenceNumber('lanjian-assistant-width', 348, 280, 460))
+  const assistantWidth = ref(preferenceNumber('lanjian-assistant-width', 348, 280, 720))
   const interfaceFontSize = ref(preferenceNumber('lanjian-interface-font-size', 14, 12, 15))
   const {
     fontScale: editorFontScale,
@@ -5540,6 +5735,11 @@ export function useWorkspaceController() {
           desktop.app.readyToClose(false)
           return
         }
+        const pluginCloseStillCurrent = prepareCompositionClose(message => window.confirm(message), notice)
+        if (!pluginCloseStillCurrent) {
+          desktop.app.readyToClose(false)
+          return
+        }
         try {
           await cancelAutomaticPlanning(false)
           await cancelPlanningChapterSkeleton(false)
@@ -5547,6 +5747,11 @@ export function useWorkspaceController() {
           await flushChapterSave()
           if (!(await prepareOutlineLeave()) || !(await flushPlannedChapterSave())) throw new Error('大纲未保存')
           await flushPlanningDraftSave()
+          if (!pluginCloseStillCurrent()) {
+            notice('关闭等待期间插件组合有变化，窗口已保留，请核对后重试。')
+            desktop.app.readyToClose(false)
+            return
+          }
           desktop.app.readyToClose(true)
         } catch {
           notice('关闭前保存失败，窗口已保留，请检查后重试')
@@ -5642,6 +5847,7 @@ export function useWorkspaceController() {
   onBeforeUnmount(premiseRegistration.dispose)
 
   onBeforeUnmount(() => {
+    disposeReviewFacts()
     window.clearTimeout(companionQuietTimer)
     clearIdeaGenerationPoll()
     void cancelAutomaticPlanning(false)
@@ -5666,8 +5872,20 @@ export function useWorkspaceController() {
     window.removeEventListener('keydown', handleQuickChapterShortcut)
     document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
   })
+  const groupWorkspace = useGroupWorkspaceNavigation({ current, open: groupChatOpen, prepareLeave: prepareWorkItemTransition, selectBook: selectBookTab,
+    closeBook: closeProject, activate: activateWorkItem, refresh: refreshProjects })
   return {
+    groupChatOpen: groupWorkspace.open, openGroupChat: groupWorkspace.show, selectWorkspaceBook: groupWorkspace.select,
+    showWorkspaceLibrary: groupWorkspace.library, groupBookCreated: groupWorkspace.created, prepareGroupCreation: prepareWorkItemTransition,
+    openGroupCreateBook: async () => { await groupWorkspace.library(); if (!current.value) await openCreateProject() },
+
     libraryModelsDialog,
+    openBookTabs,
+    bookDraftConflicts,
+    resolveBookDraftConflict,
+    selectBookTab,
+    closeBookTab,
+    openBackgroundTask,
     quickChapterOpen,
     guidancePopover,
     outlineLeaveDialog,
@@ -5701,7 +5919,15 @@ export function useWorkspaceController() {
     applyWritingAgentPartial,
     applyWritingAgentTurn,
     approveCanonicalEvent,
+    archiveTimelineEvent,
+    restoreTimelineEvent,
     approvedEvents,
+    openEventMigration,
+    closeEventMigration,
+    toggleMigrationAcknowledgement,
+    migrationReady,
+    commitEventMigration,
+    retryEventMirror,
     approvedResourceEntities,
     assistantAvailable,
     assistantMode,
@@ -5812,6 +6038,7 @@ export function useWorkspaceController() {
     confirmCurrentChapter,
     confirmFindingResolution,
     confirmPlanningChapterDetailAdoption,
+    refreshJointChapterAdoption,
     confirmPlanningCharacterSeedAdoption,
     confirmPlanningCheatSystemAdoption,
     confirmPlanningOutline,
@@ -5912,6 +6139,7 @@ export function useWorkspaceController() {
     expansionTasks,
     explorerScrolling,
     explorerWidth,
+    exportSelectedChapters,
     exportManuscript,
     extractCurrentChapterFacts,
     factBatches,
@@ -6187,6 +6415,8 @@ export function useWorkspaceController() {
     refreshFindingHistory,
     refreshLocalModels,
     refreshModelAssignments,
+    modelReturnLabel,
+    returnFromModelSettings,
     refreshOutlineRecoveryShelf,
     refreshWorkflow,
     reloadOutlineExpansionView,
@@ -6223,6 +6453,8 @@ export function useWorkspaceController() {
     retrySqliteMirrors,
     retryWritingAgentTask,
     returnToManuscript,
+    workspaceRecoveryBusy, workspaceRecoveryFeedback, recheckWorkspaceIssues,
+    workspaceIssueDiagnostic, copyWorkspaceIssueDiagnostic,
     revealBootstrapIssue,
     reviewCanonicalEvents,
     revisionDiffSummary,
@@ -6240,6 +6472,7 @@ export function useWorkspaceController() {
     saveBookProfile,
     saveBookProfileAndContinue,
     saveChapter,
+    refreshSavedChapterInfo,
     saveChapterCard,
     saveChapterOutline,
     saveChapterSummary,
@@ -6353,6 +6586,14 @@ export function useWorkspaceController() {
     themeChoice,
     themeError,
     timeline,
+    eventProjection,
+    unifiedEvents,
+    archivedUnifiedEvents,
+    unifiedEventCandidates,
+    unifiedEventMode,
+    eventMigrationState,
+    eventMigrationBusy,
+    eventMigrationError,
     timelineAiCandidates,
     timelineAiGenerating,
     timelineEntryCount,

@@ -1,0 +1,110 @@
+{
+  "apiVersion": 1,
+  "id": "lanjian.official.creative-writing",
+  "name": "正文与审校方法",
+  "version": "1.0.0",
+  "description": "正文场景、审校、选段处理、章卡讨论与作品问答的方法资产。可派生个人插件替换；作者确认和正式事实由应用检查。",
+  "runtime": "quickjs-js",
+  "entry": "main.js",
+  "capabilities": [],
+  "tools": [],
+  "categoryIds": [
+    "style",
+    "review",
+    "workflow"
+  ],
+  "tags": [
+    "创作方法",
+    "正文",
+    "审校"
+  ],
+  "assets": [
+    "prose.md",
+    "review.md",
+    "selection-revision.md",
+    "chapter-discussion.md",
+    "work-query.md"
+  ],
+  "contributions": [
+    {
+      "id": "prose",
+      "name": "正文场景创作方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "writing"
+      ],
+      "kind": "creative-policy",
+      "slot": "prose",
+      "mode": "replace",
+      "asset": "prose.md"
+    },
+    {
+      "id": "review",
+      "name": "正文与场景审校方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "review"
+      ],
+      "kind": "creative-policy",
+      "slot": "review",
+      "mode": "replace",
+      "asset": "review.md"
+    },
+    {
+      "id": "selection-revision",
+      "name": "选段处理方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "writing"
+      ],
+      "kind": "creative-policy",
+      "slot": "selection-revision",
+      "mode": "replace",
+      "asset": "selection-revision.md"
+    },
+    {
+      "id": "chapter-discussion",
+      "name": "章卡讨论方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "planning"
+      ],
+      "kind": "creative-policy",
+      "slot": "chapter-discussion",
+      "mode": "replace",
+      "asset": "chapter-discussion.md"
+    },
+    {
+      "id": "work-query",
+      "name": "作品问答方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "review"
+      ],
+      "kind": "creative-policy",
+      "slot": "work-query",
+      "mode": "replace",
+      "asset": "work-query.md"
+    }
+  ]
+}

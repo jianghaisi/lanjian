@@ -8,12 +8,14 @@ export function createAppFeedbackActions(ports) {
   }
 
   async function guard(action, success) {
+    const soundResult = success ? ports.beginSoundResult?.() : undefined
     ports.busy.value = true
     try {
       const result = await action()
-      if (success) notice(success)
+      if (success) { notice(success); soundResult?.('success') }
       return result
     } catch (error) {
+      soundResult?.('error')
       notice(error?.message || '操作失败')
       throw error
     } finally {

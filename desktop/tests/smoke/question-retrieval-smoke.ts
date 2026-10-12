@@ -17,7 +17,7 @@ export async function runQuestionRetrievalSmoke(window: BrowserWindow, modelUrl:
     }
     const profile = await window.novelDesktop.workspace.getBookProfile()
     await window.novelDesktop.workspace.saveBookProfile({ ...profile, autosaveEnabled: false })
-    const priorQuote = ${JSON.stringify(scenario === 'normalized' ? '　　班长把ＮＯＴＥ_１２递给李远明：“明天还我。”' : '　　班长把数学笔记递给李远明：“明天还我。”')}
+    const priorQuote = ${JSON.stringify(scenario === 'normalized' ? '　　班长把ＮＯＴＥ_１２递给周文衡：“明天还我。”' : '　　班长把数学笔记递给周文衡：“明天还我。”')}
     await window.novelDesktop.chapters.update(1, { title: '课堂笔记', content: '甲…'.repeat(200) + priorQuote + '乙'.repeat(900) })
     await window.novelDesktop.chapters.update(2, { title: '前情问答核验', content: '　　你借我数学笔记的恩情，我还没报答。' })
     await window.novelDesktop.chapters.update(3, { title: '后文章节', content: '　　数学笔记未来变成藏宝图，隐藏口令是海盐彗星。' })
@@ -111,7 +111,7 @@ export async function runQuestionRetrievalSmoke(window: BrowserWindow, modelUrl:
     answer.scrollIntoView({ block: 'center' })
     const bounds = answer.getBoundingClientRect()
     const sidebar = document.querySelector('.assistant-panel').getBoundingClientRect()
-    const expectedQuote = scenario === 'normalized' ? '班长把ＮＯＴＥ_１２递给李远明' : scenario === 'missing' ? '不能据此断言它从未出现' : '班长把数学笔记递给李远明'
+    const expectedQuote = scenario === 'normalized' ? '班长把ＮＯＴＥ_１２递给周文衡' : scenario === 'missing' ? '不能据此断言它从未出现' : '班长把数学笔记递给周文衡'
     if (!answer.textContent.includes(expectedQuote) || bounds.height <= 0 || bounds.top < sidebar.top || bounds.bottom > sidebar.bottom) return { ok: false, step: 'answer-or-citation-not-visible' }
     if (document.querySelector('.agent-diff-block, [data-testid^="apply-agent-candidate-"], .agent-card-options')) return { ok: false, step: 'question-created-edit-candidate' }
     const after = await Promise.all([1, 2, 3].map(id => window.novelDesktop.chapters.get(id)))

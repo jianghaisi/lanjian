@@ -108,15 +108,16 @@ const definitions = [receiptTable, aliasTable, sealTable, transitionTable, alias
 export const eventMigrationReceiptsMigrationSql = '\nDROP TRIGGER projects_schema_version_v39_after_insert;\n'
   + definitions.join('\n') + '\nUPDATE projects SET current_schema_version = 40;\n'
 
-export function assertEventMigrationReceiptSchema(database: DatabaseSync, projectSchemaVersion = Number(database.prepare('PRAGMA user_version').get()?.user_version)): void {
-  const lookup = database.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?')
+export function assertEventMigrationReceiptSchema(database: DatabaseSync, projectSchemaVersion = Number(database.prepare('PRAGMA user_version').get()?.user_version), providedDefinitions?: ReadonlyMap<string, string | null>): void {
+  const lookup = providedDefinitions ? undefined : database.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?')
   for (const original of definitions) {
     // Later additive schemas own the project version stamp, not these immutable
     // event receipt definitions. Historical migration SQL/checksums stay exact.
     const definition = original === projectGuard ? projectGuard.replaceAll('40', String(projectSchemaVersion)) : original
     const [, kind, name] = /^CREATE (TABLE|INDEX|TRIGGER) (\w+)/.exec(definition)!
-    const actual = lookup.get(kind!.toLowerCase(), name!)?.sql
-    if (typeof actual !== 'string' || compact(actual) !== compact(definition)) {
+    const actual = providedDefinitions ? providedDefinitions.get(`${kind!.toLowerCase()}:${name}`) : lookup!.get(kind!.toLowerCase(), name!)?.sql
+    const normalize = original === projectGuard ? compactProjectGuard : compact
+    if (typeof actual !== 'string' || normalize(actual) !== normalize(definition)) {
       throw new AppError('DATABASE_INTEGRITY_FAILED', '事件迁移回执结构或保护约束不完整，已停止打开且未尝试修复。', {
         recoverable: false, details: { area: 'workspaceDatabase' }
       })
@@ -125,3 +126,4 @@ export function assertEventMigrationReceiptSchema(database: DatabaseSync, projec
 }
 
 function compact(sql: string): string { return sql.trim().replace(/;$/, '').replace(/\s+/g, ' ') }
+function compactProjectGuard(sql: string): string { return compact(sql).replace(/\s*=\s*/g, '=') }

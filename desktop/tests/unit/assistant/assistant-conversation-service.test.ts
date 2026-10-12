@@ -1,3 +1,8 @@
+import { createBuiltinRegistry } from '../../../src/main/modules/writing-plugins/adapters/builtin'
+import { fieldCapabilities } from '../../../src/main/modules/writing-plugins/adapters/builtin/fields'
+import { pluginLimits } from '@lanjian/writing-plugin-contracts'
+import { objectSchema, textSchema } from '@lanjian/writing-plugin-contracts'
+import { modelToolName } from '../../../src/main/modules/writing-plugins/application/registry'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { AssistantConversationService, type AssistantConversationPorts } from '../../../src/main/modules/assistant/application/assistant-conversation-service'
@@ -11,7 +16,7 @@ function fixture(replies:AiToolStep[]){
   const started:FieldRequest[]=[],cancelled:string[]=[],seen:unknown[]=[]
   let scope:string|null='book-a'
   const ports:AssistantConversationPorts={async assertScope(expected){if(expected!==scope)throw new Error('scope conflict')},async context(){return '原始背景'},async prepare(){return {async step(messages,tools){seen.push(structuredClone({messages,tools}));return replies.shift()!}}},async startField(input){started.push(input);return {id:input.operationId,target:input.target,status:'running',createdAt:'2026-09-11',updatedAt:'2026-09-11'}},async cancelField(task){cancelled.push(task.id)}}
-  return {ports,service:new AssistantConversationService(ports),started,cancelled,seen,scope(value:string|null){scope=value}}
+  return {ports,service:new AssistantConversationService(ports,input=>createBuiltinRegistry(ports,input),new Set(fieldCapabilities)),started,cancelled,seen,scope(value:string|null){scope=value}}
 }
 test('conversation invokes list/read/edit on the exact draft without a chapter',async()=>{
   const f=fixture([call('list_editable_fields'),call('read_field',{targetId:'draft-1'}),call('edit_field',{targetId:'draft-1',instruction:'旧物可以说话'})])
@@ -101,6 +106,18 @@ test('loop progress is scoped, bounded, and removed after completion',async()=>{
 })
 
 test('an exhausted tool loop cannot be presented as task completion',async()=>{
-  const f=fixture(Array.from({length:8},()=>call('list_editable_fields')))
+  const f=fixture(Array.from({length:pluginLimits.modelSteps},()=>call('list_editable_fields')))
   await assert.rejects(()=>f.service.run(request()),/尚未完成目标/)
+})
+
+test('a newly registered plugin is discovered and invoked without a conversation name branch',async()=>{
+  const name=modelToolName('example.writing','new_tool')
+  const f=fixture([call('discover_tools',{query:'示例扩展'}),call(name,{}),{content:'扩展结果已读取。',toolCalls:[]}])
+  const service=new AssistantConversationService(f.ports,input=>{
+    const registry=createBuiltinRegistry(f.ports,input)
+    registry.register({pluginId:'example.writing',id:'new_tool',version:'1.0.0',description:'示例扩展',effect:'derive',capabilities:['fields.read'],inputSchema:objectSchema({}),outputSchema:objectSchema({text:textSchema(100)}),isAvailable:()=>true,execute:async()=>({kind:'completed',value:{text:'新工具生成的写作建议'},evidence:[]})})
+    return registry
+  },new Set(fieldCapabilities))
+  assert.equal((await service.run(request())).message,'扩展结果已读取。')
+  assert.match(JSON.stringify(f.seen[2]),/新工具生成的写作建议/)
 })

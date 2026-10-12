@@ -1,3 +1,4 @@
+import { isReferencedBookSettings } from '../../../../contracts/models/book-model-settings'
 import { LOCAL_CONNECTION_ID, isLocalConnection } from '../../../../contracts/models/local-model-contracts'
 import { AppError } from '../../../core/errors/app-error'
 import { BOOK_MODEL_TASKS, decodeBookModelSettings, defaultLegacyBookModelSettings, parseBookModelSettings, type LegacyBookModelSettings } from '../domain/book-model-settings'
@@ -44,7 +45,7 @@ export class ProjectAiService {
   private merge(value: unknown): StoredProjectAiSettings {
     const decoded = decodeBookModelSettings(value)
     // The existing public DTO/provider path does not yet support v4. Never strip its references.
-    if (decoded.version === 4) throw new AppError('FEATURE_UNAVAILABLE', '本书使用全局模型引用，请等待新版模型分配入口；原配置已保留。', { recoverable: true })
+    if (isReferencedBookSettings(decoded)) throw new AppError('FEATURE_UNAVAILABLE', '本书使用全局模型引用，请等待新版模型分配入口；原配置已保留。', { recoverable: true })
     return decoded
   }
 
@@ -124,7 +125,7 @@ export class ProjectAiService {
       if (replacesConnections && current.version === 2 && update?.connectionId === undefined
         && !isLocalConnection(next.connectionId) && !storedConnections.some(c => c.id === next.connectionId)
         && storedConnections[0]) next.connectionId = storedConnections[0].id
-      return next
+      return next as ModelProfile
     }
     const next = this.merge({
       ...current,
@@ -194,7 +195,7 @@ export class ProjectAiService {
     decodeBookModelSettings(value)
     if (!validateLocal || !this.local) return
     for (const profile of [value.shared, ...taskNames.map(task => value.tasks[task])]) {
-      if (isLocalConnection(profile.connectionId) && profile.maxTokens > this.local.limits(profile.model).maxOutputTokens) {
+      if (isLocalConnection(profile.connectionId) && (profile.maxTokens ?? 0) > this.local.limits(profile.model).maxOutputTokens) {
         throw new Error('本地模型最大输出为 ' + this.local.limits(profile.model).maxOutputTokens + ' tokens')
       }
     }

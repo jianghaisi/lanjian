@@ -1,3 +1,4 @@
+import { isReferencedBookSettings } from '../../../../contracts/models/book-model-settings'
 import type { BookModelsService } from '../../models/application/book-models-service'
 import { createHash } from 'node:crypto'
 import { AiClient } from '../../models/application/ai-client'
@@ -67,7 +68,8 @@ export function createWritingTaskRuntime(dependencies: Dependencies) {
         connection.kind === 'local'
           ? await ai.contextLimits(task, modelName, connection.id, request.maxTokensOverride)
           : undefined
-      const outputTokens = localLimits?.outputTokens ?? profile.maxTokens
+      const effective = await ai.generationFor(task, modelName, connection.id)
+      const outputTokens = localLimits?.outputTokens ?? effective.outputTokens
       return workspaceWrites.run(workItemPath, async () => {
         await guard.recheck()
         const database = await databases.openExisting(workItemPath)
@@ -79,14 +81,14 @@ export function createWritingTaskRuntime(dependencies: Dependencies) {
               ? connection.id
               : connection.scope === 'global'
                 ? `global:${connection.globalConnectionId}`
-                : document.version === 4
+                : isReferencedBookSettings(document)
                   ? `legacy:${document.references.flatMap((r) => (r.kind === 'legacy-private' && r.id === connection.id ? [r.originalConnectionId] : []))[0]}`
                   : `${connection.id}:${connection.baseUrl}`
           const provider =
             request.modelConnectionId || request.model || request.maxTokensOverride !== undefined
               ? `${source}#writing-agent-${createHash('sha256')
                   .update(
-                    JSON.stringify({ modelName, outputTokens, temperature: profile.temperature, topP: profile.topP })
+                    JSON.stringify({ modelName, outputTokens, effective })
                   )
                   .digest('hex')
                   .slice(0, 12)}`
@@ -105,14 +107,14 @@ export function createWritingTaskRuntime(dependencies: Dependencies) {
               scope,
               connectionId: connection.id,
               connectionName: connection.name,
-              temperature: profile.temperature,
-              topP: profile.topP,
+              parameterPolicy: profile.parameterPolicy,
+              effective,
               maxTokens: outputTokens,
               source: 'writing-agent-override'
             }),
             inputTokenBudget: localLimits
               ? localLimits.contextTokens - outputTokens - localLimits.systemReserveTokens
-              : profile.maxTokens,
+              : outputTokens,
             enabled: true,
             isDefault: false
           }).id

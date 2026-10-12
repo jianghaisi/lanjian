@@ -1,0 +1,122 @@
+/* Short workbench gestures. Startup, loaders and editable text are deliberately outside this scope. */
+/* Form owners unmount immediately; Vue retains only their inert departing paint. */
+.library-dialog-surface > .modal[role="dialog"] { animation:none; }
+.library-dialog-surface > [aria-modal="true"][role$="dialog"] { animation:none; }
+.library-modal-enter-active > [role$="dialog"] { transition:translate 240ms var(--interaction-ease); }
+.library-modal-leave-active > [role$="dialog"] { transition:translate 180ms ease; }
+.library-modal-enter-from > [role$="dialog"],.library-modal-leave-to > [role$="dialog"] { translate:0 8px; }
+.library-modal-enter-from > .character-conflict-docket,.library-modal-leave-to > .character-conflict-docket { translate:16px 0; }
+.planning-adoption-backdrop .planning-adoption-sheet { width:min(1180px,calc(100vw - 32px)); max-height:calc(100dvh - 32px); scrollbar-gutter:stable; overscroll-behavior:contain; }
+.planning-adoption-sheet > header { position:sticky; top:0; z-index:2; background:var(--surface); }
+.planning-adoption-sheet > footer { position:sticky; bottom:0; z-index:2; background:var(--surface); }
+.planning-adoption-sheet .adoption-compare pre { font-size:14px; line-height:1.9; max-height:45dvh; }
+.planning-adoption-sheet > footer > span { font-size:12px; }
+@media(max-width:760px) {
+  .planning-adoption-sheet > header { padding:16px; gap:12px; }.planning-adoption-sheet > header h2 { font-size:20px; }
+  .planning-adoption-sheet > footer { padding:12px 16px; gap:8px; flex-wrap:wrap; }
+  .planning-adoption-sheet .adoption-compare { margin:16px; grid-template-columns:minmax(0,1fr); }
+}
+@media(prefers-reduced-motion:reduce) {
+  .library-modal-enter-active > [role$="dialog"],.library-modal-leave-active > [role$="dialog"] { transition:none!important; translate:none!important; }
+}
+.library-modal-enter-active { transition:opacity 240ms ease; }
+.library-modal-enter-active > .modal { transition:translate 240ms var(--interaction-ease),scale 240ms var(--interaction-ease); }
+.library-modal-leave-active { transition:opacity 180ms ease; pointer-events:none; }
+.library-modal-leave-active > .modal { transition:translate 180ms ease,scale 180ms ease; }
+.library-modal-enter-from,.library-modal-leave-to { opacity:0; }
+.library-modal-enter-from > .modal,.library-modal-leave-to > .modal { translate:0 10px; scale:.985; }
+@media(prefers-reduced-motion:reduce) {
+  .library-modal-enter-active,.library-modal-leave-active,
+  .library-modal-enter-active > .modal,.library-modal-leave-active > .modal { transition:none!important; }
+  .library-modal-enter-from > .modal,.library-modal-leave-to > .modal { translate:none; scale:none; }
+}
+:root { --interaction-ease: cubic-bezier(.2,.8,.2,1); }
+@keyframes surface-arrive {
+  from { opacity:0; translate:0 9px; }
+  to { opacity:1; translate:0 0; }
+}
+@keyframes status-arrive {
+  from { opacity:.25; translate:0 3px; }
+  to { opacity:1; translate:0 0; }
+}
+@keyframes context-rule { from { scale:0 1; } to { scale:1 1; } }
+
+dialog:is(.local-appearance-dialog,.planning-dialog,.manuscript-export-dialog)[open],
+:is(.create-book-modal,.delete-sheet,.revision-ledger,.planning-adoption-sheet,.sqlite-shadow-dialog,.ai-settings-danger-dialog)[role$="dialog"] {
+  animation:surface-arrive 240ms var(--interaction-ease) both;
+}
+dialog:is(.local-appearance-dialog,.planning-dialog,.manuscript-export-dialog)[open]::backdrop {
+  animation:backdrop-arrive 180ms ease both;
+}
+@keyframes backdrop-arrive { from { opacity:0; } to { opacity:1; } }
+.book-task-popover {
+  animation:surface-arrive 180ms var(--interaction-ease) both;
+}
+.assistant-mode-page { animation:surface-arrive 180ms var(--interaction-ease); }
+.assistant-mode-switch button { transition:background-color 160ms ease,color 160ms ease; }
+.workbench-drawer-enter-active { transition:opacity 240ms ease,translate 240ms var(--interaction-ease); }
+.workbench-drawer-leave-active { transition:opacity 140ms ease,translate 140ms ease; pointer-events:none; }
+.workbench-drawer-enter-from,.workbench-drawer-leave-to { opacity:0; translate:16px 0; }
+.workbench-toast-enter-active { transition:opacity 200ms ease,translate 200ms var(--interaction-ease); }
+.workbench-toast-leave-active { transition:opacity 120ms ease; pointer-events:none; }
+.workbench-toast-enter-from { opacity:0; translate:0 8px; }
+.workbench-toast-leave-to { opacity:0; }
+
+.manuscript-chapter-label { position:relative; animation:status-arrive 240ms var(--interaction-ease); }
+.manuscript-chapter-label::after {
+  content:''; position:absolute; inset-inline:0; bottom:-5px; height:1px;
+  background:var(--color-jade,var(--jade)); transform-origin:left;
+  animation:context-rule 280ms var(--interaction-ease) both;
+}
+.chapter-tree-row[aria-current="page"] .chapter-no { animation:status-arrive 180ms var(--interaction-ease); }
+
+@media(prefers-reduced-motion:reduce) {
+  dialog:is(.local-appearance-dialog,.planning-dialog,.manuscript-export-dialog)[open],
+  dialog:is(.local-appearance-dialog,.planning-dialog,.manuscript-export-dialog)[open]::backdrop,
+  :is(.create-book-modal,.delete-sheet,.revision-ledger,.planning-adoption-sheet,.sqlite-shadow-dialog,.ai-settings-danger-dialog)[role$="dialog"],
+  :is(.book-task-popover,.assistant-mode-page,.manuscript-chapter-label),
+  .manuscript-chapter-label::after,.chapter-tree-row[aria-current="page"] .chapter-no { animation:none!important; }
+  :is(.workbench-drawer-enter-active,.workbench-drawer-leave-active,.workbench-toast-enter-active,.workbench-toast-leave-active),
+  .assistant-mode-switch button { transition:none!important; }
+}
+
+.revision-overlay-enter-active { transition:opacity 180ms ease; }
+.revision-overlay-leave-active { transition:opacity 140ms ease; pointer-events:none; }
+.revision-overlay-enter-from,.revision-overlay-leave-to { opacity:0; }
+.revision-preview-arrive { animation:backdrop-arrive 160ms ease-out; }
+.revision-body>nav>button { transition:background-color 140ms ease,border-color 140ms ease; }
+@media(prefers-reduced-motion:reduce) {
+  .revision-overlay-enter-active,.revision-overlay-leave-active,.revision-body>nav>button { transition:none; }
+  .revision-preview-arrive { animation:none; }
+}
+
+/* Navigation follows the committed page, retaining the old marker until measured. */
+.narrative-terminal.redesigned-studio .activitybar:has(>.workspace-navigation-rail){position:relative}
+.narrative-terminal.redesigned-studio .activitybar:has(>.workspace-navigation-rail[data-ready=true])>button.selected{box-shadow:none}
+dialog.quick-chapter-open[open]{animation:surface-arrive 220ms var(--interaction-ease) both}
+dialog.quick-chapter-open[open]::backdrop{animation:backdrop-arrive 160ms ease both}
+/* Persistent native hosts can retire after close without keeping focus/input. */
+dialog:is(.quick-chapter-open,.planning-dialog) {
+  opacity:0; translate:0 6px; pointer-events:none;
+  transition:opacity 140ms ease,translate 180ms var(--interaction-ease),display 180ms allow-discrete,overlay 180ms allow-discrete;
+}
+dialog:is(.quick-chapter-open,.planning-dialog)[open] { opacity:1; translate:0 0; pointer-events:auto; animation:none; }
+dialog:is(.quick-chapter-open,.planning-dialog)::backdrop {
+  opacity:0; pointer-events:none; animation:none;
+  transition:opacity 140ms ease,display 180ms allow-discrete,overlay 180ms allow-discrete;
+}
+dialog:is(.quick-chapter-open,.planning-dialog)[open]::backdrop { opacity:1; pointer-events:auto; animation:none; }
+@starting-style {
+  dialog:is(.quick-chapter-open,.planning-dialog)[open] { opacity:0; translate:0 6px; }
+  dialog:is(.quick-chapter-open,.planning-dialog)[open]::backdrop { opacity:0; }
+}
+@media(prefers-reduced-motion:reduce) {
+  dialog:is(.quick-chapter-open,.planning-dialog),dialog:is(.quick-chapter-open,.planning-dialog)::backdrop { transition:none!important; translate:none!important; }
+}
+.quick-chapter-results>button{position:relative;transition:background-color 140ms ease,color 140ms ease}
+.quick-chapter-results>button::before{content:'';position:absolute;left:0;top:18%;bottom:18%;width:2px;background:var(--color-jade);scale:1 0;transition:scale 160ms var(--interaction-ease)}
+.quick-chapter-results>button[aria-selected=true]::before{scale:1 1}
+@media(prefers-reduced-motion:reduce){
+  dialog.quick-chapter-open[open],dialog.quick-chapter-open[open]::backdrop{animation:none}
+  .quick-chapter-results>button,.quick-chapter-results>button::before{transition:none}
+}

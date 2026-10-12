@@ -4,6 +4,23 @@ import type { ArgsDecoder } from '../core/validation'
 import { boundedInteger, boundedString, exactArgs, invalid, record, rejectUnknown, uuid } from '../core/validation'
 import { chapterId, chapterLimits } from './validation'
 import { bookProfileLimits } from '../worldbuilding/validation'
+import type { ManuscriptExportSelection } from './types'
+
+export const decodeManuscriptExportArgs: ArgsDecoder<[ManuscriptExportSelection | undefined]> = (args) => {
+  if (!args.length) return [undefined]
+  exactArgs(args, 1)
+  const value = record(args[0], 'selection')
+  rejectUnknown(value, 'selection', ['workItemId', 'workItemPath', 'chapterIds'])
+  const workItemId = boundedString(value.workItemId, 'workItemId', 32_767).trim()
+  const workItemPath = boundedString(value.workItemPath, 'workItemPath', 32_767).trim()
+  if (!workItemId || !workItemPath || !isAbsolute(workItemPath)) invalid('selection', '作品身份无效')
+  if (!Array.isArray(value.chapterIds) || !value.chapterIds.length || value.chapterIds.length > 100_000) {
+    invalid('chapterIds', '请选择 1 到 100000 个章节')
+  }
+  const chapterIds = value.chapterIds.map(chapterId)
+  if (new Set(chapterIds).size !== chapterIds.length) invalid('chapterIds', '不能包含重复章节')
+  return [{ workItemId, workItemPath, chapterIds }]
+}
 
 export type ChapterUpdateInput = {
   title?: string

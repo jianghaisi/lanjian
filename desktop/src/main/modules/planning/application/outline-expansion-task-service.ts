@@ -8,18 +8,19 @@ import { parseOutlineExpansion, type PlanningDraftService } from './planning-dra
 import { WorkspaceWriteCoordinator } from '../../../core/application/workspace-write-coordinator'
 import { StructuredResponseFailure } from '../../assistant/application/structured-response-repair'
 import { createTaskContractSnapshot, isLegacyTaskContract } from '../../assistant/domain/task-template-contract'
+import { decodeCreativePolicyRecords } from '../../../../contracts/writing-plugins/creative-policy'
 
 const type = 'outline_expansion'
 const running = (status: string) => ['queued', 'preparing', 'running', 'streaming'].includes(status)
-type Checkpoint = { version: 1; request: OutlineExpansionTaskInput; source: PlanningOutlineSource; model: string }
+type Checkpoint = { methodVersion?: 'story-v1'; version: 1; request: OutlineExpansionTaskInput; source: PlanningOutlineSource; model: string }
 
 /** Uses the database task/Artifact lifecycle; never creates formal outline nodes. */
 export class OutlineExpansionTaskService {
-  private readonly active = new Map<string, { root: string; controller: AbortController }>()
+  private readonly active = new Map<string, { id: string; root: string; controller: AbortController }>()
   private readonly initialized = new Set<string>()
   private queue: Promise<unknown> = Promise.resolve()
   constructor(
-    private readonly projects: { currentPath(): Promise<string> },
+    private readonly projects: { currentPath(): Promise<string>; readonly executionIdentity?: { root: string } },
     private readonly databases: WorkspaceDatabaseFactory,
     private readonly runner: Pick<PlanningDraftService, 'expandNextLayer'>,
     private readonly source: (key: string) => Promise<PlanningOutlineSource | null>,
@@ -41,12 +42,12 @@ export class OutlineExpansionTaskService {
       if ([...this.active.values()].some(item => item.root === root)) throw this.conflict('请先停止或等待本书的逐层规划任务。')
       const source = await this.source(input.parentKey)
       if (!source || source.revision !== input.expectedRevision || !source.content.trim()) throw this.conflict('父级为空或已经变化，请重新打开后拆解。')
-      const checkpoint: Checkpoint = { version: 1, request: input, source, model: await this.model() }
+      const checkpoint: Checkpoint = { version: 1, methodVersion: 'story-v1', request: input, source, model: await this.model() }
       if (resolve(root) !== resolve(await this.projects.currentPath())) throw this.conflict('作品已经切换，本次未启动生成。')
       const task = await this.dbWrite(root, db => db.createTaskRun({ id: randomUUID(), taskType: type, idempotencyKey: input.operationId,
         taskContract: createTaskContractSnapshot(type), checkpointJson: JSON.stringify(checkpoint) }))
       const controller = new AbortController()
-      this.active.set(task.id, { root, controller })
+      this.active.set(JSON.stringify([root, task.id]), { id: task.id, root, controller })
       void this.execute(root, task, checkpoint, controller)
       return this.view(root, task)
     })
@@ -65,12 +66,17 @@ export class OutlineExpansionTaskService {
     return result
   }
 
+  async status(id: string): Promise<OutlineExpansionTask> {
+    const root = await this.projects.currentPath()
+    return this.view(root, await this.db(root, db => this.require(db, id)))
+  }
+
   async cancel(id: string): Promise<OutlineExpansionTask> {
     const root = await this.projects.currentPath()
     const task = await this.db(root, db => this.require(db, id))
-    this.active.get(id)?.controller.abort()
+    this.active.get(JSON.stringify([root, id]))?.controller.abort()
     const cancelled = running(task.status) ? await this.dbWrite(root, db => db.transitionTaskRun({ id, status: 'cancelled' })) : task
-    this.active.delete(id)
+    this.active.delete(JSON.stringify([root, id]))
     return this.view(root, cancelled)
   }
 
@@ -105,7 +111,7 @@ export class OutlineExpansionTaskService {
         attempt: original.attempt + 1, checkpointJson: JSON.stringify(nextCheckpoint)
       }))
       const controller = new AbortController()
-      this.active.set(task.id, { root, controller })
+      this.active.set(JSON.stringify([root, task.id]), { id: task.id, root, controller })
       void this.execute(root, task, nextCheckpoint, controller)
       return this.view(root, task)
     })
@@ -115,10 +121,11 @@ export class OutlineExpansionTaskService {
 
   async cancelAll(): Promise<void> {
     await this.queue
-    for (const [id, item] of this.active) {
+    for (const item of this.active.values()) {
+      const { id, root } = item
       item.controller.abort()
       await this.dbWrite(item.root, db => { if (running(this.require(db, id).status)) db.transitionTaskRun({ id, status: 'cancelled' }) })
-      this.active.delete(id)
+      this.active.delete(JSON.stringify([root, id]))
     }
   }
   abortForShutdown(): void { for (const item of this.active.values()) item.controller.abort() }
@@ -128,7 +135,7 @@ export class OutlineExpansionTaskService {
       if (controller.signal.aborted) return
       await this.dbWrite(root, db => { if (this.require(db, task.id).status === 'queued') db.transitionTaskRun({ id: task.id, status: 'running' }) })
       if (controller.signal.aborted) return
-      const proposal = await this.runner.expandNextLayer(checkpoint.request, controller.signal, checkpoint.model)
+      const proposal = await this.runner.expandNextLayer(checkpoint.request, controller.signal, checkpoint.model, checkpoint.methodVersion ?? 'legacy')
       if (controller.signal.aborted) return
       const content = JSON.stringify(proposal)
       await this.dbWrite(root, db => {
@@ -149,13 +156,13 @@ export class OutlineExpansionTaskService {
             id: randomUUID(), taskRunId: task.id, artifactType: type, status: 'invalid',
             content: error.originalContent, contentHash: createHash('sha256').update(error.originalContent).digest('hex'), schemaValid: false,
             metadataJson: JSON.stringify({ parentKey: checkpoint.source.key, parentRevision: checkpoint.source.revision, model: checkpoint.model,
-              repairAttempts: error.repairAttempts, failure: 'structured-response-invalid' })
+              repairAttempts: error.repairAttempts, lastResult: error.lastContent, failure: 'structured-or-story-response-invalid' })
           })
         }
         db.transitionTaskRun({ id: task.id, status: controller.signal.aborted ? 'cancelled' : 'failed', errorCode: 'EXPANSION_FAILED',
           errorMessage: error instanceof StructuredResponseFailure ? error.message : '逐层规划未完成，原大纲保持不变。' })
       }).catch(() => undefined)
-    } finally { this.active.delete(task.id) }
+    } finally { this.active.delete(JSON.stringify([root, task.id])) }
   }
 
   private async view(root: string, task: WorkspaceTaskRunRecord) {
@@ -171,7 +178,8 @@ export class OutlineExpansionTaskService {
     if (artifact?.schemaValid) {
       const value = JSON.parse(artifact.content) as OutlineExpansionProposal
       if (value.source?.key !== checkpoint.source.key || value.source.revision !== checkpoint.source.revision || value.source.projectFingerprint !== checkpoint.source.projectFingerprint) throw this.conflict('候选来源与任务记录不一致。')
-      proposal = { ...value, children: parseOutlineExpansion(JSON.stringify({ children: value.children }), checkpoint.request.count) }
+      proposal = { ...value, children: parseOutlineExpansion(JSON.stringify({ children: value.children }), checkpoint.request.count, checkpoint.methodVersion === 'story-v1' && value.methodVersion === 'story-v1'),
+        ...(value.creativePolicy !== undefined ? { creativePolicy: decodeCreativePolicyRecords(value.creativePolicy) } : {}) }
     }
     const sourceStale = parents.get(checkpoint.source.key) !== checkpoint.source.revision
     return { id: task.id, status: task.status, createdAt: task.createdAt, model: checkpoint.model, request: checkpoint.request,
@@ -203,6 +211,7 @@ export class OutlineExpansionTaskService {
     return initialized
   }
   private async open(root: string) {
+    if (this.projects.executionIdentity && resolve(await this.projects.currentPath()) !== resolve(root)) throw this.conflict('任务存储与绑定作品不一致。')
     const db = await this.databases.openExisting(root)
     if (!db) throw this.conflict('请先启用本书 SQLite 正式大纲。')
     return db

@@ -1,4 +1,5 @@
 import { localOutputOverride } from '../models/local-model-contracts'
+import type { DirectCompletionOperation } from '../models/ai-api'
 import type {
   AiTask,
   WritingAgentArtifactApplicationInput,
@@ -105,14 +106,19 @@ export const decodeContextBudgetPreferencesArgs: ArgsDecoder<
   ]
 }
 
-export const decodeAiCompleteArgs: ArgsDecoder<[string, string | undefined, AiTask | undefined, number | undefined]> = (
+export const decodeAiCompleteArgs: ArgsDecoder<[string, string | undefined, AiTask | undefined, number | undefined, DirectCompletionOperation?]> = (
   args
 ) => {
-  exactArgs(args, 4)
+  exactArgs(args, args.length === 5 ? 5 : 4)
   const instruction = requiredString(args[0], 'instruction', 100_000)
   const draft = args[1] === undefined ? undefined : boundedString(args[1], 'draft', chapterLimits.maxContentLength)
   const task = args[2] === undefined ? undefined : aiTask(args[2])
   const id = args[3] === undefined ? undefined : chapterId(args[3])
+  if (args.length === 5) {
+    const operation = enumValue(args[4], 'operation', ['timeline'] as const)
+    if (task !== 'outline') invalid('operation', '时间线操作只能使用 outline 任务')
+    return [instruction, draft, task, id, operation]
+  }
   return [instruction, draft, task, id]
 }
 
@@ -123,6 +129,7 @@ export const decodeWritingAgentArgs: ArgsDecoder<[WritingAgentRequest]> = (args)
     'chapterId',
     'message',
     'currentDraft',
+    'expectedWorkItemId',
     'expectedContextHash',
     'model',
     'modelConnectionId',
@@ -137,6 +144,8 @@ export const decodeWritingAgentArgs: ArgsDecoder<[WritingAgentRequest]> = (args)
     message: requiredString(value.message, 'writingAgent.message', 10_000),
     currentDraft: boundedString(value.currentDraft, 'writingAgent.currentDraft', chapterLimits.maxContentLength)
   }
+  if ('expectedWorkItemId' in value && value.expectedWorkItemId !== undefined)
+    input.expectedWorkItemId = requiredString(value.expectedWorkItemId, 'writingAgent.expectedWorkItemId', 32_767)
   if ('expectedContextHash' in value && value.expectedContextHash !== undefined) {
     const expectedContextHash = requiredString(value.expectedContextHash, 'writingAgent.expectedContextHash', 64)
     if (!/^[0-9a-f]{64}$/i.test(expectedContextHash))

@@ -1,0 +1,11 @@
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { siteSettings, type SiteSettings } from '@lanjian/hosted-contracts'
+import { getSite } from './api'
+import { http, messageOf } from '../api/http'
+const value = ref<SiteSettings>(), busy = ref(false), error = ref(''), notice = ref('')
+async function load() { busy.value = true; error.value = ''; try { value.value = await getSite() } catch (e) { error.value = messageOf(e) } finally { busy.value = false } }
+async function save() { busy.value = true; error.value = ''; notice.value = ''; try { value.value = siteSettings(await http.request('/api/admin/site', 'PUT', value.value)); notice.value = '站点设置已保存。额度用于后续请求，现有作品保留。' } catch (e) { error.value = messageOf(e) } finally { busy.value = false } }
+onMounted(load)
+</script>
+<template><section class="admin-section"><header><div><h2>公开链接与运行额度</h2></div><button :disabled="busy" @click="load">重读配置</button></header><p v-if="error" class="error" role="alert">{{ error }}</p><p v-if="notice" class="success" role="status">{{ notice }}</p><form v-if="value" @submit.prevent="save"><fieldset :disabled="busy" class="admin-two-columns"><section class="paper-card"><h3>官网导航</h3><label>项目地址<input v-model="value.links.project" type="url" placeholder="https://…"></label><label>安装包下载地址<input v-model="value.links.download" type="url" placeholder="https://…"></label><label>使用指南地址<input v-model="value.links.guide" type="url" placeholder="https://…"></label><p class="muted">仅支持 HTTPS。留空时官网会说明尚未配置，不显示虚假的下载按钮。</p></section><section class="paper-card"><h3>轻量服务额度</h3><label>全站同时运行任务数<input v-model.number="value.limits.concurrentJobs" type="number" min="1" max="16" required></label><label>全站最近 24 小时调用上限<input v-model.number="value.limits.dailyAttempts" type="number" min="1" max="100000" required></label><label>每人作品数上限<input v-model.number="value.limits.booksPerUser" type="number" min="1" max="200" required></label><div class="form-row"><label>每本书容量（MiB）<input v-model.number="value.limits.bookMiB" type="number" min="16" max="4096" required></label><label>每人总容量（MiB）<input v-model.number="value.limits.userMiB" type="number" :min="value.limits.bookMiB" max="16384" required></label></div><p class="muted">每人同时运行 1 个任务；生成前保留 8 MiB 写入空间。这里的应用额度不能替代服务器磁盘监控。</p></section><button class="primary">保存站点设置</button></fieldset></form></section></template>

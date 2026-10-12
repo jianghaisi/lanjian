@@ -19,7 +19,8 @@ export type WorldMapDocument =
   | { version: 2; markers: WorldMapMarker[]; background: WorldMapBackground | null }
 export type WorldMapLayoutView = { workItemId: string; document: WorldMapDocument; revision: string; mirrorStatus: 'synced' | 'pending' | 'conflict' | 'failed' | null }
 export type WorldMapWriteInput = { workItemId: string; expectedRevision: string; document: WorldMapDocument }
-export type WorldMapEvent = { id: string; source: 'direct' | 'canonical'; sourceId: string; title: string; time: string; characters: string[]; location: string; event: string; result: string; chapterId: number | null }
+export type WorldMapEventPhase = 'planned' | 'realized' | 'deviated' | 'legacy-unknown'
+export type WorldMapEvent = { id: string; source: 'direct' | 'canonical'; sourceId: string; title: string; time: string; characters: string[]; location: string; event: string; result: string; versionId?: string; phase?: WorldMapEventPhase; chapterId: number | null }
 export type WorldMapView = WorldMapLayoutView & { events: WorldMapEvent[]; chapters: Array<{ id: number; position: number; title: string }> }
 export type WorldMapImageGenerateInput = { operationId: string; workItemId: string; expectedRevision: string; connectionId: string; model: string; stylePreset: WorldMapStylePreset }
 export type WorldMapImageAdoptInput = { workItemId: string; expectedRevision: string; candidateId: string }
@@ -56,6 +57,10 @@ function style(value: unknown): WorldMapStylePreset {
 }
 function format(value: unknown): WorldMapBackground['format'] {
   if (value !== 'png' && value !== 'jpeg' && value !== 'webp') invalid()
+  return value
+}
+function eventPhase(value: unknown): WorldMapEventPhase {
+  if (value !== 'planned' && value !== 'realized' && value !== 'deviated' && value !== 'legacy-unknown') invalid()
   return value
 }
 function isoDate(value: unknown): string {
@@ -115,7 +120,9 @@ export function decodeWorldMapView(value: unknown): WorldMapView {
   const record = object(value, ['workItemId', 'document', 'revision', 'mirrorStatus', 'events', 'chapters'])
   const ids = new Set<string>(), chapterIds = new Set<number>(), positions = new Set<number>()
   const events = array(record.events, 100_000).map((value): WorldMapEvent => {
-    const event = object(value, ['id', 'source', 'sourceId', 'title', 'time', 'characters', 'location', 'event', 'result', 'chapterId'])
+    const hasVersion = !!value && typeof value === 'object' && Object.hasOwn(value, 'versionId')
+    const hasPhase = !!value && typeof value === 'object' && Object.hasOwn(value, 'phase')
+    const event = object(value, ['id', 'source', 'sourceId', 'title', 'time', 'characters', 'location', 'event', 'result', ...(hasVersion ? ['versionId'] : []), ...(hasPhase ? ['phase'] : []), 'chapterId'])
     const id = text(event.id, 600, true)
     if (ids.has(id) || (event.source !== 'direct' && event.source !== 'canonical')) invalid()
     const sourceId = text(event.sourceId, 500, true)
@@ -123,7 +130,9 @@ export function decodeWorldMapView(value: unknown): WorldMapView {
     ids.add(id)
     return { id, source: event.source, sourceId, title: text(event.title, 1000), time: text(event.time, 2000),
       characters: array(event.characters, 2000).map(name => text(name, 500, true)), location: text(event.location, 2000),
-      event: text(event.event, 100_000), result: text(event.result, 100_000), chapterId: event.chapterId === null ? null : number(event.chapterId, 1, Number.MAX_SAFE_INTEGER, true) }
+      event: text(event.event, 100_000), result: text(event.result, 100_000),
+      ...(hasVersion ? { versionId: text(event.versionId, 500, true) } : {}), ...(hasPhase ? { phase: eventPhase(event.phase) } : {}),
+      chapterId: event.chapterId === null ? null : number(event.chapterId, 1, Number.MAX_SAFE_INTEGER, true) }
   })
   const chapters = array(record.chapters, 100_000).map(value => {
     const chapter = object(value, ['id', 'position', 'title'])

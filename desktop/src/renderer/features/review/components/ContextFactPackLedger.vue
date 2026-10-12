@@ -37,6 +37,13 @@ function evidencePinned(item: ContextFactEvidence) {
 function materialPinned(item: ContextMaterialEvidence) {
   return Boolean(props.pinnedEvidenceKeys?.includes(contextMaterialEvidenceKey(item)))
 }
+
+function eventPhaseLabel(phase: ContextFactPackView['structured']['canonicalEvents'][number]['phase']) {
+  if (phase === 'planned') return '后续计划'
+  if (phase === 'realized') return '已实现'
+  if (phase === 'deviated') return '已偏离计划'
+  return '阶段未标注'
+}
 </script>
 
 <template>
@@ -58,9 +65,9 @@ function materialPinned(item: ContextMaterialEvidence) {
         <p v-if="!recentSummaries.length" class="context-source-empty">此前尚无已确认且仍有效的章末摘要。</p>
       </section>
       <section data-context-source="events">
-        <header><span><b>正式事件</b><small>只列本章已分配事件</small></span><em>{{ pack.structured.canonicalEvents.length }}</em></header>
+        <header><span><b>正式事件</b><small>只列本章已分配事件<template v-if="pack.structured.eventApprovedRevision"> · 批准修订 {{ pack.structured.eventApprovedRevision.slice(0, 10) }}</template></small></span><em>{{ pack.structured.canonicalEvents.length }}</em></header>
         <article v-for="event in pack.structured.canonicalEvents" :key="event.id" :data-event-source-id="event.id">
-          <div><b>{{ event.time }} · {{ event.location }}</b><small>{{ event.provenance }} · {{ event.id.slice(0, 10) }}</small></div>
+          <div><b>{{ event.time }} · {{ event.location }}</b><small>{{ event.provenance }} · {{ eventPhaseLabel(event.phase) }} · {{ (event.versionId || event.id).slice(0, 10) }}</small></div>
           <p>{{ event.characters.join('、') }}｜{{ event.event }}<template v-if="event.result"> → {{ event.result }}</template></p>
           <footer v-if="event.evidenceRefs.length">证据：{{ event.evidenceRefs.map((item) => item.sourceId).join('、') }}</footer>
         </article>

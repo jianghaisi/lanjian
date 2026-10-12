@@ -55,11 +55,10 @@ export function createAppLayoutActions(ports) {
     const startX = event.clientX
     const startWidth =
       document.querySelector('.assistant-panel')?.getBoundingClientRect().width || ports.assistantWidth.value
-    const preferenceScale = 1440 / window.innerWidth
     const move = (moveEvent) => {
       ports.assistantWidth.value = Math.min(
-        460,
-        Math.max(280, (startWidth + startX - moveEvent.clientX) * preferenceScale)
+        720,
+        Math.max(280, startWidth + startX - moveEvent.clientX)
       )
     }
     const stop = () => {
@@ -69,9 +68,13 @@ export function createAppLayoutActions(ports) {
     document.body.classList.add('is-resizing-assistant')
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', stop, { once: true })
+    window.addEventListener('pointercancel', stop, { once: true })
+    window.addEventListener('blur', stop, { once: true })
     ports.removeAssistantResizeListeners = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+      window.removeEventListener('blur', stop)
       document.body.classList.remove('is-resizing-assistant')
       ports.removeAssistantResizeListeners = null
     }
@@ -81,10 +84,10 @@ export function createAppLayoutActions(ports) {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
     event.preventDefault()
     if (event.key === 'Home') ports.assistantWidth.value = 280
-    else if (event.key === 'End') ports.assistantWidth.value = 460
+    else if (event.key === 'End') ports.assistantWidth.value = 720
     else
       ports.assistantWidth.value = Math.min(
-        460,
+        720,
         Math.max(280, ports.assistantWidth.value + (event.key === 'ArrowLeft' ? 16 : -16))
       )
     ports.saveAppearancePreferences(false)

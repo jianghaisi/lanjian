@@ -61,10 +61,10 @@ export class OutlineExpansionAdoptionService {
       if (!task || task.taskType !== 'outline_expansion' || task.status !== 'succeeded' || !artifact?.schemaValid || artifact.status !== 'complete') {
         throw this.conflict('这条候选不可采用或已经采用，请重新读取。')
       }
-      const checkpoint = JSON.parse(task.checkpointJson) as { request: OutlineExpansionTaskInput; source: PlanningOutlineSource }
+      const checkpoint = JSON.parse(task.checkpointJson) as { methodVersion?: 'story-v1'; request: OutlineExpansionTaskInput; source: PlanningOutlineSource }
       decodeOutlineExpansionArgs([checkpoint.request])
       const proposal = JSON.parse(artifact.content) as OutlineExpansionProposal
-      const children = parseOutlineExpansion(JSON.stringify({ children: proposal.children }), checkpoint.request.count)
+      const children = parseOutlineExpansion(JSON.stringify({ children: proposal.children }), checkpoint.request.count, checkpoint.methodVersion === 'story-v1' && proposal.methodVersion === 'story-v1')
       if (hash(proposal.source) !== hash(checkpoint.source) || checkpoint.request.parentKey !== checkpoint.source.key
         || checkpoint.request.expectedRevision !== checkpoint.source.revision) throw this.conflict('候选来源不一致，未执行采用。')
       return { artifact, proposal: { ...proposal, children }, checkpoint }
@@ -97,8 +97,7 @@ export class OutlineExpansionAdoptionService {
   }
 
   private compile(child: OutlineExpansionProposal['children'][number]): string {
-    return `# ${child.title}\n\n${child.content.trim()}\n\n## 事件时间线\n\n${child.events.map((event, index) =>
-      `### 事件 ${index + 1}\n\n- 时间：${event.time}\n- 人物：${event.characters.join('、')}\n- 地点：${event.location}\n- 事件与结果：${event.event}`).join('\n\n')}\n`
+    return `# ${child.title}\n\n${child.content.trim()}\n`
   }
   private directoryFingerprint(db: WorkspaceDatabasePort): string {
     return hash({ nodes: db.formalOutlines().map(({ mirrorStatus, ...node }) => node), reserved: db.reservedOutlineKeys(), chapters: db.formalChapterIds() })

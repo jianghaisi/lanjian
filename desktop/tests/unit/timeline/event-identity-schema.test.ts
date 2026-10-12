@@ -141,10 +141,17 @@ test('schema-38 rebuild retains exact rowids, all rows/history, foreign keys, cu
   await upgrade(f); const after = state(f)
   assert.equal(after.version, WORKSPACE_DATABASE_SCHEMA_VERSION)
   assert.deepEqual(after.columns, before.columns)
-  for (const table of Object.keys(before.foreignKeys)) assert.deepEqual(after.foreignKeys[table], before.foreignKeys[table], table)
+  for (const table of Object.keys(before.foreignKeys)) {
+    const added = after.foreignKeys[table]!.filter(row => row.from === 'review_application_id')
+    if (['body_versions', 'outline_versions'].includes(table)) {
+      assert.equal(added.length, 1); assert.equal(added[0]!.table, 'document_review_applications'); assert.equal(added[0]!.to, 'id')
+    } else assert.equal(added.length, 0)
+    const semantic = (rows: typeof added) => rows.filter(row => row.from !== 'review_application_id').map(({ id, ...row }) => row)
+    assert.deepEqual(semantic(after.foreignKeys[table]!), semantic(before.foreignKeys[table]!), table)
+  }
   assert.deepEqual(after.eventRows, before.eventRows)
   for (const [table, rows] of Object.entries(before.rows)) {
-    const expected = table === 'projects' ? rows.map(row => ({ ...row, current_schema_version: WORKSPACE_DATABASE_SCHEMA_VERSION, text_authority: 'legacy-sqlite' })) : rows
+    const expected = table === 'projects' ? rows.map(row => ({ ...row, current_schema_version: WORKSPACE_DATABASE_SCHEMA_VERSION, text_authority: 'legacy-sqlite' })) : ['body_versions', 'outline_versions'].includes(table) ? rows.map(row => ({ ...row, review_application_id: null })) : rows
     const actual = table === 'schema_migrations' ? after.rows[table]!.filter(row => Number(row.version) <= 38) : after.rows[table]!
     assert.deepEqual(actual.map(row => ({ ...row })), expected.map(row => ({ ...row })), table)
   }
@@ -152,6 +159,10 @@ test('schema-38 rebuild retains exact rowids, all rows/history, foreign keys, cu
     const actual = after.schema.find(row => row.name === definition.name)
     if (definition.name === 'projects') {
       assert.equal(String(actual?.sql).replace(", text_authority TEXT NOT NULL DEFAULT 'legacy-sqlite'\n  CHECK(text_authority IN ('legacy-sqlite', 'files-v1'))", ''), definition.sql)
+    } else if (['body_versions', 'outline_versions'].includes(String(definition.name))) {
+      assert.equal(actual?.sql, String(definition.sql).replace(',\n  UNIQUE', ', review_application_id TEXT REFERENCES document_review_applications(id),\n  UNIQUE'))
+    } else if (definition.name === 'body_versions_ai_task_reference_guard') {
+      assert.equal(actual?.sql, String(definition.sql).replace('BEFORE INSERT ON body_versions\nBEGIN', 'BEFORE INSERT ON body_versions\nWHEN NEW.review_application_id IS NULL\nBEGIN'))
     } else assert.deepEqual(actual, definition, String(definition.name))
   }
   assert.deepEqual(withoutDatabase(await files(f.root)), withoutDatabase(originals))

@@ -12,8 +12,12 @@ import type {
   WritingAgentTurn
 } from '../assistant/types'
 import type { CharacterStateView } from '../characters/types'
+import type { BookTaskSummary } from '../assistant/book-task-summary'
+
+export type DirectCompletionOperation = 'timeline'
 
 export type DesktopAiApi = {
+  backgroundTasks: () => Promise<BookTaskSummary[]>
   getSettings: () => Promise<AiSettings>
   updateSettings: (input: AiSettingsUpdate) => Promise<AiSettings>
   listModels: (draft?: AiConnectionDraft) => Promise<{ models: string[] }>
@@ -23,7 +27,7 @@ export type DesktopAiApi = {
   consistencyEvaluationJob: (jobId: string) => Promise<ConsistencyEvaluationJob>
   cancelConsistencyEvaluation: (jobId: string) => Promise<ConsistencyEvaluationJob>
   genres: () => Promise<{ genres: GenreCatalogItem[] }>
-  complete: (instruction: string, draft?: string, task?: AiTask, chapterId?: number) => Promise<{ content: string }>
+  complete: (instruction: string, draft?: string, task?: AiTask, chapterId?: number, operation?: DirectCompletionOperation) => Promise<{ content: string }>
   runWritingAgent: (input: WritingAgentRequest) => Promise<WritingAgentTurn>
   previewWritingAgentContext: (input: WritingAgentRequest) => Promise<WritingAgentContextPreview>
   startWritingAgent: (input: WritingAgentTaskStart) => Promise<WritingAgentTask>

@@ -1,0 +1,5 @@
+import { groupId, groupRecord, groupText, groupRevision, type GroupCommand } from './group-chat'
+export type GroupAdoptionRequest = GroupCommand & { candidateId: string }
+export type GroupAdoptionPreview = { token: string; candidateId: string; bookTitle: string; title: string; currentContent: string; content: string; destination: string; notice: string }
+export function decodeGroupAdoptionRequest(v: unknown): GroupAdoptionRequest { const r = groupRecord(v, ['sessionId', 'expectedRevision', 'candidateId']); return { sessionId: groupId(r.sessionId), expectedRevision: groupRevision(r.expectedRevision), candidateId: groupId(r.candidateId) } }
+export function decodeGroupAdoptionPreview(v: unknown): GroupAdoptionPreview { const r = groupRecord(v, ['token', 'candidateId', 'bookTitle', 'title', 'currentContent', 'content', 'destination', 'notice']); return { token: groupId(r.token), candidateId: groupId(r.candidateId), bookTitle: groupText(r.bookTitle, 2000), title: groupText(r.title, 200), currentContent: groupText(r.currentContent, 200000, false), content: groupText(r.content, 100000), destination: groupText(r.destination, 200), notice: groupText(r.notice, 500) } }

@@ -57,3 +57,13 @@ test('dense book trims whole source records, never truncates the author brief or
   assert.ok(result.prompt.endsWith('不要把人物剪影当成正式角色设定。'))
   assert.ok(result.summary.events < 40)
 })
+
+test('event version and phase participate in the map fingerprint and planned events stay labelled as plans', () => {
+  const planned = { ...source, view: { ...source.view, events: [{ ...source.view.events[0]!, versionId: 'version-1', phase: 'planned' as const }] } }
+  const realized = { ...planned, view: { ...planned.view, events: [{ ...planned.view.events[0]!, versionId: 'version-2', phase: 'realized' as const }] } }
+  const plannedResult = buildWorldMapPrompt(planned, 'paper-atlas')
+  const realizedResult = buildWorldMapPrompt(realized, 'paper-atlas')
+  assert.match(plannedResult.prompt, /后续计划，不表示已经发生/)
+  assert.match(realizedResult.prompt, /已实现事件/)
+  assert.notEqual(plannedResult.sourceFingerprint, realizedResult.sourceFingerprint)
+})

@@ -1,43 +1,68 @@
-# Environment variables
-.env
-.env.local
-
-# Logs
-*.log
-logs/
-backend.log
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Local novel projects never belong in the application repository
-.webnovel/
-作品/
-
-# Node.js (desktop)
+# Dependencies and caches
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Local Python and migration backups
 __pycache__/
 *.pyc
-.trellis/tasks/*/research/directory-originals.zip
-.trellis/tasks/*/research/workspace-bridge-originals.zip
-.trellis/tasks/*/research/refactor-originals.zip
-.trellis/tasks/*/research/tooling/
-
-# Temporary Superdesign canvas HTML and command receipts
-.superdesign/tmp/
-
-# Generated local tool caches
-/.chrome-ui-preview/
-/.npm-cache-superdesign/
+.npm-cache*/
+.vite/
+*.tsbuildinfo
+# Secrets: examples may contain names/placeholders only
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+# Builds and validation evidence
+/desktop/out/
+/desktop/out-*/
+/desktop/dist/
+/desktop/dist-*/
+/desktop/release/
+/desktop/artifacts/
+/web/dist/
+/web/dist-*/
+/web/test-results/
+/web/playwright-report/
+/packages/*/dist/
+/services/*/dist/
+/services/*/data/
+/services/*/runtime/
+/deploy/hosted/runtime/
+/deploy/hosted/backups/
+/dist/
+/release/
+/artifacts/
+/.local/
+/worktrees/
+/.worktrees/
+*.log
+logs/
+# Author projects and local state
+.webnovel/
+/作品/
+/data/
+/backups/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+# Private development history never enters the public snapshot
+/.trellis/tasks/
+/.trellis/workspace/
+/.trellis/.runtime/
+/.trellis/.current-task
+# Editors / operating system
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+# Source artwork and restricted references remain outside distribution
+*.cmo3
+*.psd
+/desktop/src/renderer/assets/visuals/reference-yang-fang-courtyard.jpg
+/desktop/src/renderer/assets/visuals/lanjian-quartet-master-v2.png
+/desktop/src/renderer/assets/visuals/lanjian-quartet-workbench-v2.png

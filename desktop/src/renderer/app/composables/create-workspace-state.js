@@ -7,9 +7,10 @@ import { settingsSections, categoryForSettingsSection, searchSettingsSections } 
 // Explicit live ports preserve the existing book/request scope and draft ownership.
 export function createAppState(ports) {
   const localAppearanceDialog = ref(null)
+  const groupChatOpen = ref(false)
 
   const workspaceLocation = computed(() => ({
-    active: active.value,
+    active: groupChatOpen.value ? 'group' : active.value,
     materialSection: ports.materialSection.value,
     timelineMode: ports.timelineMode.value,
     outlineMode: ports.outlineMode.value,
@@ -121,7 +122,7 @@ export function createAppState(ports) {
     // Legacy saved widths remain untouched; render them as proportions of the
     // original 90rem desktop canvas, with readable bounds supplied by CSS.
     '--explorer-width': `clamp(12.5rem, ${ports.explorerWidth.value / 14.4}vw, 26.25rem)`,
-    '--assistant-width': `clamp(17.5rem, ${ports.assistantWidth.value / 14.4}vw, 28.75rem)`,
+    '--assistant-width': `${ports.assistantWidth.value}px`,
     '--type-control': `${ports.interfaceFontSize.value / 16}rem`,
     '--type-body': `${(ports.interfaceFontSize.value + 1) / 16}rem`,
     '--explorer-label-size': `${ports.interfaceFontSize.value / 16}rem`,
@@ -145,17 +146,18 @@ export function createAppState(ports) {
   )
 
   const oneOffConnections = computed(() => [
-    ...ports.ai.value.connections,
+    ...ports.ai.value.connections.filter(c => c.kind === 'local' || (c.scope === 'global' && c.enabled !== false)),
     ...ports.oneOffGlobalConnections.value
       .filter(
         (c) =>
+          c.enabled &&
           !ports.ai.value.connections.some(
             (attached) => attached.scope === 'global' && attached.globalConnectionId === c.id
           )
       )
       .map((c) => ({
         id: `global:${c.id}`,
-        name: `${c.name} · 全局`,
+        name: c.name,
         baseUrl: c.baseUrl,
         enabled: c.enabled,
         apiKeyConfigured: c.credentialState === 'stored' && c.enabled,
@@ -303,6 +305,7 @@ export function createAppState(ports) {
 
   return {
     localAppearanceDialog,
+    groupChatOpen,
     workspaceLocation,
     activeWorkspaceLeaf,
     activeWorkspaceGroup,

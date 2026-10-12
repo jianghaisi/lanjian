@@ -1,0 +1,343 @@
+{
+  "format": 1,
+  "packages": [
+    {
+      "directory": "creative-team/1.0.0",
+      "pluginId": "lanjian.official.creative-team",
+      "version": "1.0.0",
+      "digest": "5dcd8ebfa63809c04e198fce6f9dca4e43182452d56c48e9e41ef4592075e4a6"
+    },
+    {
+      "directory": "story-planning/1.1.0",
+      "pluginId": "lanjian.official.story-planning",
+      "version": "1.1.0",
+      "digest": "92b6754cadbb95e9729fe247e7a81d8a820288255a9d64c930561287453e4220"
+    },
+    {
+      "directory": "story-planning/1.0.0",
+      "pluginId": "lanjian.official.story-planning",
+      "version": "1.0.0",
+      "digest": "d6d4c0eb64b60a1827ee24662d3bcac41970f11576caddb9e9e16668f65019f9"
+    },
+    {
+      "directory": "creative-writing/1.0.0",
+      "pluginId": "lanjian.official.creative-writing",
+      "version": "1.0.0",
+      "digest": "c47bedb69f9decae20417cf8e0413a58fe87c39339233a78f96649aa89ec64dd"
+    },
+    {
+      "directory": "story-planning/1.2.0",
+      "pluginId": "lanjian.official.story-planning",
+      "version": "1.2.0",
+      "digest": "6d83c6696e5935f80eca3cf534c093ed2f8bc37895a9c3bf5bf0886c9973f150"
+    },
+    {
+      "directory": "creative-writing/1.2.0",
+      "pluginId": "lanjian.official.creative-writing",
+      "version": "1.2.0",
+      "digest": "4ded7c4fadc6b60f28c145417d41a78619e72ad36aa198bf9af56b581aa1805c"
+    },
+    {
+      "directory": "story-planning/1.4.0",
+      "pluginId": "lanjian.official.story-planning",
+      "version": "1.4.0",
+      "digest": "b5bf591f1460e0a9d8620c87543c8d8d45eea96d43cff4c4657171722639e91e"
+    },
+    {
+      "directory": "creative-writing/1.1.0",
+      "pluginId": "lanjian.official.creative-writing",
+      "version": "1.1.0",
+      "digest": "d0939f5d39927b7640a52ce4fd80b6f0ece209c78d15a353f0106030ba5ec40a"
+    },
+    {
+      "directory": "story-planning/1.3.0",
+      "pluginId": "lanjian.official.story-planning",
+      "version": "1.3.0",
+      "digest": "0ef817c796e017f843dfaef905cbf88ee6bc433ee3d958857848eec493678383"
+    },
+    {
+      "directory": "story-planning/1.5.0",
+      "pluginId": "lanjian.official.story-planning",
+      "version": "1.5.0",
+      "digest": "ba69b1722b5e36fdef39ebc0410a875f0d033a74c8df11997fb2c4b66f01f876"
+    },
+    {
+      "directory": "creative-writing/1.3.0",
+      "pluginId": "lanjian.official.creative-writing",
+      "version": "1.3.0",
+      "digest": "e0da4c03751e333405bf0b1393653db0f076fba70c2f5702793a504d78646203"
+    },
+    {
+      "directory": "creative-writing/1.4.0",
+      "pluginId": "lanjian.official.creative-writing",
+      "version": "1.4.0",
+      "digest": "82ff0cd143e3a9b987af2a29be9515162c2521bfb25e337a06662b80ca49bd21"
+    },
+    {
+      "directory": "story-planning/1.6.0",
+      "pluginId": "lanjian.official.story-planning",
+      "version": "1.6.0",
+      "digest": "687013441579eda00c1a5cc74e430e97e3ec44674e54b2f3e5bf438206ff1f1f"
+    },
+    {
+      "directory": "creative-team/1.1.0",
+      "pluginId": "lanjian.official.creative-team",
+      "version": "1.1.0",
+      "digest": "b4405bd96e2d794b9b515286c7ff6982c980a883a3cdb31df053112dbc49102e"
+    },
+    {
+      "directory": "creative-team/1.2.0",
+      "pluginId": "lanjian.official.creative-team",
+      "version": "1.2.0",
+      "digest": "e9d22bccd52a921b23190d81d9128055e70fa96ea2be646b16477560098607ae"
+    },
+    {
+      "directory": "story-planning/1.7.0",
+      "pluginId": "lanjian.official.story-planning",
+      "version": "1.7.0",
+      "digest": "c422de579867a134b521884fb17a8c9082e2c00f2dbd361f27e9bab1c7815b44"
+    }
+  ],
+  "sets": [
+    [
+      {
+        "pluginId": "lanjian.official.creative-team",
+        "version": "1.0.0",
+        "digest": "5dcd8ebfa63809c04e198fce6f9dca4e43182452d56c48e9e41ef4592075e4a6"
+      },
+      {
+        "pluginId": "lanjian.official.story-planning",
+        "version": "1.1.0",
+        "digest": "92b6754cadbb95e9729fe247e7a81d8a820288255a9d64c930561287453e4220"
+      }
+    ],
+    [
+      {
+        "pluginId": "lanjian.official.creative-team",
+        "version": "1.0.0",
+        "digest": "5dcd8ebfa63809c04e198fce6f9dca4e43182452d56c48e9e41ef4592075e4a6"
+      },
+      {
+        "pluginId": "lanjian.official.story-planning",
+        "version": "1.0.0",
+        "digest": "d6d4c0eb64b60a1827ee24662d3bcac41970f11576caddb9e9e16668f65019f9"
+      }
+    ],
+    [
+      {
+        "pluginId": "lanjian.official.creative-team",
+        "version": "1.0.0",
+        "digest": "5dcd8ebfa63809c04e198fce6f9dca4e43182452d56c48e9e41ef4592075e4a6"
+      },
+      {
+        "pluginId": "lanjian.official.creative-writing",
+        "version": "1.0.0",
+        "digest": "c47bedb69f9decae20417cf8e0413a58fe87c39339233a78f96649aa89ec64dd"
+      },
+      {
+        "pluginId": "lanjian.official.story-planning",
+        "version": "1.2.0",
+        "digest": "6d83c6696e5935f80eca3cf534c093ed2f8bc37895a9c3bf5bf0886c9973f150"
+      }
+    ],
+    [
+      {
+        "pluginId": "lanjian.official.creative-team",
+        "version": "1.0.0",
+        "digest": "5dcd8ebfa63809c04e198fce6f9dca4e43182452d56c48e9e41ef4592075e4a6"
+      },
+      {
+        "pluginId": "lanjian.official.creative-writing",
+        "version": "1.2.0",
+        "digest": "4ded7c4fadc6b60f28c145417d41a78619e72ad36aa198bf9af56b581aa1805c"
+      },
+      {
+        "pluginId": "lanjian.official.story-planning",
+        "version": "1.4.0",
+        "digest": "b5bf591f1460e0a9d8620c87543c8d8d45eea96d43cff4c4657171722639e91e"
+      }
+    ],
+    [
+      {
+        "pluginId": "lanjian.official.creative-team",
+        "version": "1.0.0",
+        "digest": "5dcd8ebfa63809c04e198fce6f9dca4e43182452d56c48e9e41ef4592075e4a6"
+      },
+      {
+        "pluginId": "lanjian.official.creative-writing",
+        "version": "1.1.0",
+        "digest": "d0939f5d39927b7640a52ce4fd80b6f0ece209c78d15a353f0106030ba5ec40a"
+      },
+      {
+        "pluginId": "lanjian.official.story-planning",
+        "version": "1.2.0",
+        "digest": "6d83c6696e5935f80eca3cf534c093ed2f8bc37895a9c3bf5bf0886c9973f150"
+      }
+    ],
+    [
+      {
+        "pluginId": "lanjian.official.creative-team",
+        "version": "1.0.0",
+        "digest": "5dcd8ebfa63809c04e198fce6f9dca4e43182452d56c48e9e41ef4592075e4a6"
+      },
+      {
+        "pluginId": "lanjian.official.creative-writing",
+        "version": "1.2.0",
+        "digest": "4ded7c4fadc6b60f28c145417d41a78619e72ad36aa198bf9af56b581aa1805c"
+      },
+      {
+        "pluginId": "lanjian.official.story-planning",
+        "version": "1.3.0",
+        "digest": "0ef817c796e017f843dfaef905cbf88ee6bc433ee3d958857848eec493678383"
+      }
+    ],
+    [
+      {
+        "pluginId": "lanjian.official.creative-team",
+        "version": "1.0.0",
+        "digest": "5dcd8ebfa63809c04e198fce6f9dca4e43182452d56c48e9e41ef4592075e4a6"
+      },
+      {
+        "pluginId": "lanjian.official.creative-writing",
+        "version": "1.2.0",
+        "digest": "4ded7c4fadc6b60f28c145417d41a78619e72ad36aa198bf9af56b581aa1805c"
+      },
+      {
+        "pluginId": "lanjian.official.story-planning",
+        "version": "1.5.0",
+        "digest": "ba69b1722b5e36fdef39ebc0410a875f0d033a74c8df11997fb2c4b66f01f876"
+      }
+    ],
+    [
+      {
+        "pluginId": "lanjian.official.creative-team",
+        "version": "1.0.0",
+        "digest": "5dcd8ebfa63809c04e198fce6f9dca4e43182452d56c48e9e41ef4592075e4a6"
+      },
+      {
+        "pluginId": "lanjian.official.creative-writing",
+        "version": "1.2.0",
+        "digest": "4ded7c4fadc6b60f28c145417d41a78619e72ad36aa198bf9af56b581aa1805c"
+      },
+      {
+        "pluginId": "lanjian.official.story-planning",
+        "version": "1.2.0",
+        "digest": "6d83c6696e5935f80eca3cf534c093ed2f8bc37895a9c3bf5bf0886c9973f150"
+      }
+    ],
+    [
+      {
+        "pluginId": "lanjian.official.creative-team",
+        "version": "1.0.0",
+        "digest": "5dcd8ebfa63809c04e198fce6f9dca4e43182452d56c48e9e41ef4592075e4a6"
+      },
+      {
+        "pluginId": "lanjian.official.creative-writing",
+        "version": "1.3.0",
+        "digest": "e0da4c03751e333405bf0b1393653db0f076fba70c2f5702793a504d78646203"
+      },
+      {
+        "pluginId": "lanjian.official.story-planning",
+        "version": "1.5.0",
+        "digest": "ba69b1722b5e36fdef39ebc0410a875f0d033a74c8df11997fb2c4b66f01f876"
+      }
+    ],
+    [
+      {
+        "pluginId": "lanjian.official.creative-team",
+        "version": "1.0.0",
+        "digest": "5dcd8ebfa63809c04e198fce6f9dca4e43182452d56c48e9e41ef4592075e4a6"
+      },
+      {
+        "pluginId": "lanjian.official.creative-writing",
+        "version": "1.4.0",
+        "digest": "82ff0cd143e3a9b987af2a29be9515162c2521bfb25e337a06662b80ca49bd21"
+      },
+      {
+        "pluginId": "lanjian.official.story-planning",
+        "version": "1.5.0",
+        "digest": "ba69b1722b5e36fdef39ebc0410a875f0d033a74c8df11997fb2c4b66f01f876"
+      }
+    ],
+    [
+      {
+        "pluginId": "lanjian.official.creative-team",
+        "version": "1.0.0",
+        "digest": "5dcd8ebfa63809c04e198fce6f9dca4e43182452d56c48e9e41ef4592075e4a6"
+      },
+      {
+        "pluginId": "lanjian.official.story-planning",
+        "version": "1.2.0",
+        "digest": "6d83c6696e5935f80eca3cf534c093ed2f8bc37895a9c3bf5bf0886c9973f150"
+      }
+    ],
+    [
+      {
+        "pluginId": "lanjian.official.creative-team",
+        "version": "1.0.0",
+        "digest": "5dcd8ebfa63809c04e198fce6f9dca4e43182452d56c48e9e41ef4592075e4a6"
+      },
+      {
+        "pluginId": "lanjian.official.creative-writing",
+        "version": "1.4.0",
+        "digest": "82ff0cd143e3a9b987af2a29be9515162c2521bfb25e337a06662b80ca49bd21"
+      },
+      {
+        "pluginId": "lanjian.official.story-planning",
+        "version": "1.6.0",
+        "digest": "687013441579eda00c1a5cc74e430e97e3ec44674e54b2f3e5bf438206ff1f1f"
+      }
+    ],
+    [
+      {
+        "pluginId": "lanjian.official.creative-team",
+        "version": "1.1.0",
+        "digest": "b4405bd96e2d794b9b515286c7ff6982c980a883a3cdb31df053112dbc49102e"
+      },
+      {
+        "pluginId": "lanjian.official.creative-writing",
+        "version": "1.4.0",
+        "digest": "82ff0cd143e3a9b987af2a29be9515162c2521bfb25e337a06662b80ca49bd21"
+      },
+      {
+        "pluginId": "lanjian.official.story-planning",
+        "version": "1.6.0",
+        "digest": "687013441579eda00c1a5cc74e430e97e3ec44674e54b2f3e5bf438206ff1f1f"
+      }
+    ],
+    [
+      {
+        "pluginId": "lanjian.official.creative-team",
+        "version": "1.2.0",
+        "digest": "e9d22bccd52a921b23190d81d9128055e70fa96ea2be646b16477560098607ae"
+      },
+      {
+        "pluginId": "lanjian.official.creative-writing",
+        "version": "1.4.0",
+        "digest": "82ff0cd143e3a9b987af2a29be9515162c2521bfb25e337a06662b80ca49bd21"
+      },
+      {
+        "pluginId": "lanjian.official.story-planning",
+        "version": "1.6.0",
+        "digest": "687013441579eda00c1a5cc74e430e97e3ec44674e54b2f3e5bf438206ff1f1f"
+      }
+    ],
+    [
+      {
+        "pluginId": "lanjian.official.creative-team",
+        "version": "1.2.0",
+        "digest": "e9d22bccd52a921b23190d81d9128055e70fa96ea2be646b16477560098607ae"
+      },
+      {
+        "pluginId": "lanjian.official.creative-writing",
+        "version": "1.4.0",
+        "digest": "82ff0cd143e3a9b987af2a29be9515162c2521bfb25e337a06662b80ca49bd21"
+      },
+      {
+        "pluginId": "lanjian.official.story-planning",
+        "version": "1.7.0",
+        "digest": "c422de579867a134b521884fb17a8c9082e2c00f2dbd361f27e9bab1c7815b44"
+      }
+    ]
+  ]
+}

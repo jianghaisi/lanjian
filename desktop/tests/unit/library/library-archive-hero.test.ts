@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import { transformWithEsbuild } from 'vite'
 import * as Vue from 'vue'
+import { dossierArrivalKey } from '../../../src/renderer/features/library/composables/dossier-arrival'
 import * as Icons from '@lucide/vue'
 import { renderToString } from '@vue/server-renderer'
 import type { ProjectSummary } from '../../../src/contracts/index'
@@ -14,9 +15,10 @@ async function render(props: Record<string, unknown>) {
   const code = compileScript(descriptor, { id: 'approved-library-hero', inlineTemplate: true }).content
     .replace(/import\s*\{([^}]+)\}\s*from\s*['"]vue['"];?/g, (_, names: string) => `const { ${names.replace(/\s+as\s+/g, ': ')} } = Vue;`)
     .replace(/import\s*\{([^}]+)\}\s*from\s*['"]@lucide\/vue['"];?/g, (_, names: string) => `const { ${names} } = Icons;`)
+    .replace(/import\s*\{\s*dossierArrivalKey\s*\}\s*from\s*['"][^'"]+['"];?/, '')
     .replace(/import LibraryBookCover from ['"][^'"]+['"];?/, `const LibraryBookCover = { props: ['title'], render() { return Vue.h('span', { 'data-testid': 'cover' }, this.title) } };`)
   const compiled = await transformWithEsbuild(code, 'approved-library-hero.ts', { loader: 'ts' })
-  const component = new Function('Vue', 'Icons', compiled.code.replace('export default', 'return'))(Vue, Icons)
+  const component = new Function('Vue', 'Icons', 'dossierArrivalKey', compiled.code.replace('export default', 'return'))(Vue, Icons, dossierArrivalKey)
   return renderToString(Vue.createSSRApp(component, props))
 }
 
@@ -64,7 +66,7 @@ test('continue-writing dossier keeps the supplied terminal texture and plays its
   assert.match(source, /@blur="emit\('continue-intent',false\)"/)
   assert.match(source, /@click="emit\('open', project\)"/)
   assert.match(source, /setTimeout\(\(\) => \{ previewingProject\.value = false \}, 650\)/)
-  assert.doesNotMatch(source, /reducedMotion|prefers-reduced-motion/)
+  assert.match(source, /prefers-reduced-motion:reduce/)
 })
 
 test('continue-writing reuses the titled book cover instead of a background illustration', async () => {
@@ -97,7 +99,7 @@ test('unknown word counts remain unknown rather than claiming zero', async () =>
 test('different continuation titles keep their own metadata and full-text hints with the same four actions', async () => {
   for (const [title, wordCount, chapterCount] of [
     ['星城少年们的日常录', 591789, 440],
-    ['3000个宗师，他们都叫我主公', 52561, 17],
+    ['三千盏星灯，他们都叫我主公', 52561, 17],
     ['超长书名'.repeat(20), null, 0],
   ] as const) {
     const chapter = '这是一条需要完整提示而不能挤出卡片的章节标题'.repeat(5)
@@ -117,9 +119,18 @@ test('different continuation titles keep their own metadata and full-text hints 
 test('manuscript import is explicitly bound inside the open-book writing flow, never the library', async () => {
   const source = await readFile(new URL('../../../src/renderer/app/components/WorkspaceExplorer.vue', import.meta.url), 'utf8')
   const entrance = source.match(/<button\b[^>]*data-testid="import-manuscript-in-book"[^>]*>/)?.[0] || ''
-  assert.match(entrance, /v-if="active === 'desk' && !chapterTrashOpen"/)
+  assert.match(source, /v-if="active === 'desk' && !chapterTrashOpen"[\s\S]*?class="chapter-explorer-tools"[\s\S]*?popover="auto"[\s\S]*?data-testid="import-manuscript-in-book"/)
   assert.match(entrance, /:disabled="busy"/)
-  assert.match(entrance, /@click="openTxtImport\('inside-work-item'\)"/)
-  assert.doesNotMatch(source, /@click="openTxtImport\('create-from-files'\)"/)
+  assert.match(entrance, /@click="transfer\('inside-work-item'\)"/)
+  assert.match(source, /data-testid="continue-manuscript-files"[^>]*@click="transfer\('create-from-files'\)"/)
   assert.doesNotMatch(source, /@import-files=/)
+})
+
+
+test('cinematic dossier uses the same truthful face without duplicating library actions', async () => {
+  const html = await render({ project, projectCount: 6, loading: false, dossierOnly: true })
+  assert.match(html, /我的&lt;小说&gt;/)
+  assert.match(html, /4,278 字/)
+  assert.match(html, /data-testid="boot-dossier"/)
+  assert.doesNotMatch(html, /data-testid="library-all-works"|data-testid="create-work-item"|data-testid="library-continue-writing"/)
 })

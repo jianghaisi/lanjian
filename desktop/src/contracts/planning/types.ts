@@ -1,4 +1,5 @@
 import type { Chapter } from '../manuscript/types'
+import type { CreativePolicyRecord } from '@lanjian/writing-plugin-contracts'
 import type { ChapterContractVersionRef } from '../assistant/types'
 import type { CharacterStateView } from '../characters/types'
 import type { CheatSystemData, FoundationData, PowerSystemData } from '../worldbuilding/types'
@@ -64,6 +65,8 @@ export type OutlineExpansionAdoptionPreview = {
 export type OutlineExpansionAdoptionResult = { keys: string[]; mirrorPending: boolean }
 
 export type OutlineExpansionProposal = {
+  creativePolicy?: CreativePolicyRecord[]
+  methodVersion?: 'story-v1'
   id: string
   createdAt: string
   source: PlanningOutlineSource
@@ -189,6 +192,7 @@ export type OutlineReviewIssue = {
 }
 
 export type ChapterOutlineReview = {
+  upstream?: import('./upstream-review-contracts').ChapterUpstreamReview
   status: 'missing' | 'needs-changes' | 'ready' | 'confirmed' | 'stale'
   canConfirm: boolean
   issues: OutlineReviewIssue[]
@@ -302,6 +306,7 @@ export type PlanningTotalOutlineProposal = {
 }
 
 export type PlanningVolumeProposal = {
+  storyContent?: string
   order: number
   title: string
   goal: string
@@ -321,6 +326,7 @@ export type PlanningChapterSkeletonEntry = {
 }
 
 export type PlanningChapterSkeletonProposal = {
+  creativePolicy?: CreativePolicyRecord[]
   generatedAt: string
   basedOn: {
     totalOutlineFingerprint: string
@@ -338,7 +344,74 @@ export type PlanningChapterSkeletonStatus = {
   reason?: string
 }
 
+export type FormalSkeletonView = {
+  volume: number
+  fingerprint: string
+  canAdopt: boolean
+  reason: string
+  entries: Array<{
+    chapter: number
+    title: string
+    revision: string | null
+    status: 'untracked' | 'current' | 'stale' | 'changed'
+    reasons: string[]
+  }>
+  affectedChapterIds: number[]
+}
+
+export type FormalSkeletonPreview = FormalSkeletonView & { token: string; proposalId: string }
+
+export type ChapterEventReference = {
+  id: string
+  replaceable?: boolean
+  version: string | null
+  phase: 'planned' | 'realized' | 'deviated' | 'legacy-unknown'
+  time: string
+  characters: string[]
+  location: string
+  event: string
+  result: string | null
+}
+
+export type ChapterEventRefinementSource = { eventId: string; eventVersionId: string }
+export type ChapterEventDraft = { time: string; characters: string[]; location: string; event: string; result: string; refines?: ChapterEventRefinementSource; replaces?: ChapterEventRefinementSource }
+export type ChapterEventReplacementImpact = { chapterIds: number[]; skeletonChapterIds: number[] }
+export type ChapterEventAdoptionPreview = {
+  token: string; operationId: string; proposalId: string; chapterId: number
+  event: ChapterEventDraft; chapterContent: string; replacesChapter: boolean; existingEventCount: number
+  events?: ChapterEventDraft[]
+  replacementImpact?: ChapterEventReplacementImpact
+}
+export type ChapterEventAdoptionResult = {
+  chapterId: number; eventId: string; eventVersionId: string
+  mirrorsPending: boolean; candidateReceiptPending: boolean
+  events?: Array<{ eventId: string; eventVersionId: string }>
+}
+
+/** Informational comparison only; this fingerprint is never an adoption grant. */
+export type ChapterEventPreview = {
+  workItemId: string
+  proposalId: string
+  chapterId: number
+  fingerprint: string
+  freshness: 'current' | 'stale' | 'untracked'
+  candidate: {
+    title: string
+    time: null
+    characters: string[]
+    location: string
+    coreEvent: string
+    plannedResult: string
+    entryState: string
+    beats: string[]
+    exitState: string
+  }
+  formalEvents: ChapterEventReference[]
+  findings: Array<{ code: 'TIME_UNSPECIFIED' | 'SOURCE_CHANGED' | 'UNTRACKED_CANDIDATE' | 'SEMANTIC_REVIEW_REQUIRED'; message: string }>
+}
+
 export type PlanningChapterDetailEntry = {
+  storyContent?: string
   chapter: number
   volume: number
   volumeChapter: number
@@ -355,9 +428,10 @@ export type PlanningChapterDetailEntry = {
 }
 
 export type PlanningChapterDetailVolumeProposal = {
+  creativePolicy?: CreativePolicyRecord[]
   volume: number
   generatedAt: string
-  basedOn: { totalOutlineFingerprint: string; volumeOutlineFingerprint: string; skeletonFingerprint: string }
+  basedOn: { totalOutlineFingerprint: string; volumeOutlineFingerprint: string; skeletonFingerprint: string; formalSkeletonFingerprint?: string }
   chapters: PlanningChapterDetailEntry[]
 }
 
@@ -422,6 +496,7 @@ export type PlanningCheatSystemAdoption = {
 }
 
 export type PlanningPackageProposal = {
+  creativePolicy?: CreativePolicyRecord[]
   id: string
   workItemId: string
   createdAt: string
@@ -586,6 +661,7 @@ export type PlanningCheatSystemResult = {
 }
 
 export type PlanningJob = {
+  rawResult?: string
   id: string
   workItemId: string
   status: PlanningJobStatus
@@ -602,6 +678,7 @@ export type PlanningJob = {
 }
 
 export type PlanningChapterSkeletonJob = {
+  rawResult?: string
   id: string
   workItemId: string
   proposalId: string
@@ -615,6 +692,7 @@ export type PlanningChapterSkeletonJob = {
 }
 
 export type PlanningChapterDetailJob = {
+  rawResult?: string
   id: string
   workItemId: string
   proposalId: string

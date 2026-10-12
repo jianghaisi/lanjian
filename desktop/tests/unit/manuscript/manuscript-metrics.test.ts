@@ -4,7 +4,7 @@ import { performance } from 'node:perf_hooks'
 import { countLinesBeforeOffset, measureManuscript, projectWordCountWithDraft } from '../../../src/contracts/manuscript/manuscript-metrics'
 
 test('keeps manuscript counts compatible without allocating word or line arrays', () => {
-  assert.deepEqual(measureManuscript('  林知夏与 AI-2 在示例中学。\n\n第二段 123 test  '), {
+  assert.deepEqual(measureManuscript('  陈景安与 AI-2 在示例中学。\n\n第二段 123 test  '), {
     wordCount: 16,
     paragraphCount: 2
   })
@@ -14,7 +14,7 @@ test('keeps manuscript counts compatible without allocating word or line arrays'
 })
 
 test('measures a 20,000-plus-character Chinese chapter within the long-form baseline', () => {
-  const paragraph = '林知夏推开窗，晨光落在书页上，所有细节仍须逐字保存。AI draft 2026。'
+  const paragraph = '陈景安推开窗，晨光落在书页上，所有细节仍须逐字保存。AI draft 2026。'
   const manuscript = Array.from({ length: 600 }, (_, index) => `第${index + 1}段：${paragraph}`).join('\n\n')
   assert.ok(manuscript.length >= 20_000 && manuscript.length <= 30_000)
 

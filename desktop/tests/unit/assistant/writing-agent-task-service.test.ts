@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test, { type TestContext } from 'node:test'
 import { ShadowImportService } from '../../../src/main/modules/library/application/shadow-import-service'
@@ -44,12 +44,12 @@ async function fixture(context: TestContext, run: (
     prepare: async (input: WritingAgentRequest) => ({
       version: 1 as const,
       workItemId: (await projects.currentSummary()).id,
-      workItemPath: created.project.path,
+      workItemPath: await projects.currentPath(),
       skill: input.preferredSkill || 'continue',
       model: input.model || 'model-a',
       toolGrant: new AgentToolRegistry().grant({
         workItemId: (await projects.currentSummary()).id,
-        workItemPath: created.project.path,
+        workItemPath: await projects.currentPath(),
         chapterId: input.chapterId,
         skill: input.preferredSkill || 'continue'
       }),
@@ -71,6 +71,104 @@ const request: WritingAgentRequest = {
   preferredSkill: 'rewrite',
   selection: { start: 0, end: 3, text: '旧句。' }
 }
+
+for (const action of ['pause', 'cancel'] as const) {
+  test(`${action} during context preparation stops the read and permits an explicit child run`, async context => {
+    let modelCalls = 0
+    const data = await fixture(context, async () => { modelCalls += 1; return turn(data.project.id) })
+    const prepare = data.runner.prepare.bind(data.runner)
+    let sourceSignal: AbortSignal | undefined
+    let release!: () => void
+    let entered!: () => void
+    const reading = new Promise<void>(resolve => { entered = resolve })
+    data.runner.prepare = async (input, signal) => {
+      sourceSignal = signal
+      await new Promise<void>(resolve => {
+        release = resolve
+        signal?.addEventListener('abort', () => resolve(), { once: true })
+        entered()
+      })
+      signal?.throwIfAborted()
+      return prepare(input, signal)
+    }
+    context.after(() => release?.())
+    const started = await data.service.start({ operationId: randomUUID(), request })
+    await reading
+    const stopped = await data.service[action](started.id)
+    assert.equal(sourceSignal?.aborted, true)
+    assert.equal(stopped.status, action === 'pause' ? 'paused' : 'cancelled')
+    assert.equal(stopped.artifact, undefined)
+    assert.equal(stopped.partial, undefined)
+    assert.equal(modelCalls, 0)
+    data.runner.prepare = prepare
+    const child = await data.service[action === 'pause' ? 'resume' : 'retry'](started.id, randomUUID())
+    const completed = await waitFor(data.service, child.id, 'succeeded')
+    assert.equal(completed.parentTaskRunId, started.id)
+    assert.equal(modelCalls, 1)
+    assert.equal((await data.service.status(started.id)).status, stopped.status)
+    const documents = new DocumentService(data.projects)
+    assert.equal((await documents.chapter(1)).content, '旧句。')
+  })
+}
+
+test('a stale selected-book assertion rejects task creation before any checkpoint write', async context => {
+  const data = await fixture(context, async () => turn(data.project.id))
+  const staleOperationId = randomUUID()
+  await assert.rejects(
+    data.service.start({ operationId: staleOperationId, request: { ...request, expectedWorkItemId: 'another-book' } }),
+    (error: { code?: string }) => error.code === 'CONFLICT'
+  )
+  assert.equal(await data.service.byOperation(staleOperationId), null)
+  const started = await data.service.start({
+    operationId: randomUUID(),
+    request: { ...request, expectedWorkItemId: data.project.id }
+  })
+  assert.equal(started.workItemId, data.project.id)
+  await waitFor(data.service, started.id, 'succeeded')
+})
+
+test('concurrent A/B streaming survives focus changes; same task IDs cannot cancel or persist into the other book', async context => {
+  const gates = new Map<string, () => void>()
+  const entered = new Map<string, AbortSignal | undefined>()
+  const data = await fixture(context, async (_input, signal, prepared, delta) => {
+    const root = await data.projects.currentPath()
+    assert.equal(prepared?.workItemPath, root)
+    await delta?.('片段', `只属于${root}的片段`)
+    entered.set(root, signal)
+    await new Promise<void>(resolve => { gates.set(root, resolve); signal?.addEventListener('abort', () => resolve(), { once: true }) })
+    assert.equal(await data.projects.currentPath(), root)
+    return turn((await data.projects.currentSummary()).id)
+  })
+  const id = '00000000-0000-4000-8000-000000000077'
+  const service = new WritingAgentTaskService(data.runner, data.projects, data.databases, () => new Date(), () => id)
+  context.after(() => { for (const release of gates.values()) release() })
+  const first = await service.start({ operationId: randomUUID(), request })
+  await waitFor(service, first.id, 'streaming')
+  const second = (await data.projects.create({ parentPath: dirname(data.project.path), name: '并发乙书' })).project
+  const documents = new DocumentService(data.projects)
+  await documents.updateChapter(1, { title: '乙书一章', content: '旧句。' })
+  const importer = new ShadowImportService(new CurrentProjectLegacyWorkspaceSource(data.projects, documents), data.databases)
+  await importer.import(await importer.preview())
+  await assert.rejects(service.cancel(first.id), { code: 'NOT_FOUND' })
+  assert.equal(entered.get(data.project.path)?.aborted, false)
+  const secondTask = await service.start({ operationId: randomUUID(), request })
+  assert.equal(secondTask.id, first.id)
+  await waitFor(service, secondTask.id, 'streaming')
+  await service.pause(secondTask.id)
+  assert.equal(entered.get(second.path)?.aborted, true)
+  assert.equal(entered.get(data.project.path)?.aborted, false)
+  gates.get(data.project.path)!()
+  await data.projects.switch(data.project.path)
+  const completed = await waitFor(service, first.id, 'succeeded')
+  assert.equal(completed.turn?.workItemId, data.project.id)
+  assert.ok(completed.partial?.content.includes(data.project.path))
+  await data.projects.switch(second.path)
+  const paused = await service.status(secondTask.id)
+  assert.equal(paused.status, 'paused')
+  assert.ok(paused.partial?.content.includes(second.path))
+  assert.ok(!paused.partial?.content.includes(data.project.path))
+  assert.equal((await documents.chapter(1)).content, '旧句。')
+})
 
 function turn(workItemId: string): WritingAgentTurn {
   return {
@@ -331,6 +429,94 @@ test('persists cancellation and retries as a child run with a new attempt', asyn
   assert.ok(!(await data.service.recent(1)).some((task) => task.id === deletable.id))
 })
 
+for (const change of ['manuscript', 'model connection'] as const) {
+  test(`returns the persisted retry receipt after changing the ${change}`, async context => {
+    let calls = 0
+    let resolverCalls = 0
+    let connectionAvailable = true
+    const data = await fixture(context, async () => {
+      calls += 1
+      if (calls === 1) throw new Error('provider unavailable')
+      return turn(data.project.id)
+    })
+    const source = new CurrentProjectLegacyWorkspaceSource(data.projects, new DocumentService(data.projects))
+    const snapshot = await source.snapshot()
+    const initial = await data.databases.openExisting(data.project.path)
+    assert.ok(initial)
+    try { initial.activateSqlite(snapshot) } finally { initial.close() }
+    const createService = () => new WritingAgentTaskService(
+      data.runner, data.projects, data.databases, undefined, undefined,
+      async () => {
+        resolverCalls += 1
+        if (!connectionAvailable) throw new Error('connection disabled')
+        return 'model-a'
+      }
+    )
+    const service = createService()
+    const parent = await service.start({ operationId: randomUUID(), request })
+    await waitFor(service, parent.id, 'failed')
+    const operationId = randomUUID()
+    const child = await service.retry(parent.id, operationId)
+    const completed = await waitFor(service, child.id, 'succeeded')
+    const database = await data.databases.openExisting(data.project.path)
+    assert.ok(database)
+    let manuscript
+    try {
+      if (change === 'manuscript') {
+        database.writeFormalChapter({ legacyChapterId: 1, title: '第一章', content: '作者后来修改的正文。', reason: 'manual' })
+      } else {
+        connectionAvailable = false
+      }
+      manuscript = database.formalChapter(1)
+    } finally { database.close() }
+    const resolutionsBeforeReplay = resolverCalls
+    const restarted = createService()
+    const replayed = await restarted.retry(parent.id, operationId)
+    assert.equal(replayed.id, completed.id)
+    assert.equal(replayed.status, 'succeeded')
+    assert.deepEqual(replayed.turn, completed.turn)
+    assert.equal(resolverCalls, resolutionsBeforeReplay)
+    assert.equal(calls, 2)
+    connectionAvailable = false
+    await assert.rejects(restarted.retry(parent.id, randomUUID()), /connection disabled/)
+    const after = await data.databases.openExisting(data.project.path)
+    assert.ok(after)
+    try {
+      assert.equal(after.recentTaskRuns('writing_agent', 1, 10).length, 2)
+      assert.deepEqual(after.formalChapter(1), manuscript)
+      assert.equal(after.taskRun(parent.id)?.status, 'failed')
+    } finally { after.close() }
+  })
+}
+
+test('rejects retry operation keys belonging to a different parent or request', async context => {
+  const data = await fixture(context, async () => { throw new Error('provider unavailable') })
+  const first = await data.service.start({ operationId: randomUUID(), request })
+  await waitFor(data.service, first.id, 'failed')
+  const operationId = randomUUID()
+  const child = await data.service.retry(first.id, operationId)
+  await waitFor(data.service, child.id, 'failed')
+  const second = await data.service.start({ operationId: randomUUID(), request })
+  await waitFor(data.service, second.id, 'failed')
+  await assert.rejects(data.service.retry(second.id, operationId), (error: { code?: string }) => error.code === 'CONFLICT')
+
+  const mismatchedOperation = randomUUID()
+  const database = await data.databases.openExisting(data.project.path)
+  assert.ok(database)
+  try {
+    const parent = database.taskRun(second.id)!
+    const checkpoint = JSON.parse(parent.checkpointJson)
+    const mismatched = database.createTaskRun({
+      id: randomUUID(), legacyChapterId: 1, taskType: 'writing_agent',
+      parentTaskRunId: second.id, taskContract: parent.taskContract,
+      idempotencyKey: mismatchedOperation, contentHash: parent.contentHash!,
+      checkpointJson: JSON.stringify({ ...checkpoint, request: { ...request, message: '另一份请求' } })
+    })
+    database.transitionTaskRun({ id: mismatched.id, status: 'cancelled' })
+  } finally { database.close() }
+  await assert.rejects(data.service.retry(second.id, mismatchedOperation), (error: { code?: string }) => error.code === 'CONFLICT')
+})
+
 test('persists a native pause and resumes as a traceable resuming child run', async (context) => {
   let calls = 0
   let workItemId = ''
@@ -412,6 +598,114 @@ test('flushes the final buffered stream fragment before marking a task cancelled
   assert.equal(cancelled.status, 'cancelled')
   assert.equal(cancelled.partial?.content, '开头。最后一小段。')
 })
+
+for (const stage of ['context', 'partial', 'candidate', 'completion'] as const) {
+  test(`a ${stage} storage failure preserves recovery evidence and allows explicit retry`, async context => {
+    const marker = 'synthetic-private-sql-detail'
+    const partial = '已收到且应保留的片段。'.repeat(70)
+    const tail = '最后一小段。'
+    let calls = 0
+    const data = await fixture(context, async (_input, _signal, _prepared, onDelta) => {
+      calls += 1
+      await onDelta?.(partial, partial)
+      await onDelta?.(tail, partial + tail)
+      return turn(data.project.id)
+    })
+    const before = nonTaskDatabaseSnapshot(data.project.path)
+    const databasePath = join(data.project.path, ...WORKSPACE_DATABASE_RELATIVE_PATH.split('/'))
+    const trigger = {
+      context: 'BEFORE INSERT ON context_packages',
+      partial: "BEFORE UPDATE OF content ON generation_artifacts WHEN NEW.artifact_type = 'writing_agent_stream'",
+      candidate: "BEFORE INSERT ON generation_artifacts WHEN NEW.artifact_type = 'writing_agent_turn'",
+      completion: "BEFORE UPDATE OF status ON task_runs WHEN NEW.status = 'succeeded'"
+    }[stage]
+    const fault = new DatabaseSync(databasePath, { allowExtension: false })
+    try { fault.exec(`CREATE TRIGGER writing_task_test_fault ${trigger} BEGIN SELECT RAISE(ABORT, '${marker}'); END`) }
+    finally { fault.close() }
+    const parent = await data.service.start({ operationId: randomUUID(), request })
+    const failed = await waitFor(data.service, parent.id, 'failed')
+    assert.equal(failed.error?.code, 'STORAGE_ERROR')
+    assert.doesNotMatch(JSON.stringify(failed), new RegExp(marker))
+    assert.equal(failed.artifact, undefined)
+    assert.equal(failed.turn, undefined)
+    assert.equal(failed.partial?.content, stage === 'context' ? undefined : stage === 'partial' ? partial : partial + tail)
+    if (stage !== 'context') assert.equal(failed.partial?.status, 'partial')
+    assert.equal(calls, stage === 'context' ? 0 : 1)
+    const stored = await data.databases.openExisting(data.project.path)
+    assert.ok(stored)
+    try {
+      assert.doesNotMatch(JSON.stringify(stored.taskRun(parent.id)), new RegExp(marker))
+      assert.equal(stored.generationArtifactForTask(parent.id, 'writing_agent_turn'), null)
+      assert.equal(stored.contextPackageForTask(parent.id) !== null, stage !== 'context')
+      assert.equal(stored.recentTaskRuns('writing_agent', 1, 10).length, 1)
+    } finally { stored.close() }
+    assert.deepEqual(nonTaskDatabaseSnapshot(data.project.path), before)
+    const repair = new DatabaseSync(databasePath, { allowExtension: false })
+    try { repair.exec('DROP TRIGGER writing_task_test_fault') } finally { repair.close() }
+    const child = await data.service.retry(parent.id, randomUUID())
+    const completed = await waitFor(data.service, child.id, 'succeeded')
+    assert.equal(completed.parentTaskRunId, parent.id)
+    assert.equal(completed.attempt, 2)
+    assert.ok(completed.artifact)
+    assert.equal(calls, stage === 'context' ? 1 : 2)
+    assert.deepEqual(await data.service.status(parent.id), failed)
+    assert.deepEqual(nonTaskDatabaseSnapshot(data.project.path), before)
+  })
+}
+
+for (const phase of ['preparing', 'streaming'] as const) {
+  test(`an independent AbortError during ${phase} becomes a recoverable failure`, async context => {
+    const marker = 'synthetic-private-provider-detail'
+    const partial = '中断前已收到的片段。'.repeat(70)
+    const tail = '最后一小段。'
+    let prepareCalls = 0
+    let modelCalls = 0
+    const data = await fixture(context, async (_input, signal, _prepared, onDelta) => {
+      modelCalls += 1
+      if (phase === 'streaming' && modelCalls === 1) {
+        await onDelta?.(partial, partial)
+        await onDelta?.(tail, partial + tail)
+        assert.equal(signal?.aborted, false)
+        throw new DOMException(marker, 'AbortError')
+      }
+      return turn(data.project.id)
+    })
+    const prepare = data.runner.prepare.bind(data.runner)
+    data.runner.prepare = async (input, signal) => {
+      prepareCalls += 1
+      if (phase === 'preparing' && prepareCalls === 1) {
+        assert.equal(signal?.aborted, false)
+        throw new DOMException(marker, 'AbortError')
+      }
+      return prepare(input, signal)
+    }
+    const before = nonTaskDatabaseSnapshot(data.project.path)
+    const parent = await data.service.start({ operationId: randomUUID(), request })
+    const failed = await waitFor(data.service, parent.id, 'failed')
+    assert.equal(failed.error?.code, 'GENERATION_FAILED')
+    assert.equal(failed.error?.message, 'AI 任务未完成，请检查模型连接后重试。')
+    assert.doesNotMatch(JSON.stringify(failed), new RegExp(marker))
+    assert.equal(failed.artifact, undefined)
+    assert.equal(failed.partial?.content, phase === 'streaming' ? partial + tail : undefined)
+    assert.equal(prepareCalls, 1)
+    assert.equal(modelCalls, phase === 'streaming' ? 1 : 0)
+    const database = await data.databases.openExisting(data.project.path)
+    assert.ok(database)
+    try {
+      assert.doesNotMatch(JSON.stringify(database.taskRun(parent.id)), new RegExp(marker))
+      assert.equal(database.generationArtifactForTask(parent.id, 'writing_agent_turn'), null)
+      assert.equal(database.recentTaskRuns('writing_agent', 1, 10).length, 1)
+    } finally { database.close() }
+    const child = await data.service.retry(parent.id, randomUUID())
+    const completed = await waitFor(data.service, child.id, 'succeeded')
+    assert.equal(completed.parentTaskRunId, parent.id)
+    assert.equal(completed.attempt, 2)
+    assert.equal(prepareCalls, 2)
+    assert.equal(modelCalls, phase === 'streaming' ? 2 : 1)
+    assert.deepEqual(await data.service.status(parent.id), failed)
+    assert.deepEqual(nonTaskDatabaseSnapshot(data.project.path), before)
+  })
+}
 
 test('never persists provider exception text that could echo a credential', async (context) => {
   const marker = 'LANJIAN-SECRET-WRITING-DO-NOT-PERSIST'
@@ -528,6 +822,66 @@ test('native pause flushes buffered text and rejects late completion without cha
   assert.deepEqual(nonTaskDatabaseSnapshot(data.project.path), before)
 })
 
+for (const action of ['pause', 'cancel'] as const) {
+  test(`${action} ignores stream chunks arriving after abort but before the stop is persisted`, async context => {
+    let ready!: () => void
+    let release!: () => void
+    let ended!: () => void
+    const buffered = new Promise<void>(resolve => { ready = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const providerEnded = new Promise<void>(resolve => { ended = resolve })
+    let abortChunk: void | Promise<void> = undefined
+    let sourceSignal: AbortSignal | undefined
+    let calls = 0
+    const content = '开头。停止前的最后一段。'
+    const data = await fixture(context, async (_input, signal, _prepared, onDelta) => {
+      calls += 1
+      if (calls > 1) return turn(data.project.id)
+      sourceSignal = signal
+      await onDelta?.('开头。', '开头。')
+      await onDelta?.('停止前的最后一段。', content)
+      // Deliver before pause/cancel can persist its terminal state, while the
+      // old transport remains pending. A DB status check alone is too late.
+      signal?.addEventListener('abort', () => {
+        abortChunk = onDelta?.('停止后的迟到片段。', content + '停止后的迟到片段。')
+      }, { once: true })
+      ready()
+      await gate
+      await onDelta?.('旧请求又有输出。', content + '旧请求又有输出。')
+      ended()
+      return turn(data.project.id)
+    })
+    context.after(() => { data.service.abortForShutdown(); release() })
+    const before = nonTaskDatabaseSnapshot(data.project.path)
+    const parent = await data.service.start({ operationId: randomUUID(), request })
+    await buffered
+    const stopped = await data.service[action](parent.id)
+    await abortChunk
+    assert.equal(sourceSignal?.aborted, true)
+    assert.equal(stopped.status, action === 'pause' ? 'paused' : 'cancelled')
+    assert.equal(stopped.partial?.content, content)
+    assert.equal(stopped.partial?.status, 'partial')
+    assert.equal(stopped.artifact, undefined)
+    assert.equal(stopped.turn, undefined)
+    assert.equal(calls, 1)
+    const child = await data.service[action === 'pause' ? 'resume' : 'retry'](parent.id, randomUUID())
+    const completed = await waitFor(data.service, child.id, 'succeeded')
+    assert.equal(completed.parentTaskRunId, parent.id)
+    assert.equal(completed.attempt, 2)
+    assert.equal(calls, 2)
+    release()
+    await providerEnded
+    assert.deepEqual(await data.service.status(parent.id), stopped)
+    assert.deepEqual(await data.service.status(child.id), completed)
+    const restored = new WritingAgentTaskService(data.runner, data.projects, data.databases)
+    assert.deepEqual(await restored.status(parent.id), stopped)
+    assert.deepEqual(await restored.status(child.id), completed)
+    assert.equal(calls, 2)
+    assert.deepEqual(nonTaskDatabaseSnapshot(data.project.path), before)
+    assert.equal((await new DocumentService(data.projects).chapter(1)).content, request.currentDraft)
+  })
+}
+
 test('legacy pause validates the public book path and chapter instead of the internal project UUID', async (context) => {
   let workItemId = ''
   const data = await fixture(context, async () => turn(workItemId))
@@ -584,6 +938,23 @@ test('restart interrupts an abandoned resuming child but preserves its paused pa
   assert.equal((await restored.status(parentId)).status, 'paused')
   assert.deepEqual(nonTaskDatabaseSnapshot(data.project.path), before)
 })
+
+for (const boundary of ['artifact', 'stream'] as const) {
+  test(`policy withdrawal before the serialized ${boundary} write leaves no late artifact`, async context => {
+    let withdrawn = false, checked = 0
+    const data = await fixture(context, async (_input, _signal, _prepared, onDelta) => {
+      withdrawn = true
+      if (boundary === 'stream') await onDelta?.('只读核查结果', '只读核查结果')
+      return { id: 'readonly-run', workItemId: data.project.id, chapterId: 1, createdAt: new Date().toISOString(), model: 'model-a', skill: { id: 'query', label: '作品问答' }, answer: '本次检索未找到足够依据。', tools: [] }
+    })
+    data.runner.assertRunAuthorized = async () => { checked++; if (withdrawn) throw Error('withdrawn') }
+    const before = nonTaskDatabaseSnapshot(data.project.path)
+    const started = await data.service.start({ operationId: randomUUID(), request: { chapterId: 1, message: '只读核查资料', currentDraft: '', preferredSkill: 'query' } })
+    const failed = await waitFor(data.service, started.id, 'failed')
+    assert.equal(failed.artifact, undefined); assert.equal(failed.partial, undefined); assert.ok(checked > 0)
+    assert.deepEqual(nonTaskDatabaseSnapshot(data.project.path), before)
+  })
+}
 
 async function waitFor(service: WritingAgentTaskService, id: string, status: string): Promise<Awaited<ReturnType<WritingAgentTaskService['status']>>> {
   for (let index = 0; index < 100; index += 1) {

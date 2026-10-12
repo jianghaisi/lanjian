@@ -378,10 +378,13 @@ test('validates bounded traceable material evidence before context preview reach
   }), (error: unknown) => (error as { code?: string }).code === 'INTERNAL_ERROR')
 })
 import { registerValidatedIpc } from '../../src/main/bootstrap/ipc-handler'
+import { createInspirationBridge } from '../../src/contracts/inspiration/bridge'
 
-test('keeps every renderer IPC result behind a registered value decoder', () => {
-  const preloadSource = ['index.ts', 'companion-voice-bridge.ts', 'model-connections-bridge.ts'].map(file => readFileSync(new URL(`../../src/preload/${file}`, import.meta.url), 'utf8')).join('\n')
+test('keeps every renderer IPC result behind a registered value decoder', async () => {
+  const preloadSource = ['preload/index.ts', 'preload/companion-voice-bridge.ts', 'contracts/core/create-desktop-api.ts', 'contracts/core/model-connections-bridge.ts', 'contracts/core/writing-plugins-bridge.ts'].map(file => readFileSync(new URL(`../../src/${file}`, import.meta.url), 'utf8')).join('\n')
   const invokedChannels = [...preloadSource.matchAll(/invokeValidated\('([^']+)'/g)].map((match) => match[1])
+  const inspiration=createInspirationBridge(async<T>(channel:string)=>{invokedChannels.push(channel);return undefined as T})
+  await Promise.all(Object.values(inspiration).map(method=>(method as (input:unknown)=>Promise<unknown>)({})))
   assert.equal(new Set(invokedChannels).size, invokedChannels.length)
   assert.deepEqual([...registeredIpcResultChannels].sort(), invokedChannels.sort())
 })
@@ -690,7 +693,7 @@ test('validates project lifecycle, backup and real-trial results before renderer
 
 test('validates workspace definition, world rules and prompt-profile results before renderer use', () => {
   const bookProfile = {
-    genre: '轻小说', subgenre: '校园奇幻', coreIdea: '怪物少女同居喜剧', plannedVolumes: 8, chaptersPerVolume: 55,
+    genre: '轻小说', subgenre: '校园奇幻', coreIdea: '发明社员同居喜剧', plannedVolumes: 8, chaptersPerVolume: 55,
     targetWordsPerChapter: 4_900, targetWords: 2_000_000, audienceScale: '轻松日常', defaultPov: '第三人称限知',
     narrativeDistance: '贴近男主', writingStyle: '自然对白、笑话和吐槽推动节奏', proseExpansionMode: 'web-serial',
     reviewStrictness: 'balanced', chapterGenerationMode: 'reviewed', autosaveEnabled: true, autosaveDelayMs: 1_500,
@@ -710,8 +713,8 @@ test('validates workspace definition, world rules and prompt-profile results bef
     systemTemplate: '[状态]\n姓名：{{name}}', rationale: '固定展示方式，避免正文中的界面随机变化。'
   }
   const timeline = {
-    events: [{ id: 'event-1', title: '转学', time: '第一卷第一天早晨', characters: '李远明、班主任',
-      location: '教室', event: '李远明转入新班级。', result: '第一次见到怪物少女。' }]
+    events: [{ id: 'event-1', title: '转学', time: '第一卷第一天早晨', characters: '周文衡、班主任',
+      location: '教室', event: '周文衡转入新班级。', result: '第一次见到发明社员。' }]
   }
   const authorityLayers = [
     { id: 'guardrails', order: 1, label: '安全与一致性门禁', source: '产品内置', summary: '作品隔离与候选边界。' },
@@ -816,7 +819,7 @@ test('validates the complete workspace bootstrap snapshot before opening a work 
     systemTemplate: { template: '' },
     foundation: { creationPath: 'materials', sourceNotes: '', worldView: '', useRealms: false, useSystem: false },
     bookProfile: {
-      genre: '轻小说', subgenre: '校园奇幻', coreIdea: '怪物少女同居喜剧', plannedVolumes: 8,
+      genre: '轻小说', subgenre: '校园奇幻', coreIdea: '发明社员同居喜剧', plannedVolumes: 8,
       chaptersPerVolume: 55, targetWordsPerChapter: 4_900, targetWords: 2_000_000,
       audienceScale: '', defaultPov: '', narrativeDistance: '', writingStyle: '',
       proseExpansionMode: 'web-serial', reviewStrictness: 'balanced', chapterGenerationMode: 'reviewed',
@@ -834,6 +837,7 @@ test('validates the complete workspace bootstrap snapshot before opening a work 
     },
     sources: { sources: [] },
     events: { events: [] },
+    eventProjection: null,
     planningDraft: null,
     promptProfile: {
       version: 1, workItemId: root, genreLabel: '轻小说 / 校园奇幻',
@@ -890,7 +894,7 @@ test('validates workspace workflow, canon ledgers and generation-task results be
   }
   const finding = {
     code: 'LOCATION_JUMP', layer: 'deterministic', severity: 'attention', message: '地点变化缺少移动说明。',
-    characterId: entityId, characterName: '李远明', fromChapter: 1, toChapter: 2, evidence: ['上一章仍在教室。'],
+    characterId: entityId, characterName: '周文衡', fromChapter: 1, toChapter: 2, evidence: ['上一章仍在教室。'],
     findingId: taskId, findingStatus: 'open', sourceBodyVersionId: taskId, sourceContentHash: revision,
     suggestedAction: '补充移动过程。', confidence: 0.9
   }
@@ -907,9 +911,9 @@ test('validates workspace workflow, canon ledgers and generation-task results be
   const chapterProjection = { chapterId: 2, workflow, planning, consistency, derivatives }
   const historyEntry = { id: entityId, title: '重复段落', rationale: '原来有两段重复。', status: 'fixed', sourceBodyVersionId: relatedEntityId, resultingBodyVersionId: taskId, updatedAt: now }
   const findingHistory = { bodyVersionId: taskId, entries: [historyEntry] }
-  const chapterSummary = { chapterId: 1, bodyVersionId: taskId, content: '李远明完成转学并见到同桌。', createdAt: now, status: 'approved' }
-  const aliases = [{ characterId: entityId, canonicalName: '李远明', alias: '远明' }]
-  const entity = { id: entityId, entityType: 'character', canonicalName: '李远明', profileJson: '{"role":"主角"}', status: 'approved', createdAt: now, updatedAt: now }
+  const chapterSummary = { chapterId: 1, bodyVersionId: taskId, content: '周文衡完成转学并见到同桌。', createdAt: now, status: 'approved' }
+  const aliases = [{ characterId: entityId, canonicalName: '周文衡', alias: '远明' }]
+  const entity = { id: entityId, entityType: 'character', canonicalName: '周文衡', profileJson: '{"role":"主角"}', status: 'approved', createdAt: now, updatedAt: now }
   const worldRule = { ...entity, id: relatedEntityId, entityType: 'world_rule', canonicalName: '怪物隐匿规则', profileJson: '{"rule":"不得公开身份"}' }
   const relation = { id: taskId, subjectEntityId: entityId, predicate: '受规则约束', objectEntityId: relatedEntityId, notes: '', createdAt: now, updatedAt: now }
   const baseIdea = { id: ideaId, title: '同桌异常', content: '同桌总能提前知道老师的问题。', status: 'approved', promotedToType: null, promotedToId: null, createdAt: now, updatedAt: now }
@@ -924,10 +928,10 @@ test('validates workspace workflow, canon ledgers and generation-task results be
   const resourceBalance = { resourceEntityId: relatedEntityId, resourceName: '信任值', quantity: 1, isNegative: false, lastChangedAt: now }
   const foreshadow = { id: entityId, title: '同桌提前知道答案', normalizedTitle: '同桌提前知道答案', status: 'open', plantedChapterId: 1, payoffChapterId: null, dataJson: '{}', createdAt: now, updatedAt: now }
   const foreshadowAction = { id: taskId, operationKey: ideaId, foreshadowId: entityId, foreshadowTitle: foreshadow.title, chapterId: 1, action: 'plant', description: '课堂异常', evidence: '她提前写下答案。', sourceType: 'chapter_draft', createdAt: now }
-  const snapshot = { characterId: entityId, name: '李远明', throughChapter: 1, present: true, location: '教室', vitality: 'alive', lastEventId: taskId }
-  const stateEvent = { id: taskId, characterId: entityId, chapterId: 1, chapterPosition: 1, manuscriptRevision: revision, proposalId: ideaId, acceptedAt: now, evidence: '李远明坐在教室。', active: true, changes: { present: true, location: '教室', vitality: 'alive' }, changeEvidence: { location: '李远明坐在教室。' } }
-  const characterState = { version: 1, workItemId: 'E:\\作品\\怪物少女', anchors: [{ id: entityId, name: '李远明', role: '主角', sourceRefs: ['planning:character-1'] }], events: [stateEvent], snapshots: [snapshot], pendingConflicts: [] }
-  const characterLines = { version: 1, workItemId: characterState.workItemId, source: 'sqlite-approved-facts', lines: [{ characterId: entityId, name: '李远明', points: [{ ...snapshot, chapterId: 1, chapterPosition: 1, source: 'approved_fact', sourceId: taskId }] }] }
+  const snapshot = { characterId: entityId, name: '周文衡', throughChapter: 1, present: true, location: '教室', vitality: 'alive', lastEventId: taskId }
+  const stateEvent = { id: taskId, characterId: entityId, chapterId: 1, chapterPosition: 1, manuscriptRevision: revision, proposalId: ideaId, acceptedAt: now, evidence: '周文衡坐在教室。', active: true, changes: { present: true, location: '教室', vitality: 'alive' }, changeEvidence: { location: '周文衡坐在教室。' } }
+  const characterState = { version: 1, workItemId: 'E:\\作品\\发明社员', anchors: [{ id: entityId, name: '周文衡', role: '主角', sourceRefs: ['planning:character-1'] }], events: [stateEvent], snapshots: [snapshot], pendingConflicts: [] }
+  const characterLines = { version: 1, workItemId: characterState.workItemId, source: 'sqlite-approved-facts', lines: [{ characterId: entityId, name: '周文衡', points: [{ ...snapshot, chapterId: 1, chapterPosition: 1, source: 'approved_fact', sourceId: taskId }] }] }
   const taskCenterItem = { id: taskId, workItemId: 'book-1', taskType: 'writing_agent', status: 'paused', label: '智能助笔', detail: '续写这一段', chapterId: 1, attempt: 1, createdAt: now, updatedAt: now, actions: ['resume', 'view', 'cancel'] }
 
   for (const [channel, value] of [
@@ -976,7 +980,7 @@ test('validates workspace workflow, canon ledgers and generation-task results be
   const newAnchorState = {
     ...characterState,
     events: [],
-    snapshots: [{ characterId: entityId, name: '李远明', throughChapter: 0, present: false, lastEventId: '' }]
+    snapshots: [{ characterId: entityId, name: '周文衡', throughChapter: 0, present: false, lastEventId: '' }]
   }
   assert.deepEqual(unwrapValidatedIpcResponse('workspace:get-character-state', { ok: true, value: newAnchorState }), newAnchorState)
   assert.equal(unwrapValidatedIpcResponse('workspace:get-chapter-summary', { ok: true, value: null }), null)
@@ -1157,8 +1161,8 @@ test('validates automatic-planning proposals, adoption gates and generation jobs
     id: 'planning-proposal-1', workItemId: 'work-1', createdAt: '2026-09-05T01:00:00.000Z',
     basedOn: { inputFingerprint: 'input-fingerprint', blueprintFingerprint: 'blueprint-fingerprint', totalOutlineFingerprint: 'total-fingerprint' },
     blueprint: {
-      premise: '一家人与怪物少女共同生活。', worldView: '现代城市中的隐秘异常。',
-      characters: [{ name: '林知夏', role: '男主', arcSeed: '守住看似普通的日常。' }],
+      premise: '一家人与发明社员共同生活。', worldView: '现代城市中的隐秘异常。',
+      characters: [{ name: '陈景安', role: '男主', arcSeed: '守住看似普通的日常。' }],
       powerSystem: '', cheatSystem: '', rationale: '以家庭日常串联异常事件。'
     },
     totalOutline: { title: '星城少年们的日常录', summary: '日常与异常相互碰撞。', content: '第一卷建立共同生活。' },
@@ -1214,12 +1218,13 @@ test('validates research settings, traceable sources and four-part event results
     contentHash: 'a'.repeat(64)
   }
   const candidate = {
-    id: 'event-1', time: '第一日雨夜', characters: ['林知夏', '转学生'], location: '旧城区下水道',
+    id: 'event-1', time: '第一日雨夜', characters: ['陈景安', '转学生'], location: '旧城区下水道',
     event: '两人沿异常水声找到隐藏入口。', result: '确认怪物并非孤立出现。',
     evidenceRefs: [{ sourceId: source.id, excerpt: source.excerpt }], confidence: 0.85,
     status: 'candidate', createdAt: '2026-09-05T02:01:00.000Z'
   }
   const approved = { ...candidate, status: 'approved', approvedAt: '2026-09-05T02:02:00.000Z' }
+  const authorEvent = { ...approved, id: 'event-author', evidenceRefs: [] }
   const search = {
     query: '旧城区排水系统', content: '搜索摘要', sources: [{ title: '城市档案', url: 'https://archive.example.test/city' }],
     searchedQueries: ['旧城区 排水 系统'], webSearchCalls: 1, model: 'doubao-search'
@@ -1228,6 +1233,7 @@ test('validates research settings, traceable sources and four-part event results
   assert.deepEqual(unwrapValidatedIpcResponse('research:get-settings', { ok: true, value: settings }), settings)
   assert.deepEqual(unwrapValidatedIpcResponse('research:search', { ok: true, value: search }), search)
   assert.deepEqual(unwrapValidatedIpcResponse('research:list-sources', { ok: true, value: { sources: [source] } }), { sources: [source] })
+  assert.deepEqual(unwrapValidatedIpcResponse('research:list-events', { ok: true, value: { events: [candidate, authorEvent] } }), { events: [candidate, authorEvent] })
   assert.deepEqual(unwrapValidatedIpcResponse('research:create-event-candidate', { ok: true, value: candidate }), candidate)
   assert.deepEqual(unwrapValidatedIpcResponse('research:approve-event', { ok: true, value: approved }), approved)
 
@@ -1239,6 +1245,8 @@ test('validates research settings, traceable sources and four-part event results
     ['research:create-source', { ...source, url: undefined, references: [] }],
     ['research:create-event-candidate', { ...candidate, characters: [] }],
     ['research:create-event-candidate', { ...candidate, confidence: 2 }],
+    ['research:list-events', { events: [{ ...candidate, evidenceRefs: [] }] }],
+    ['research:create-event-candidate', { ...candidate, evidenceRefs: [] }],
     ['research:create-event-candidate', approved],
     ['research:approve-event', { ...candidate, status: 'approved' }]
   ] as const) {
@@ -1599,7 +1607,7 @@ test('requires four complete dimensions and stale fingerprints for existing-plot
 
 test('requires one complete bounded person and three fingerprints for continuation-character adoption', async () => {
   const id = '11111111-2222-4333-8444-555555555555'
-  const character = { name: '林知夏', role: '维持普通生活的高中生', arcSeed: '从隐瞒异常，到主动守住怪物少女们的日常。' }
+  const character = { name: '陈景安', role: '维持普通生活的高中生', arcSeed: '从隐瞒异常，到主动守住发明社员们的日常。' }
   const preview = harness(decodeContinuationCharacterPreviewArgs, (value) => value)
   assert.deepEqual(unwrapIpcResponse(await preview({ candidateId: id, character })), { candidateId: id, character })
   for (const response of [

@@ -16,7 +16,7 @@ export type ParsedChapterOutline = {
   invalidForeshadowLines: string[]
 }
 export type OutlineAuditIssue = {
-  code: 'OUTLINE_EMPTY' | 'TOO_FEW_BEATS' | 'TOO_MANY_BEATS' | 'DUPLICATE_BEAT' | 'MISSING_FORBIDDEN' | 'MISSING_ENTRY_STATE' | 'MISSING_EXIT_STATE' | 'MISSING_ALLOWED_FACTS' | 'INVALID_FORESHADOW_ACTION' | 'UNSTRUCTURED_BEATS'
+  code: 'STORY_CONTRACT_REQUIRED' | 'OUTLINE_EMPTY' | 'TOO_FEW_BEATS' | 'TOO_MANY_BEATS' | 'DUPLICATE_BEAT' | 'MISSING_FORBIDDEN' | 'MISSING_ENTRY_STATE' | 'MISSING_EXIT_STATE' | 'MISSING_ALLOWED_FACTS' | 'INVALID_FORESHADOW_ACTION' | 'UNSTRUCTURED_BEATS'
   level: 'error' | 'warning'
   message: string
 }
@@ -55,11 +55,11 @@ export function parseChapterOutline(outline: string): ParsedChapterOutline {
   return { requirements: requirements.slice(0, 20), forbiddenEvents, entryState, exitState, allowedFacts, foreshadowActions, invalidForeshadowLines }
 }
 
-export function auditChapterOutline(outline: string, formalEventCount = 0): {
+export function auditChapterOutline(outline: string, formalEventCount = 0, constraints?: import('../../../../contracts/planning/chapter-story-contract').ChapterStoryConstraints): {
   issues: OutlineAuditIssue[]
   metrics: { beatCount: number; forbiddenCount: number; formalEventCount: number; boundaryCount: number; foreshadowCount: number }
 } {
-  const parsed = parseChapterOutline(outline)
+  const parsed = constraints ? { ...constraints, requirements: constraints.beats, invalidForeshadowLines: [] } : parseChapterOutline(outline)
   const issues: OutlineAuditIssue[] = []
   if (!outline.trim()) issues.push({ code: 'OUTLINE_EMPTY', level: 'error', message: '章纲还没有内容。' })
   if (parsed.requirements.length > 0 && parsed.requirements.length < 2) {
@@ -88,7 +88,7 @@ export function auditChapterOutline(outline: string, formalEventCount = 0): {
     issues.push({ code: 'INVALID_FORESHADOW_ACTION', level: 'error', message: '伏笔动作格式应为“伏笔：埋设｜内容”，动作可选埋设、推进（或强化）、误导、保持、回收、废弃。' })
   }
   const unstructured = parsed.requirements.filter((beat) => !['目标', '人物', '地点', '事件', '结果'].every((field) => new RegExp(`${field}\\s*[：:]`).test(beat))).length
-  if (parsed.requirements.length && unstructured) {
+  if (!constraints && parsed.requirements.length && unstructured) {
     issues.push({ code: 'UNSTRUCTURED_BEATS', level: 'warning', message: `${unstructured} 个节点尚未写全“目标、人物、地点、事件、结果”；可以确认，但生成前建议补齐。` })
   }
   return {

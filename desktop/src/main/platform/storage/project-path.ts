@@ -3,6 +3,10 @@ import { realpathSync } from 'node:fs'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { AppError } from '../../core/errors/app-error'
 
+// Windows' native resolver avoids the JS implementation's per-ancestor lstat
+// walk. Resolve both sides afresh so junction changes never use cached trust.
+const realpathForContainment = process.platform === 'win32' ? realpathSync.native : realpathSync
+
 export async function canonicalDirectory(path: string): Promise<string> {
   const value = await realpath(resolve(path))
   if (!(await stat(value)).isDirectory()) {
@@ -39,16 +43,16 @@ export async function projectTargetPath(root: string, candidate: string): Promis
 /** Synchronous counterpart for the existing synchronous SQLite version reader. */
 export function projectExistingPathSync(root: string, candidate: string): string {
   const absolute = lexicalInside(root, candidate)
-  assertRealInside(realpathSync(resolve(root)), realpathSync(absolute))
+  assertRealInside(realpathForContainment(resolve(root)), realpathForContainment(absolute))
   return absolute
 }
 
 export function projectTargetPathSync(root: string, candidate: string): string {
   const absolute = lexicalInside(root, candidate)
-  const realRoot = realpathSync(resolve(root))
+  const realRoot = realpathForContainment(resolve(root))
   let ancestor = dirname(absolute)
   while (true) {
-    try { assertRealInside(realRoot, realpathSync(ancestor)); return absolute }
+    try { assertRealInside(realRoot, realpathForContainment(ancestor)); return absolute }
     catch (error) {
       if (!missing(error)) throw error
       const parent = dirname(ancestor)

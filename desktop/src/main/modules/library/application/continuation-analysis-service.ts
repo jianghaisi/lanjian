@@ -1,10 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { readFile, unlink } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
 import { AppError } from '../../../core/errors/app-error'
 import { projectDirectory } from '../../../platform/storage/project-path'
 import type {
-  AiTask,
   BookProfile,
   CheatSystemData,
   ContinuationAnalysisArea,
@@ -54,10 +53,17 @@ import type { CharacterStateService } from '../../characters/application/charact
 import { writeJson } from '../../../platform/storage/json-store'
 import { ProjectService } from './project-service'
 import { completeStructured, StructuredResponseFailure } from '../../assistant/application/structured-response-repair'
+import type { AiClient } from '../../models/application/ai-client'
+import { creativePolicyRun, type CaptureCreativePolicy, type CreativePolicyRun } from '../../writing-plugins/domain/creative-policy'
+import { creativePolicyContext } from '../../writing-plugins/domain/creative-policy-context'
+import { policyRecords, validatePolicyRecords } from '@lanjian/writing-plugin-contracts'
+import { WorkspaceWriteCoordinator } from '../../../core/application/workspace-write-coordinator'
+import { atomicWriteText } from '../../../platform/storage/atomic-file'
+import type { EventOperationService } from '../../timeline/application/event-operation-service'
+import type { EventProjectionService } from '../../timeline/application/event-projection-service'
 
-type TextGenerator = {
-  complete: (instruction: string, draft?: string, systemContext?: string, task?: AiTask) => Promise<{ content: string }>
-}
+type TextGenerator = Pick<AiClient, 'complete'> & Partial<Pick<AiClient, 'captureRun' | 'modelFor' | 'completionIdentity'>>
+type ContinuationCreativeContext = { capturePolicy: CaptureCreativePolicy; context(readOnly: boolean, policy: CreativePolicyRun): Promise<string>; writes: WorkspaceWriteCoordinator }
 
 type WorkspaceStore = {
   bookProfile: () => Promise<BookProfile>
@@ -91,6 +97,25 @@ type OutlineStore = {
   adoptImportedChapterOutline: (input: { chapterId: number; content: string; currentFingerprint: string; parentTotalFingerprint: string; parentVolumeFingerprint: string }) => Promise<{ content: string; fingerprint: string; status: OutlinePlanningStatus }>
 }
 
+type ExistingPlotEvents = {
+  projection: Pick<EventProjectionService, 'read'>
+  operations: Pick<EventOperationService, 'previewVerifiedManuscript' | 'commitVerifiedManuscript' | 'receipt'>
+}
+
+type ExistingPlotPending = {
+  version: 1
+  candidateId: string
+  candidateFingerprint: string
+  eventFingerprint: string
+  event: TimelineEvent
+  operationId: string
+  requestHash: string
+  manifestId: string
+  sourceFingerprint: string
+  evidenceFingerprint: string
+  createdAt: string
+}
+
 const areas: ContinuationAnalysisArea[] = ['projectDefinition', 'existingPlot', 'characters', 'worldView', 'powerSystem', 'cheatSystem', 'totalOutline', 'volumeOutline', 'chapterOutline']
 const requiredAreas = new Set<ContinuationAnalysisArea>(['projectDefinition', 'existingPlot', 'characters'])
 const labels: Record<ContinuationAnalysisArea, string> = {
@@ -99,20 +124,25 @@ const labels: Record<ContinuationAnalysisArea, string> = {
 }
 
 export class ContinuationAnalysisService {
+  private readonly writes: WorkspaceWriteCoordinator
   constructor(
     private readonly ai: TextGenerator,
     private readonly projects: ProjectService,
     private readonly imports: BookImportService,
     private readonly workspace: WorkspaceStore,
     private readonly characterStates: CharacterStateService,
-    private readonly outlines: OutlineStore
-  ) {}
+    private readonly outlines: OutlineStore,
+    private readonly events?: ExistingPlotEvents,
+    private readonly creativity?: ContinuationCreativeContext
+  ) { this.writes = creativity?.writes ?? new WorkspaceWriteCoordinator() }
 
   async state(): Promise<ContinuationAnalysisState> {
     const latest = await this.imports.latestCompletedManifestId()
     let candidate: ContinuationAnalysisCandidate | null = null
     let blockedReason: string | undefined
-    try { candidate = await this.readCandidate() }
+    try {
+      candidate = await this.readCandidate()
+    }
     catch (error) {
       if (error instanceof AppError && error.code === 'CONFLICT') blockedReason = error.message
       else throw error
@@ -125,21 +155,54 @@ export class ContinuationAnalysisService {
   }
 
   async generate(manifestId: string): Promise<ContinuationAnalysisCandidate> {
+    return this.projects.runInCurrentBook ? this.projects.runInCurrentBook(() => this.generateInBook(manifestId)) : this.generateInBook(manifestId)
+  }
+
+  private async generateInBook(manifestId: string): Promise<ContinuationAnalysisCandidate> {
     // A malformed candidate is evidence. Never replace it through a new model
     // run; the author must first preserve and repair or remove it deliberately.
     await this.readCandidate()
+    const root = await this.projects.currentPath(), physicalIdentity = this.projects.executionIdentity?.physicalIdentity
+    const path = await this.candidatePath(), before = await candidateFileHash(path)
+    const policy = await (this.creativity?.capturePolicy() ?? creativePolicyRun())
+    const ai = this.ai.captureRun ? await this.ai.captureRun(['outline']) : this.ai
+    const model = await ai.modelFor?.('outline'), identity = await ai.completionIdentity?.('outline', model)
     const [evidence, project] = await Promise.all([this.imports.completedManifestEvidence(manifestId), this.projects.currentSummary()])
+    const profile = await this.workspace.bookProfile(), profileHash = contentFingerprint(JSON.stringify(profile))
+    const withPolicy = <T>(operation: () => Promise<T>) => policy.withContext ? policy.withContext(operation) : operation()
+    const context = await withPolicy(async () => this.creativity?.context(false, policy) ?? '')
+    const sources = [...policy.resolve('continuation-analysis'), ...policy.resolve('genre-guidance', { genre: profile.genre || '', subgenre: profile.subgenre || '' })]
+    const methods = creativePolicyContext(sources), contextHash = contentFingerprint(context)
+    if (context.length > 200_000) throw staleAnalysis('旧稿整理的正式材料超出预算，请缩小材料范围。')
+    const guard = async () => {
+      if (resolve(await this.projects.currentPath()) !== resolve(root) || this.projects.executionIdentity?.physicalIdentity !== physicalIdentity) throw staleAnalysis('原作品身份已经变化，请重新发起。')
+      await policy.assertAuthorized?.()
+      const formal = await withPolicy(async () => this.creativity?.context(true, policy) ?? '')
+      if (contentFingerprint(formal) !== contextHash || contentFingerprint(JSON.stringify(await this.workspace.bookProfile())) !== profileHash) throw staleAnalysis('正式依据或作品定义已经变化，请重新发起。')
+      const current = await this.imports.completedManifestEvidence(manifestId)
+      if (current.id !== evidence.id || current.sourceFingerprint !== evidence.sourceFingerprint) throw staleAnalysis('原导入证据已经变化，请重新核对。')
+      if (await this.ai.completionIdentity?.('outline', model) !== identity || await ai.completionIdentity?.('outline', model) !== identity) throw staleAnalysis('原模型配置已经变化，请重新发起。')
+      await policy.assertAuthorized?.()
+      if (resolve(await this.projects.currentPath()) !== resolve(root) || this.projects.executionIdentity?.physicalIdentity !== physicalIdentity) throw staleAnalysis('原作品身份已经变化，请重新发起。')
+    }
+    const beforeCommit = async () => { await guard(); if (await candidateFileHash(path) !== before) throw staleAnalysis('接续候选已经被编辑或采用，请保留新内容并重新发起。'); await policy.assertAuthorized?.() }
     const instruction = buildInstruction(evidence)
     let parsed: ReturnType<typeof parseContinuationAnalysis>
     try {
       parsed = await completeStructured({
-        ai: this.ai, instruction,
-        systemContext: '你是中文长篇小说旧稿整理员。只整理作者提供的证据；推断必须留在候选中，绝不能伪装成正式事实。',
+        ai: { complete: async (...args: Parameters<AiClient['complete']>) => { await beforeCommit(); const result = await withPolicy(() => ai.complete(...args)); await beforeCommit(); return result } }, instruction, model,
+        systemContext: `只返回候选，原证据/作者要求/正式设定/动态境界和固定系统模板优先；创作方法不能确认事实或大纲。\n${methods}\n本书正式上下文：\n${context}`,
         task: 'outline', repairAttempts: (await this.workspace.contextBudgetPreferences()).structuredRepairAttempts,
         parse: (content) => parseContinuationAnalysis(content, evidence)
       })
     } catch (error) {
-      if (error instanceof StructuredResponseFailure) await writeFile(await this.candidatePath(), error.originalContent, 'utf8')
+      if (error instanceof StructuredResponseFailure && Buffer.byteLength(error.originalContent) <= 5 * 1024 * 1024) {
+        await this.writes.run(root, async () => {
+          await beforeCommit()
+          const target = before === null ? path : await projectDirectory(root, join(root, '.webnovel', 'imports', `continuation-analysis-failed-${randomUUID()}.txt`))
+          await atomicWriteText(target, error.originalContent, beforeCommit)
+        })
+      }
       throw error
     }
     const now = new Date().toISOString()
@@ -154,9 +217,10 @@ export class ContinuationAnalysisService {
       status: 'candidate',
       sections: parsed.sections,
       gaps: buildGaps(parsed.sections),
-      rationale: parsed.rationale
+      rationale: parsed.rationale,
+      creativePolicy: policyRecords(sources)
     }
-    await writeJson(await this.candidatePath(), candidate)
+    await this.writes.run(root, async () => { await beforeCommit(); await writeJson(path, candidate, beforeCommit) })
     return structuredClone(candidate)
   }
 
@@ -248,33 +312,39 @@ export class ContinuationAnalysisService {
   }
 
   async previewExistingPlot(candidateId: string): Promise<ContinuationExistingPlotPreview> {
-    const [candidate, timeline] = await Promise.all([this.readCandidate(), this.workspace.timeline()])
+    if (!this.events) return this.previewExistingPlotCompatibility(candidateId)
+    let candidate = await this.readCandidate()
     if (!candidate || candidate.id !== candidateId) throw new AppError('CONFLICT', '接续分析候选已经变化，请重新打开作品后再预览', { recoverable: true })
+    const projection = await this.eventStore().projection.read()
     const section = candidate.sections.find((item) => item.area === 'existingPlot')
     const content = section?.content.trim() || ''
-    const canAdopt = Boolean(content && section?.evidence.length)
+    const alreadyConfirmed = Boolean(candidate.adoption?.existingPlot?.some((item) => item.candidateFingerprint === contentFingerprint(content)))
+    const canAdopt = Boolean(content && section?.evidence.length && !alreadyConfirmed)
     return {
       candidateId: candidate.id,
       area: 'existingPlot',
       candidateEvent: content,
       candidateFingerprint: contentFingerprint(content),
-      currentTimelineFingerprint: timelineFingerprint(timeline.events),
+      currentTimelineFingerprint: projection.approvedRevision,
       evidence: structuredClone(section?.evidence || []),
       canAdopt,
       ...(!content ? { reason: '已有剧情候选还是空白，请先补写并保存候选。' }
-        : !section?.evidence.length ? { reason: '已有剧情没有可核对的原文证据，不能写入正式纪事。' } : {})
+        : !section?.evidence.length ? { reason: '已有剧情没有可核对的原文证据，不能写入正式纪事。' }
+          : alreadyConfirmed ? { reason: '这项已有剧情已经确认过，请勿重复写入。' } : {})
     }
   }
 
   async adoptExistingPlot(input: ContinuationExistingPlotAdoptionInput): Promise<ContinuationExistingPlotAdoptionResult> {
-    const [candidate, currentTimeline] = await Promise.all([this.readCandidate(), this.workspace.timeline()])
+    if (!this.events) return this.adoptExistingPlotCompatibility(input)
+    let candidate = await this.readCandidate()
     if (!candidate || candidate.id !== input.candidateId) throw stalePlotAdoption()
+    const store = this.eventStore(), projection = await store.projection.read()
     const section = candidate.sections.find((item) => item.area === 'existingPlot')
     const content = section?.content.trim() || ''
     if (!content || !section?.evidence.length) throw new AppError('VALIDATION_ERROR', '已有剧情必须同时具备候选内容和原文证据', { recoverable: true })
-    if (contentFingerprint(content) !== input.candidateFingerprint || timelineFingerprint(currentTimeline.events) !== input.currentTimelineFingerprint) throw stalePlotAdoption()
+    if (contentFingerprint(content) !== input.candidateFingerprint || projection.approvedRevision !== input.currentTimelineFingerprint) throw stalePlotAdoption()
     const event: TimelineEvent = {
-      id: deterministicTimelineEventId(candidate.id, input.event),
+      id: '',
       time: input.event.time.trim(),
       characters: input.event.characters.trim(),
       location: input.event.location.trim(),
@@ -282,25 +352,42 @@ export class ContinuationAnalysisService {
     }
     if (!event.time || !event.characters || !event.location || !event.event) throw new AppError('VALIDATION_ERROR', '请完整填写时间、人物、地点和事件', { recoverable: true })
     const eventFingerprintValue = timelineEventFingerprint(event)
-    const existing = currentTimeline.events.find((item) => item.id === event.id)
-    if (existing && timelineEventFingerprint(existing) !== eventFingerprintValue) throw new AppError('CONFLICT', '同一接续事件标识已经对应其他内容，已停止写入', { recoverable: true })
     const previousAdoptions = candidate.adoption?.existingPlot || []
     if (previousAdoptions.some((item) => item.eventFingerprint === eventFingerprintValue)) {
       throw new AppError('CONFLICT', '这项已有剧情已经确认过，请勿重复写入', { recoverable: true })
     }
-    const timeline = existing ? currentTimeline : await this.workspace.saveTimeline([...currentTimeline.events, event])
-    candidate.adoption = {
-      ...candidate.adoption,
-      existingPlot: [...previousAdoptions, {
-        candidateFingerprint: input.candidateFingerprint,
-        eventFingerprint: eventFingerprintValue,
-        timelineEventId: event.id,
-        adoptedAt: new Date().toISOString()
-      }]
+    const verified = await this.verifiedExistingPlotEvidence(candidate, section.evidence)
+    const characters = event.characters.split(/[、,，;；\n]+/u).map((name) => name.trim()).filter(Boolean)
+    if (!characters.length || characters.length > 100 || new Set(characters).size !== characters.length) {
+      throw new AppError('VALIDATION_ERROR', '人物请使用顿号、逗号、分号或换行分隔，且不要重复', { recoverable: true })
     }
-    candidate.updatedAt = new Date().toISOString()
-    await writeJson(await this.candidatePath(), candidate)
-    return { candidate: structuredClone(candidate), event: structuredClone(event), timeline: structuredClone(timeline) }
+    const preview = await store.operations.previewVerifiedManuscript({
+      expectedOrderId: projection.state.order.id,
+      content: { time: event.time, characters, rawCharacters: event.characters, location: event.location,
+        event: event.event, evidenceRefs: [], confidence: 1 },
+      manifestId: verified.id,
+      sourceFingerprint: verified.sourceFingerprint,
+      evidenceFingerprint: verified.evidenceFingerprint,
+      manuscriptSources: verified.manuscriptSources
+    })
+    const pending: ExistingPlotPending = {
+      version: 1, candidateId: candidate.id, candidateFingerprint: input.candidateFingerprint,
+      eventFingerprint: eventFingerprintValue, event, operationId: preview.operationId, requestHash: preview.requestHash,
+      manifestId: verified.id, sourceFingerprint: verified.sourceFingerprint,
+      evidenceFingerprint: verified.evidenceFingerprint, createdAt: new Date().toISOString()
+    }
+    await writeJson(await this.existingPlotPendingPath(), pending)
+    await store.operations.commitVerifiedManuscript(preview.token, async () => {
+      const current = await this.verifiedExistingPlotEvidence(candidate!, section.evidence)
+      if (current.id !== pending.manifestId || current.sourceFingerprint !== pending.sourceFingerprint
+        || current.evidenceFingerprint !== pending.evidenceFingerprint) throw stalePlotAdoption()
+    })
+    candidate = await this.recoverExistingPlot(candidate)
+    const current = await store.projection.read()
+    const adopted = current.approved.find((item) => item.eventId === candidate.adoption?.existingPlot?.at(-1)?.timelineEventId)
+    if (!adopted) throw new AppError('DATABASE_INTEGRITY_FAILED', '已有剧情回执存在，但统一事件投影缺少对应版本。', { recoverable: false })
+    const timeline = { events: current.approved.map(projectedTimelineEvent) }
+    return { candidate: structuredClone(candidate), event: projectedTimelineEvent(adopted), timeline: structuredClone(timeline) }
   }
 
   async previewCharacter(input: ContinuationCharacterPreviewInput): Promise<ContinuationCharacterPreview> {
@@ -723,6 +810,148 @@ export class ContinuationAnalysisService {
     }
   }
 
+  private eventStore(): ExistingPlotEvents {
+    if (!this.events) throw new AppError('FEATURE_UNAVAILABLE', '当前作品尚未接通统一事件采用入口，请先完成事件迁移。', { recoverable: true })
+    return this.events
+  }
+
+  /** Test/legacy composition seam. The desktop runtime always injects the unified event store. */
+  private async previewExistingPlotCompatibility(candidateId: string): Promise<ContinuationExistingPlotPreview> {
+    const [candidate, timeline] = await Promise.all([this.readCandidate(), this.workspace.timeline()])
+    if (!candidate || candidate.id !== candidateId) throw stalePlotAdoption()
+    const section = candidate.sections.find((item) => item.area === 'existingPlot'), content = section?.content.trim() || ''
+    const alreadyConfirmed = Boolean(candidate.adoption?.existingPlot?.some((item) => item.candidateFingerprint === contentFingerprint(content)))
+    return {
+      candidateId: candidate.id, area: 'existingPlot', candidateEvent: content,
+      candidateFingerprint: contentFingerprint(content), currentTimelineFingerprint: timelineFingerprint(timeline.events),
+      evidence: structuredClone(section?.evidence || []), canAdopt: Boolean(content && section?.evidence.length && !alreadyConfirmed),
+      ...(!content ? { reason: '已有剧情候选还是空白，请先补写并保存候选。' }
+        : !section?.evidence.length ? { reason: '已有剧情没有可核对的原文证据，不能写入正式纪事。' }
+          : alreadyConfirmed ? { reason: '这项已有剧情已经确认过，请勿重复写入。' } : {})
+    }
+  }
+
+  private async adoptExistingPlotCompatibility(input: ContinuationExistingPlotAdoptionInput): Promise<ContinuationExistingPlotAdoptionResult> {
+    const [candidate, currentTimeline] = await Promise.all([this.readCandidate(), this.workspace.timeline()])
+    if (!candidate || candidate.id !== input.candidateId) throw stalePlotAdoption()
+    const section = candidate.sections.find((item) => item.area === 'existingPlot'), content = section?.content.trim() || ''
+    if (!content || !section?.evidence.length || contentFingerprint(content) !== input.candidateFingerprint
+      || timelineFingerprint(currentTimeline.events) !== input.currentTimelineFingerprint) throw stalePlotAdoption()
+    const event: TimelineEvent = { id: deterministicTimelineEventId(candidate.id, input.event),
+      time: input.event.time.trim(), characters: input.event.characters.trim(), location: input.event.location.trim(), event: input.event.event.trim() }
+    if (!event.time || !event.characters || !event.location || !event.event) throw new AppError('VALIDATION_ERROR', '请完整填写时间、人物、地点和事件', { recoverable: true })
+    const eventFingerprintValue = timelineEventFingerprint(event), existing = currentTimeline.events.find((item) => item.id === event.id)
+    if (existing && timelineEventFingerprint(existing) !== eventFingerprintValue) throw stalePlotAdoption()
+    const previous = candidate.adoption?.existingPlot || []
+    if (previous.some((item) => item.eventFingerprint === eventFingerprintValue)) throw new AppError('CONFLICT', '这项已有剧情已经确认过，请勿重复写入', { recoverable: true })
+    const timeline = existing ? currentTimeline : await this.workspace.saveTimeline([...currentTimeline.events, event])
+    candidate.adoption = { ...candidate.adoption, existingPlot: [...previous, { candidateFingerprint: input.candidateFingerprint,
+      eventFingerprint: eventFingerprintValue, timelineEventId: event.id, adoptedAt: new Date().toISOString() }] }
+    candidate.updatedAt = new Date().toISOString(); await writeJson(await this.candidatePath(), candidate)
+    return { candidate: structuredClone(candidate), event: structuredClone(event), timeline: structuredClone(timeline) }
+  }
+
+  private async verifiedExistingPlotEvidence(candidate: ContinuationAnalysisCandidate, refs: ContinuationEvidenceRef[]) {
+    const evidence = await this.imports.completedManifestEvidence(candidate.manifestId, true)
+    if (evidence.id !== candidate.manifestId || evidence.sourceFingerprint !== candidate.sourceFingerprint) throw stalePlotAdoption()
+    const manuscriptSources = new Map<string, { chapterId: number; revision: string }>()
+    const normalizedRefs = refs.map((reference) => {
+      const matches = evidence.files.flatMap((file) => file.fileName === reference.fileName && file.ownership === 'owned'
+        && normalizeEvidence(file.content).includes(normalizeEvidence(reference.excerpt))
+        ? (file.chapters ?? []).filter((chapter) => chapter.bodyVersionId
+          && normalizeEvidence(chapter.content).includes(normalizeEvidence(reference.excerpt))) : [])
+      if (matches.length !== 1) {
+        throw new AppError('CONFLICT', `“${reference.fileName}”中的已有剧情证据无法唯一对应当前正式正文版本，请重新分析。`, { recoverable: true })
+      }
+      const match = matches[0]!
+      manuscriptSources.set(`${match.id}\0${match.bodyVersionId}`, { chapterId: match.id, revision: match.bodyVersionId! })
+      return { fileName: reference.fileName, excerpt: reference.excerpt }
+    })
+    const sources = [...manuscriptSources.values()]
+    return {
+      id: evidence.id,
+      sourceFingerprint: evidence.sourceFingerprint,
+      evidenceFingerprint: createHash('sha256').update(JSON.stringify({
+        manifestId: evidence.id, sourceFingerprint: evidence.sourceFingerprint, refs: normalizedRefs, sources
+      })).digest('hex'),
+      manuscriptSources: sources
+    }
+  }
+
+  private async recoverExistingPlot(candidate: ContinuationAnalysisCandidate): Promise<ContinuationAnalysisCandidate> {
+    const pending = await this.readExistingPlotPending()
+    if (!pending) return candidate
+    if (pending.candidateId !== candidate.id) {
+      throw new AppError('CONFLICT', '存在属于另一份接续分析的未决剧情采用记录，已停止覆盖。', { recoverable: true })
+    }
+    const receipt = await this.eventStore().operations.receipt(pending.operationId)
+    if (!receipt) {
+      await this.removeExistingPlotPending()
+      return candidate
+    }
+    if (receipt.kind !== 'create' || receipt.requestHash !== pending.requestHash || !receipt.eventId || !receipt.versionId) {
+      throw new AppError('DATABASE_INTEGRITY_FAILED', '未决剧情采用记录与统一事件回执不一致，已停止恢复。', { recoverable: false })
+    }
+    const section = candidate.sections.find((item) => item.area === 'existingPlot')
+    if (!section || contentFingerprint(section.content) !== pending.candidateFingerprint) {
+      throw new AppError('CONFLICT', '已有剧情候选在提交后发生变化，统一事件已保留，请先核对未决采用记录。', { recoverable: true })
+    }
+    const previous = candidate.adoption?.existingPlot || []
+    if (!previous.some((item) => item.operationId === pending.operationId)) {
+      candidate.adoption = {
+        ...candidate.adoption,
+        existingPlot: [...previous, {
+          candidateFingerprint: pending.candidateFingerprint,
+          eventFingerprint: pending.eventFingerprint,
+          timelineEventId: receipt.eventId,
+          eventVersionId: receipt.versionId,
+          operationId: receipt.operationId,
+          sourceManifestId: pending.manifestId,
+          sourceFingerprint: pending.sourceFingerprint,
+          adoptedAt: receipt.committedAt
+        }]
+      }
+      candidate.updatedAt = new Date().toISOString()
+      await writeJson(await this.candidatePath(), candidate)
+    }
+    await this.removeExistingPlotPending()
+    return structuredClone(candidate)
+  }
+
+  private async readExistingPlotPending(): Promise<ExistingPlotPending | null> {
+    let raw: string
+    try { raw = await readFile(await this.existingPlotPendingPath(), 'utf8') }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
+    try {
+      const value = JSON.parse(raw) as ExistingPlotPending
+      const keys = ['candidateFingerprint', 'candidateId', 'createdAt', 'event', 'eventFingerprint', 'evidenceFingerprint',
+        'manifestId', 'operationId', 'requestHash', 'sourceFingerprint', 'version']
+      if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== keys.sort().join(',')
+        || value.version !== 1 || typeof value.candidateId !== 'string' || typeof value.operationId !== 'string'
+        || !/^[0-9a-f]{64}$/i.test(value.candidateFingerprint) || !/^[0-9a-f]{64}$/i.test(value.eventFingerprint)
+        || !/^[0-9a-f]{64}$/i.test(value.requestHash) || !/^[0-9a-f]{64}$/i.test(value.sourceFingerprint)
+        || !/^[0-9a-f]{64}$/i.test(value.evidenceFingerprint) || typeof value.manifestId !== 'string'
+        || typeof value.createdAt !== 'string' || Number.isNaN(Date.parse(value.createdAt))
+        || !value.event || typeof value.event !== 'object' || timelineEventFingerprint(value.event) !== value.eventFingerprint) throw new Error('invalid')
+      return value
+    } catch {
+      throw new AppError('CONFLICT', '未决剧情采用记录已损坏，已停止覆盖以保护统一事件回执。', { recoverable: true })
+    }
+  }
+
+  private async removeExistingPlotPending(): Promise<void> {
+    try { await unlink(await this.existingPlotPendingPath()) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+  }
+
+  private async existingPlotPendingPath(): Promise<string> {
+    const root = await this.projects.currentPath()
+    return projectDirectory(root, join(root, '.webnovel', 'imports', 'continuation-existing-plot-pending.json'))
+  }
+
   private async readCandidate(): Promise<ContinuationAnalysisCandidate | null> {
     const path = await this.candidatePath()
     let raw: string
@@ -738,7 +967,7 @@ export class ContinuationAnalysisService {
     if (!validStoredCandidate(value) || value.workItemId !== project.id) {
       throw new AppError('CONFLICT', '接续分析候选格式或作品归属异常，已停止覆盖', { recoverable: true })
     }
-    return structuredClone(value)
+    return this.recoverExistingPlot(structuredClone(value))
   }
 
   private async candidatePath(): Promise<string> {
@@ -782,6 +1011,12 @@ export function parseContinuationAnalysis(content: string, evidence: CompletedMa
   return { sections, rationale }
 }
 
+function staleAnalysis(message: string) { return new AppError('CONFLICT', message, { recoverable: true }) }
+async function candidateFileHash(path: string): Promise<string | null> {
+  try { return createHash('sha256').update(await readFile(path)).digest('hex') }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }
+}
+
 function buildInstruction(evidence: CompletedManifestEvidence): string {
   let remaining = 120_000
   const files = evidence.files.map((file, index) => {
@@ -821,6 +1056,7 @@ function buildGaps(sections: ContinuationAnalysisSection[]): ContinuationGap[] {
 function validStoredCandidate(value: unknown): value is ContinuationAnalysisCandidate {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as ContinuationAnalysisCandidate
+  if (candidate.creativePolicy !== undefined) { try { validatePolicyRecords(candidate.creativePolicy) } catch { return false } }
   return candidate.version === 1 && candidate.status === 'candidate' && typeof candidate.id === 'string' && typeof candidate.workItemId === 'string'
     && typeof candidate.manifestId === 'string' && /^[0-9a-f]{64}$/i.test(candidate.sourceFingerprint)
     && Array.isArray(candidate.sections) && candidate.sections.length === areas.length && Array.isArray(candidate.gaps)
@@ -837,9 +1073,14 @@ function validAdoption(value: ContinuationAnalysisCandidate['adoption']): boolea
     && typeof item.adoptedAt === 'string' && !Number.isNaN(Date.parse(item.adoptedAt)))
   const existingPlot = value.existingPlot
   const existingPlotValid = existingPlot === undefined || (Array.isArray(existingPlot) && existingPlot.every((entry) => entry && typeof entry === 'object'
-    && Object.keys(entry).every((key) => key === 'candidateFingerprint' || key === 'eventFingerprint' || key === 'timelineEventId' || key === 'adoptedAt')
+    && Object.keys(entry).every((key) => ['candidateFingerprint', 'eventFingerprint', 'timelineEventId', 'eventVersionId',
+      'operationId', 'sourceManifestId', 'sourceFingerprint', 'adoptedAt'].includes(key))
     && /^[0-9a-f]{64}$/i.test(entry.candidateFingerprint) && /^[0-9a-f]{64}$/i.test(entry.eventFingerprint)
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(entry.timelineEventId)
+    && typeof entry.timelineEventId === 'string' && entry.timelineEventId.trim() === entry.timelineEventId && entry.timelineEventId.length <= 200
+    && (entry.eventVersionId === undefined || (typeof entry.eventVersionId === 'string' && entry.eventVersionId.trim() === entry.eventVersionId && entry.eventVersionId.length <= 200))
+    && (entry.operationId === undefined || (typeof entry.operationId === 'string' && entry.operationId.trim() === entry.operationId && entry.operationId.length <= 200))
+    && (entry.sourceManifestId === undefined || (typeof entry.sourceManifestId === 'string' && entry.sourceManifestId.trim() === entry.sourceManifestId && entry.sourceManifestId.length <= 200))
+    && (entry.sourceFingerprint === undefined || /^[0-9a-f]{64}$/i.test(entry.sourceFingerprint))
     && typeof entry.adoptedAt === 'string' && !Number.isNaN(Date.parse(entry.adoptedAt))))
   const characters = value.characters
   const charactersValid = characters === undefined || (Array.isArray(characters) && characters.every((entry) => entry && typeof entry === 'object'
@@ -920,17 +1161,29 @@ function profileFingerprint(profile: BookProfile): string {
   })).digest('hex')
 }
 
-function timelineFingerprint(events: TimelineEvent[]): string {
-  return createHash('sha256').update(JSON.stringify(events)).digest('hex')
-}
-
 function timelineEventFingerprint(event: TimelineEvent): string {
   return createHash('sha256').update(JSON.stringify({ time: event.time, characters: event.characters, location: event.location, event: event.event })).digest('hex')
+}
+
+function timelineFingerprint(events: TimelineEvent[]): string {
+  return createHash('sha256').update(JSON.stringify(events)).digest('hex')
 }
 
 function deterministicTimelineEventId(candidateId: string, event: Omit<TimelineEvent, 'id'>): string {
   const hex = createHash('sha256').update(`${candidateId}\n${timelineEventFingerprint({ id: '', ...event })}`).digest('hex')
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${((Number.parseInt(hex[16], 16) & 3) | 8).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`
+}
+
+function projectedTimelineEvent(item: Awaited<ReturnType<EventProjectionService['read']>>['approved'][number]): TimelineEvent {
+  return {
+    id: item.eventId,
+    ...(item.content.title !== undefined ? { title: item.content.title } : {}),
+    time: item.content.time,
+    characters: item.content.rawCharacters ?? item.content.characters.join('、'),
+    location: item.content.location,
+    event: item.content.event,
+    ...(item.content.result !== undefined ? { result: item.content.result } : {})
+  }
 }
 
 function staleAdoption(): AppError {

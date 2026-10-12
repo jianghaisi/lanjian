@@ -3,36 +3,59 @@ import { isLocalConnection } from '../../../../contracts/models/local-model-cont
 
 // Explicit live ports preserve the existing book/request scope and draft ownership.
 export function createModelsConnectionsActions(ports) {
+  let savingAi = false, localRefreshGeneration = 0
+
   async function refreshLocalModels() {
-    const settings = await ports.desktop.ai.getSettings()
-    ports.ai.value.modelConfigured = settings.modelConfigured
-    ports.localModelViews.value = await ports.desktop.localModels.list()
+    await readLocalModelState('模型状态暂时无法刷新，请稍后重试。')
+  }
+
+  async function readLocalModelState(failureMessage) {
+    const generation = ++localRefreshGeneration, source = ports.ai.value, bookId = ports.current.value?.id
+    const current = () => generation === localRefreshGeneration && ports.ai.value === source && ports.current.value?.id === bookId
+    try {
+      const [settings, models] = await Promise.all([ports.desktop.ai.getSettings(), ports.desktop.localModels.list()])
+      if (!current()) return
+      source.modelConfigured = settings.modelConfigured
+      ports.localModelViews.value = models
+    } catch {
+      if (!current()) return
+      ports.localModelViews.value = []
+      ports.notice(failureMessage)
+    }
   }
 
   async function useLocalModel(model, target) {
     const patch = localModelAssignment(ports.ai.value, model, target)
-    Object.assign(ports.ai.value, patch)
-    await saveAi()
-    ports.localModelViews.value = await ports.desktop.localModels.list()
+    const saved = await persistAi(patch)
+    if (!saved || ports.ai.value !== saved.settings || ports.current.value?.id !== saved.bookId) return
+    await readLocalModelState('模型方案已保存，但模型状态暂时无法刷新，请稍后重试。')
   }
 
   async function saveAi() {
-    const result = await ports.guard(
-      () =>
-        ports.desktop.ai.updateSettings(
-          ports.plainDto({
-            routingMode: ports.ai.value.routingMode,
-            shared: ports.ai.value.shared,
-            tasks: ports.ai.value.tasks
-          })
-        ),
-      '当前书稿的模型方案已保存'
-    )
-    ports.ai.value = {
-      ...result,
-      connections: result.connections.map((connection) => ({ ...connection, apiKey: '', clearApiKey: false }))
+    await persistAi({})
+  }
+
+  async function persistAi(patch) {
+    if (savingAi) return
+    const source = ports.ai.value, bookId = ports.current.value?.id
+    // Selection stays separate from the displayed projection until main confirms.
+    const update = ports.plainDto({ routingMode: source.routingMode, shared: source.shared, tasks: source.tasks, ...patch })
+    savingAi = true; localRefreshGeneration++
+    try {
+      return await ports.guard(async () => {
+        const result = await ports.desktop.ai.updateSettings(update)
+        if (ports.ai.value !== source || ports.current.value?.id !== bookId) return
+        ports.ai.value = {
+          ...result,
+          connections: result.connections.map((connection) => ({ ...connection, apiKey: '', clearApiKey: false }))
+        }
+        ports.removedAiConnectionIds.value = []
+        ports.notice('当前书稿的模型方案已保存')
+        return { settings: ports.ai.value, bookId }
+      })
+    } finally {
+      savingAi = false
     }
-    ports.removedAiConnectionIds.value = []
   }
 
   function addAiConnection() {

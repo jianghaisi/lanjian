@@ -2,6 +2,7 @@ import type { IdeaGenerationInput, OutlineExpansionTaskInput, PlannedChapterOutl
 import type { PlannedChapterStartInput } from '../index'
 import type { ChapterPlanningUpdate, IdeaSaveInput, PlanningPackageProposal } from '../index'
 import type { ArgsDecoder } from '../core/validation'
+import { decodeCreativePolicyRecords } from '../writing-plugins/creative-policy'
 import {
   boundedInteger,
   boundedString,
@@ -154,7 +155,7 @@ export const decodePlanningPackageArgs: ArgsDecoder<[PlanningPackageProposal]> =
   exactArgs(args, 1)
   const requiredProposalFields = ['id', 'workItemId', 'createdAt', 'basedOn', 'blueprint', 'totalOutline', 'volumes']
   const value = record(args[0], 'proposal')
-  rejectUnknown(value, 'proposal', [...requiredProposalFields, 'chapterSkeleton', 'chapterDetails', 'adoption'])
+  rejectUnknown(value, 'proposal', [...requiredProposalFields, 'chapterSkeleton', 'chapterDetails', 'adoption', 'creativePolicy'])
   for (const key of requiredProposalFields) if (!(key in value)) invalid(`proposal.${key}`, '不能为空')
   const basedOn = exactRecord(value.basedOn, 'proposal.basedOn', [
     'inputFingerprint',
@@ -183,7 +184,7 @@ export const decodePlanningPackageArgs: ArgsDecoder<[PlanningPackageProposal]> =
     }
   })
   const volumes = value.volumes.map((item, index) => {
-    const volume = exactRecord(item, `proposal.volumes[${index}]`, ['order', 'title', 'goal', 'summary', 'ending'])
+    const volume = storyRecord(item, `proposal.volumes[${index}]`, ['order', 'title', 'goal', 'summary', 'ending'])
     const order = boundedInteger(volume.order, `volumes[${index}].order`, 1, 100)
     if (order !== index + 1) invalid(`volumes[${index}].order`, '卷序必须从 1 连续排列')
     return {
@@ -191,7 +192,8 @@ export const decodePlanningPackageArgs: ArgsDecoder<[PlanningPackageProposal]> =
       title: requiredString(volume.title, `volumes[${index}].title`, 200),
       goal: requiredString(volume.goal, `volumes[${index}].goal`, 10_000),
       summary: requiredString(volume.summary, `volumes[${index}].summary`, 100_000),
-      ending: requiredString(volume.ending, `volumes[${index}].ending`, 20_000)
+      ending: requiredString(volume.ending, `volumes[${index}].ending`, 20_000),
+      ...(volume.storyContent !== undefined ? { storyContent: requiredString(volume.storyContent, 'volume.storyContent', 100_000) } : {})
     }
   })
   const digest = (input: unknown, field: string) => {
@@ -201,11 +203,12 @@ export const decodePlanningPackageArgs: ArgsDecoder<[PlanningPackageProposal]> =
   }
   let chapterSkeleton: PlanningPackageProposal['chapterSkeleton']
   if (value.chapterSkeleton !== undefined) {
-    const skeleton = exactRecord(value.chapterSkeleton, 'proposal.chapterSkeleton', [
+    const skeletonRecord = record(value.chapterSkeleton, 'proposal.chapterSkeleton')
+    const skeleton = exactRecord(skeletonRecord, 'proposal.chapterSkeleton', [
       'generatedAt',
       'basedOn',
       'targetWordsPerChapter',
-      'chapters'
+      'chapters', ...('creativePolicy' in skeletonRecord ? ['creativePolicy'] : [])
     ])
     const skeletonBasedOn = exactRecord(skeleton.basedOn, 'proposal.chapterSkeleton.basedOn', [
       'totalOutlineFingerprint',
@@ -261,6 +264,7 @@ export const decodePlanningPackageArgs: ArgsDecoder<[PlanningPackageProposal]> =
         invalid('proposal.chapterSkeleton.chapters', `第 ${volume.order} 卷的卷内章序必须从 1 连续排列`)
     }
     chapterSkeleton = {
+      ...(skeleton.creativePolicy === undefined ? {} : { creativePolicy: decodeCreativePolicyRecords(skeleton.creativePolicy) }),
       generatedAt: requiredString(skeleton.generatedAt, 'proposal.chapterSkeleton.generatedAt', 64),
       basedOn: {
         totalOutlineFingerprint: digest(
@@ -286,17 +290,20 @@ export const decodePlanningPackageArgs: ArgsDecoder<[PlanningPackageProposal]> =
     if (!Array.isArray(value.chapterDetails) || value.chapterDetails.length > volumes.length)
       invalid('proposal.chapterDetails', '必须是每卷至多一项的数组')
     chapterDetails = value.chapterDetails.map((item, volumeIndex) => {
-      const detail = exactRecord(item, `proposal.chapterDetails[${volumeIndex}]`, [
+      const detailRecord = record(item, `proposal.chapterDetails[${volumeIndex}]`)
+      const detail = exactRecord(detailRecord, `proposal.chapterDetails[${volumeIndex}]`, [
         'volume',
         'generatedAt',
         'basedOn',
-        'chapters'
+        'chapters', ...('creativePolicy' in detailRecord ? ['creativePolicy'] : [])
       ])
       const volume = boundedInteger(detail.volume, `proposal.chapterDetails[${volumeIndex}].volume`, 1, volumes.length)
-      const basedOnDetail = exactRecord(detail.basedOn, `proposal.chapterDetails[${volumeIndex}].basedOn`, [
+      const basedOnDetail = record(detail.basedOn, `proposal.chapterDetails[${volumeIndex}].basedOn`)
+      rejectUnknown(basedOnDetail, `proposal.chapterDetails[${volumeIndex}].basedOn`, [
         'totalOutlineFingerprint',
         'volumeOutlineFingerprint',
-        'skeletonFingerprint'
+        'skeletonFingerprint',
+        'formalSkeletonFingerprint'
       ])
       if (!Array.isArray(detail.chapters) || detail.chapters.length < 1 || detail.chapters.length > 500)
         invalid(`proposal.chapterDetails[${volumeIndex}].chapters`, '必须包含 1 到 500 章')
@@ -304,7 +311,7 @@ export const decodePlanningPackageArgs: ArgsDecoder<[PlanningPackageProposal]> =
       if (!expectedSkeleton.length || expectedSkeleton.length !== detail.chapters.length)
         invalid(`proposal.chapterDetails[${volumeIndex}].chapters`, '必须与当前章节骨架中的本卷章节一一对应')
       const chapters = detail.chapters.map((raw, chapterIndex) => {
-        const entry = exactRecord(raw, `proposal.chapterDetails[${volumeIndex}].chapters[${chapterIndex}]`, [
+        const entry = storyRecord(raw, `proposal.chapterDetails[${volumeIndex}].chapters[${chapterIndex}]`, [
           'chapter',
           'volume',
           'volumeChapter',
@@ -350,6 +357,7 @@ export const decodePlanningPackageArgs: ArgsDecoder<[PlanningPackageProposal]> =
           volume,
           volumeChapter,
           title: skeletonEntry.title,
+          ...(entry.storyContent !== undefined ? { storyContent: requiredString(entry.storyContent, 'chapterDetail.storyContent', 100_000) } : {}),
           entryState: requiredString(entry.entryState, 'chapterDetail.entryState', 5_000),
           beats: strings(entry.beats, 'chapterDetail.beats', 2, 8, 5_000),
           exitState: requiredString(entry.exitState, 'chapterDetail.exitState', 5_000),
@@ -360,6 +368,7 @@ export const decodePlanningPackageArgs: ArgsDecoder<[PlanningPackageProposal]> =
       })
       return {
         volume,
+        ...(detail.creativePolicy === undefined ? {} : { creativePolicy: decodeCreativePolicyRecords(detail.creativePolicy) }),
         generatedAt: requiredString(detail.generatedAt, 'chapterDetail.generatedAt', 64),
         basedOn: {
           totalOutlineFingerprint: digest(
@@ -370,7 +379,10 @@ export const decodePlanningPackageArgs: ArgsDecoder<[PlanningPackageProposal]> =
             basedOnDetail.volumeOutlineFingerprint,
             'chapterDetail.volumeOutlineFingerprint'
           ),
-          skeletonFingerprint: digest(basedOnDetail.skeletonFingerprint, 'chapterDetail.skeletonFingerprint')
+          skeletonFingerprint: digest(basedOnDetail.skeletonFingerprint, 'chapterDetail.skeletonFingerprint'),
+          ...(basedOnDetail.formalSkeletonFingerprint === undefined ? {} : {
+            formalSkeletonFingerprint: digest(basedOnDetail.formalSkeletonFingerprint, 'chapterDetail.formalSkeletonFingerprint')
+          })
         },
         chapters
       }
@@ -554,6 +566,7 @@ export const decodePlanningPackageArgs: ArgsDecoder<[PlanningPackageProposal]> =
   return [
     {
       id: requiredString(value.id, 'proposal.id', 100),
+      ...(value.creativePolicy === undefined ? {} : { creativePolicy: decodeCreativePolicyRecords(value.creativePolicy) }),
       workItemId: requiredString(value.workItemId, 'proposal.workItemId', 32_767),
       createdAt: requiredString(value.createdAt, 'proposal.createdAt', 64),
       basedOn: {
@@ -913,4 +926,22 @@ export const decodeOutlineUpdateArgs: ArgsDecoder<[number | 'total', string]> = 
 export const decodeChapterOutlineUpdateArgs: ArgsDecoder<[number, string]> = (args) => {
   exactArgs(args, 2)
   return [chapterId(args[0]), boundedString(args[1], 'content', planningLimits.maxOutlineLength)]
+}
+
+export const decodeFormalSkeletonPreviewArgs: ArgsDecoder<[string, number]> = args => {
+  exactArgs(args, 2)
+  return [requiredString(args[0], 'proposalId', 200), boundedInteger(args[1], 'volume', 1, 1000)]
+}
+export const decodeFormalSkeletonTokenArgs: ArgsDecoder<[string]> = args => {
+  exactArgs(args, 1)
+  return [uuid(args[0], 'token')]
+}
+
+export { decodeChapterEventAdoptionArgs } from './chapter-event-contracts'
+
+function storyRecord(value: unknown, field: string, required: string[]) {
+  const result = record(value, field)
+  rejectUnknown(result, field, [...required, 'storyContent'])
+  for (const key of required) if (!(key in result)) invalid(`${field}.${key}`, '不能为空')
+  return result
 }

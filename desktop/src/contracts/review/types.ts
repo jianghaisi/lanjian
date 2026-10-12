@@ -351,6 +351,15 @@ export type AdherenceBeatResult = {
 
 export type AdherenceForeshadowResult = { id: string; status: 'satisfied' | 'missing' | 'violated'; evidence: string }
 
+export type LiteraryFinding = {
+  category: 'scene-motivation' | 'character-voice' | 'relationship-continuity' | 'causal-gap' | 'scene-function'
+  severity: 'blocking' | 'advice'
+  candidateQuote: string
+  sourceQuote: string
+  reason: string
+  correction: string
+}
+
 export type AdherenceReport = {
   /** Older persisted proposals without this field were produced by the full AI review path. */
   reviewMode?: 'fast' | 'full'
@@ -363,4 +372,6 @@ export type AdherenceReport = {
   introducedFacts: string[]
   characterChanges: CharacterDynamicChange[]
   characterConflicts: CharacterStableConflict[]
+  /** Absent in historical reports; an empty list means the new review actually ran. */
+  literaryFindings?: LiteraryFinding[]
 }

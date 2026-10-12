@@ -1,0 +1,254 @@
+{
+  "apiVersion": 1,
+  "id": "lanjian.official.story-planning",
+  "name": "故事逐层展开",
+  "version": "1.2.0",
+  "description": "岚笺默认的分层创作方法。策略来自本包声明资产，可派生为个人插件替换；正式依据和作者确认仍由应用检查。",
+  "runtime": "quickjs-js",
+  "entry": "main.js",
+  "capabilities": [],
+  "tools": [],
+  "categoryIds": [
+    "workflow",
+    "worldbuilding",
+    "plot"
+  ],
+  "tags": [
+    "创作方法",
+    "分层大纲"
+  ],
+  "assets": [
+    "foundation.md",
+    "blueprint.md",
+    "total-outline.md",
+    "volume-outline.md",
+    "stage-outline.md",
+    "chapter-outline.md",
+    "chapter-skeleton.md",
+    "outline-review.md",
+    "genre-guidance.txt",
+    "field-edit.md",
+    "characters.md",
+    "events.md",
+    "revision.md"
+  ],
+  "contributions": [
+    {
+      "id": "foundation",
+      "name": "作品设定创作方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "worldbuilding"
+      ],
+      "kind": "creative-policy",
+      "slot": "foundation",
+      "mode": "replace",
+      "asset": "foundation.md"
+    },
+    {
+      "id": "blueprint",
+      "name": "创作蓝图方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "planning"
+      ],
+      "kind": "creative-policy",
+      "slot": "blueprint",
+      "mode": "replace",
+      "asset": "blueprint.md"
+    },
+    {
+      "id": "total-outline",
+      "name": "总纲方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "planning"
+      ],
+      "kind": "creative-policy",
+      "slot": "total-outline",
+      "mode": "replace",
+      "asset": "total-outline.md"
+    },
+    {
+      "id": "volume-outline",
+      "name": "卷纲方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "planning"
+      ],
+      "kind": "creative-policy",
+      "slot": "volume-outline",
+      "mode": "replace",
+      "asset": "volume-outline.md"
+    },
+    {
+      "id": "stage-outline",
+      "name": "阶段纲方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "planning"
+      ],
+      "kind": "creative-policy",
+      "slot": "stage-outline",
+      "mode": "replace",
+      "asset": "stage-outline.md"
+    },
+    {
+      "id": "chapter-outline",
+      "name": "章纲方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "planning"
+      ],
+      "kind": "creative-policy",
+      "slot": "chapter-outline",
+      "mode": "replace",
+      "asset": "chapter-outline.md"
+    },
+    {
+      "id": "chapter-skeleton",
+      "name": "章节安排方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "planning"
+      ],
+      "kind": "creative-policy",
+      "slot": "chapter-skeleton",
+      "mode": "replace",
+      "asset": "chapter-skeleton.md"
+    },
+    {
+      "id": "outline-review",
+      "name": "大纲复核与有限修正方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "review"
+      ],
+      "kind": "creative-policy",
+      "slot": "outline-review",
+      "mode": "replace",
+      "asset": "outline-review.md"
+    },
+    {
+      "id": "genre-guidance",
+      "name": "题材指导方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "genre": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "subgenre": {
+            "type": "string",
+            "maxLength": 120
+          }
+        },
+        "additionalProperties": false
+      },
+      "stages": [
+        "planning"
+      ],
+      "kind": "creative-policy",
+      "slot": "genre-guidance",
+      "mode": "replace",
+      "asset": "genre-guidance.txt"
+    },
+    {
+      "id": "field-edit",
+      "name": "指定字段创作方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "assistant"
+      ],
+      "kind": "creative-policy",
+      "slot": "field-edit",
+      "mode": "replace",
+      "asset": "field-edit.md"
+    },
+    {
+      "id": "characters",
+      "name": "人物创作方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "worldbuilding"
+      ],
+      "kind": "creative-policy",
+      "slot": "characters",
+      "mode": "replace",
+      "asset": "characters.md"
+    },
+    {
+      "id": "events",
+      "name": "事件创作方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "planning"
+      ],
+      "kind": "creative-policy",
+      "slot": "events",
+      "mode": "replace",
+      "asset": "events.md"
+    },
+    {
+      "id": "revision",
+      "name": "故事修改方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "review"
+      ],
+      "kind": "creative-policy",
+      "slot": "revision",
+      "mode": "replace",
+      "asset": "revision.md"
+    }
+  ]
+}

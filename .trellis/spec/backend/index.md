@@ -4,6 +4,8 @@
 
 ## Active contracts
 
+- [公开发布与 Windows 安装验证](v3-public-release.md)
+
 - [Desktop source, tests and repository layout](v3-repository-layout.md)
 
 - [Runtime and process boundaries](v3-runtime-boundaries.md)

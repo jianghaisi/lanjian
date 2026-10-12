@@ -1,0 +1,197 @@
+/* Library-only presentation: keep preference owners and standalone pet styles intact. */
+.local-appearance-dialog.library-preferences-dialog {
+  padding: 0;
+  block-size: calc(100dvb - var(--archive-topbar-size, 3.125rem) - 2.5rem);
+  overflow: hidden;
+  background: var(--surface);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.local-appearance-dialog.library-preferences-dialog[open] {
+  display: grid;
+}
+/* Native close releases focus immediately; only its painted surface retires. */
+dialog.local-appearance-dialog.library-preferences-dialog {
+  opacity: 0;
+  translate: 12px 0;
+  pointer-events: none;
+  transition: opacity 180ms ease, translate 240ms var(--interaction-ease),
+    display 240ms allow-discrete, overlay 240ms allow-discrete;
+}
+dialog.local-appearance-dialog.library-preferences-dialog[open] {
+  opacity: 1;
+  translate: 0 0;
+  pointer-events: auto;
+  animation: none;
+}
+dialog.local-appearance-dialog.library-preferences-dialog > .library-settings-content {
+  animation: none;
+}
+dialog.local-appearance-dialog.library-preferences-dialog::backdrop {
+  opacity: 0;
+  pointer-events: none;
+  animation: none;
+  transition: opacity 180ms ease, display 240ms allow-discrete, overlay 240ms allow-discrete;
+}
+dialog.local-appearance-dialog.library-preferences-dialog[open]::backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+@starting-style {
+  dialog.local-appearance-dialog.library-preferences-dialog[open] { opacity: 0; translate: 12px 0; }
+  dialog.local-appearance-dialog.library-preferences-dialog[open]::backdrop { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  dialog.local-appearance-dialog.library-preferences-dialog,
+  dialog.local-appearance-dialog.library-preferences-dialog::backdrop { transition: none !important; translate: none !important; }
+}
+.local-appearance-dialog.library-preferences-dialog > header {
+  position: relative;
+  margin: 0;
+  padding-inline: 1.5rem;
+  background: var(--surface);
+  box-shadow: none;
+}
+.library-preferences-dialog .library-settings-content {
+  container: library-settings / inline-size;
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 1.5rem;
+  scroll-padding-block: 1.5rem;
+  color: var(--ink);
+  background: var(--surface);
+  font: .875rem/1.6 var(--sans);
+}
+.library-settings-content :is(.theme-settings, .library-appearance-settings) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.library-settings-content :is(.library-appearance-settings, .pet-settings, .microphone-settings, .companion-voice-settings, .dialogue-settings, .loader-preferences, .library-settings-links) {
+  margin-block: 1.75rem 0;
+  padding-block: 1.5rem 0;
+  border-block-start: 1px solid var(--line);
+}
+.library-settings-content :is(h3, .dialogue-settings > legend > span) {
+  margin: 0;
+  padding: 0 0 0 .75rem;
+  border-inline-start: 3px solid var(--jade);
+  color: var(--ink);
+  font: 600 1rem/1.4 var(--sans);
+  letter-spacing: normal;
+}
+.library-settings-content :is(.theme-settings, .library-appearance-settings, .companion-voice-settings) > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-block: 0 1rem;
+}
+.library-settings-content :is(.pet-settings, .microphone-settings) > p,
+.library-settings-content .loader-preferences > header > p {
+  margin-block: .5rem 1rem;
+}
+.library-settings-content :is(.pet-settings, .microphone-settings, .companion-voice-settings, .dialogue-settings, .loader-preferences) {
+  font: .875rem/1.6 var(--sans);
+}
+.library-settings-content :is(.pet-settings, .microphone-settings, .companion-voice-settings, .dialogue-settings) :is(p, small),
+.library-settings-content :is(header small, header > span, .loader-preferences > header > p) {
+  color: var(--muted);
+  font: .75rem/1.6 var(--sans);
+  letter-spacing: normal;
+}
+/* These are decorative category stamps, not status or settings controls. */
+.library-settings-content .companion-voice-settings header > div > small,
+.library-settings-content .companion-voice-settings h3 > svg,
+.library-settings-content .loader-preferences > header > span {
+  display: none;
+}
+.library-settings-content :is(.pet-settings, .microphone-settings) > label,
+.library-settings-content :is(.sound-toggle, .sound-volume, .sound-voice) {
+  min-block-size: 3.25rem;
+  padding-block: .5rem;
+  gap: 1rem;
+  border-block-end: 1px solid var(--line);
+  font: .875rem/1.5 var(--sans);
+}
+.library-settings-content :is(.pet-settings, .microphone-settings) > label > span,
+.library-settings-content .sound-toggle > span {
+  min-inline-size: 0;
+  display: grid;
+  gap: .25rem;
+}
+.library-settings-content :is(.pet-settings, .microphone-settings) label select {
+  flex: 0 1 18rem;
+  inline-size: 45%;
+  max-inline-size: 45%;
+  min-inline-size: 0;
+}
+.library-settings-content :is(.pet-settings, .microphone-settings, .companion-voice-settings, .dialogue-settings) :is(button, select) {
+  min-block-size: 2.375rem;
+  padding: .45rem .75rem;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  color: var(--ink);
+  background: var(--surface);
+  font: .8125rem/1.5 var(--sans);
+}
+.library-settings-content :is(.pet-settings, .microphone-settings, .companion-voice-settings) input[type="checkbox"] {
+  flex: none;
+  inline-size: 1rem;
+  block-size: 1rem;
+  margin: 0;
+  accent-color: var(--jade);
+}
+.library-settings-content .sound-controls {
+  gap: 0 1.5rem;
+}
+.library-settings-content .sound-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-self: stretch;
+}
+.library-settings-content .sound-toggle > input { grid-column: 2; grid-row: 1; }
+.library-settings-content .sound-toggle > span { grid-column: 1; grid-row: 1; }
+.library-settings-content .sound-preview { padding-block-start: 1rem; }
+.library-settings-content .sound-voice { margin-block-start: .5rem; }
+.library-settings-content .sound-voice > span { flex: none; }
+.library-settings-content .sound-controls small { margin: 0; }
+.library-settings-content .dialogue-settings {
+  padding-inline: 0;
+  border-inline: 0;
+  border-block-end: 0;
+  background: transparent;
+}
+.library-settings-content .dialogue-settings > legend {
+  float: inline-start;
+  box-sizing: border-box;
+  inline-size: 100%;
+  padding: 0;
+  justify-content: space-between;
+  margin-block-end: 1rem;
+}
+.library-settings-content .dialogue-settings-controls { clear: both; }
+.library-settings-content .dialogue-settings label { min-block-size: 2.375rem; font: .8125rem/1.5 var(--sans); }
+.library-settings-content .microphone-settings > button { max-inline-size: 100%; }
+.library-settings-content :is(button, input, select, summary):focus-visible { outline: 2px solid var(--jade); outline-offset: 3px; }
+.library-settings-content :is(.pet-settings, .microphone-settings, .companion-voice-settings, .dialogue-settings) [role="alert"] { color: var(--danger); }
+.library-settings-content .library-art-choices span { white-space: normal; }
+
+/* The panel is only 71% of the window: reflow from its own available width. */
+@container library-settings (max-width: 50rem) {
+  .library-settings-content .character-sliders { grid-template-columns: minmax(0, 1fr); }
+  .library-settings-content .dialogue-settings-controls { grid-template-columns: minmax(0, 1fr); }
+}
+@container library-settings (max-width: 42rem) {
+  .library-settings-content .sound-controls { grid-template-columns: minmax(0, 1fr); }
+  .library-settings-content :is(.theme-choices, .background-choices) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .library-settings-content .boot-style-options { grid-template-columns: minmax(0, 1fr); }
+  .library-settings-content .boot-style-options button { padding: 1rem; }
+  .library-settings-content .boot-style-options strong { font-size: 1rem; }
+}
+@container library-settings (max-width: 30rem) {
+  .library-settings-content :is(.boot-palette-options, .loader-theme-options) { grid-template-columns: minmax(0, 1fr); }
+  .library-settings-content .theme-description strong { flex-wrap: wrap; }
+}

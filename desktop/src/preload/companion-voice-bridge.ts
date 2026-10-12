@@ -4,6 +4,11 @@ import { unwrapValidatedIpcResponse } from '../contracts/core/ipc-response'
 export function createCompanionVoiceBridge(): CompanionVoiceApi {
   const invokeValidated = async <T>(channel: string, ...args: unknown[]): Promise<T> => unwrapValidatedIpcResponse<T>(channel, await ipcRenderer.invoke(channel, ...args))
   return {
+    onReset: listener => {
+      const callback = (_event: Electron.IpcRendererEvent, id: unknown) => { if (typeof id === 'string' && /^[\w-]{1,80}$/.test(id)) listener(id) }
+      ipcRenderer.on('companion-voice:reset', callback)
+      return () => ipcRenderer.removeListener('companion-voice:reset', callback)
+    },
     status: () => invokeValidated('companion-voice:status'),
     configure: options => invokeValidated('companion-voice:configure', { ...options }),
     warmup: () => invokeValidated('companion-voice:warmup'),

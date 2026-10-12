@@ -1,5 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { FactExtractionService } from '../application/fact-extraction-service'
+import { stat } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { assertJson } from '@lanjian/writing-plugin-contracts'
+import { FactExtractionService, decodeFactExtractionRecovery, type FactExtractionPrepared, type FactExtractionRecovery } from '../application/fact-extraction-service'
 import { FactExtractionJobService } from '../application/fact-extraction-job-service'
 import { ProjectService } from '../../library/application/project-service'
 import { SqliteManuscriptService } from '../../manuscript/application/sqlite-manuscript-service'
@@ -14,13 +17,27 @@ interface Dependencies {
   factExtraction: FactExtractionService
   withWorkspaceDatabaseWrite: <T>(
     workItemId: string,
-    operation: (database: import('../../../core/ports/workspace-database').WorkspaceDatabasePort) => T | Promise<T>
+    operation: (database: import('../../../core/ports/workspace-database').WorkspaceDatabasePort) => T | Promise<T>,
+    beforeWrite?: () => Promise<void>
   ) => Promise<T>
   projects: ProjectService
 }
 
 export function createFactExtractionRuntime(dependencies: Dependencies) {
   const { sqliteManuscripts, databases, factExtraction, withWorkspaceDatabaseWrite, projects } = dependencies
+  const prepared = new Map<string, FactExtractionPrepared>()
+  const key = (root: string, id: string) => JSON.stringify([resolve(root), id])
+  const bookIdentity = async (root: string) => {
+    if (resolve(await projects.currentPath()) !== resolve(root)) throw stale()
+    const physical = await stat(join(root, '.webnovel', 'workspace.sqlite'), { bigint: true })
+    return hash(JSON.stringify([resolve(root), projects.executionIdentity?.physicalIdentity ?? null, String(physical.dev), String(physical.ino), String(physical.birthtimeNs)]))
+  }
+  const assertPhysical = async (root: string, original?: string) => { if (original && await bookIdentity(root) !== original) throw stale() }
+  const readTask = async (root: string, id: string) => {
+    const db = await databases.openDocumentReviewReadOnly(root)
+    if (!db) throw stale()
+    try { return db.taskRun(id) } finally { db.close() }
+  }
   const toFactExtractionJob = (
     task: import('../../../core/ports/workspace-database').WorkspaceTaskRunRecord,
     database?: import('../../../core/ports/workspace-database').WorkspaceDatabasePort
@@ -51,22 +68,13 @@ export function createFactExtractionRuntime(dependencies: Dependencies) {
   const factExtractionJobs = new FactExtractionJobService(
     {
       extract: async (workItemId, chapterId, signal, taskId) => {
-        if (!(await sqliteManuscripts.active(workItemId)))
-          throw new AppError('CONFLICT', '请先切换为 SQLite 正式数据后再提炼事实。', { recoverable: true })
-        const database = await databases.openExisting(workItemId)
-        if (!database) throw new AppError('FEATURE_UNAVAILABLE', '变化提炼任务数据库不可用。', { recoverable: true })
-        let bodyVersionId = ''
-        try {
-          const task = database.taskRun(taskId)
-          bodyVersionId = task?.baseBodyVersionId ?? ''
-        } finally {
-          database.close()
-        }
-        if (!bodyVersionId) throw new AppError('CONFLICT', '变化提炼任务没有绑定确认正文版本。', { recoverable: true })
-        const chapter = await sqliteManuscripts.bodyVersion(workItemId, chapterId, bodyVersionId)
+        const run = prepared.get(key(workItemId, taskId))
+        if (!run || run.chapter.id !== chapterId) throw stale()
+        const chapter = run.chapter, bodyVersionId = chapter.bodyVersionId!
+        const guard = () => factExtraction.assertPrepared(run, signal)
         let changes
         try {
-          changes = await factExtraction.extract(chapter, signal)
+          changes = await factExtraction.extract(chapter, signal, run)
         } catch (error) {
           if (error instanceof StructuredResponseFailure && !signal.aborted) {
             await withWorkspaceDatabaseWrite(workItemId, (database) =>
@@ -84,12 +92,12 @@ export function createFactExtractionRuntime(dependencies: Dependencies) {
                   repairAttempts: error.repairAttempts,
                   failure: 'structured-response-invalid'
                 })
-              })
+              }), guard
             )
           }
           throw error
         }
-        return sqliteManuscripts.recordCharacterFactCandidates(workItemId, chapter, changes, taskId, taskId)
+        return sqliteManuscripts.recordCharacterFactCandidates(workItemId, chapter, changes, taskId, taskId, guard)
       }
     },
     {
@@ -107,20 +115,25 @@ export function createFactExtractionRuntime(dependencies: Dependencies) {
         })
       },
       create: async ({ id, workItemId, chapterId, parentTaskId }) => {
-        if (!(await sqliteManuscripts.active(workItemId)))
-          throw new AppError('CONFLICT', '请先切换为 SQLite 正式数据后再提炼事实。', { recoverable: true })
-        return withWorkspaceDatabaseWrite(workItemId, (database) => {
-          const planning = database.chapterPlanning(chapterId)
-          if (!planning.confirmedBodyVersionId)
-            throw new AppError('CONFLICT', '请先确认本章正文，再提炼重要变化。', { recoverable: true })
-          const chapter = database.formalBodyVersion(chapterId, planning.confirmedBodyVersionId)
-          const parent = parentTaskId ? database.taskRun(parentTaskId) : null
-          if (
-            parentTaskId &&
-            (!parent || parent.taskType !== 'fact_extraction' || parent.legacyChapterId !== chapterId)
-          ) {
-            throw new AppError('CONFLICT', '变化提炼的来源任务不一致，请重新打开本章。', { recoverable: true })
-          }
+        const parent = parentTaskId ? await readTask(workItemId, parentTaskId) : null
+        if (parentTaskId && (!parent || parent.taskType !== 'fact_extraction' || parent.legacyChapterId !== chapterId)) throw stale()
+        const previous = parent ? checkpoint(parent.checkpointJson) : undefined
+        if (parent && (!previous?.recovery || previous.workItemId !== workItemId || previous.chapterId !== chapterId || parent.baseBodyVersionId !== previous.bodyVersionId)) throw stale()
+        // Pin the real policy/model before asynchronous source and formal reads.
+        const captured = await factExtraction.capture(previous?.recovery)
+        const chapter = await sqliteManuscripts.factExtractionSource(workItemId, chapterId, previous?.bodyVersionId)
+        if (parent && parent.contentHash !== hash(chapter.content)) throw stale()
+        const physical = await bookIdentity(workItemId), chapterHash = hash(JSON.stringify(chapter))
+        const assertSource = async () => {
+          const source = await sqliteManuscripts.factExtractionSource(workItemId, chapterId, chapter.bodyVersionId)
+          if (hash(JSON.stringify(source)) !== chapterHash) throw stale()
+          await assertPhysical(workItemId, physical)
+        }
+        const run = await factExtraction.prepare(chapter, physical, assertSource, captured), recovery = factExtraction.snapshotForRecovery(run)
+        const saved = { version: 1, workItemId, chapterId, bodyVersionId: chapter.bodyVersionId!, phase: 'queued', recovery }
+        assertJson(saved, 384 * 1024)
+        const job = await withWorkspaceDatabaseWrite(workItemId, (database) => {
+          if (database.chapterPlanning(chapterId).confirmedBodyVersionId !== chapter.bodyVersionId) throw stale()
           database.createTaskRun({
             id,
             legacyChapterId: chapterId,
@@ -129,19 +142,15 @@ export function createFactExtractionRuntime(dependencies: Dependencies) {
             idempotencyKey: id,
             ...(parentTaskId ? { parentTaskRunId: parentTaskId } : {}),
             ...(parent ? { attempt: parent.attempt + 1 } : {}),
-            baseBodyVersionId: planning.confirmedBodyVersionId,
+            baseBodyVersionId: chapter.bodyVersionId!,
             contentHash: createHash('sha256').update(chapter.content).digest('hex'),
-            checkpointJson: JSON.stringify({
-              version: 1,
-              workItemId,
-              chapterId,
-              bodyVersionId: chapter.currentVersionId,
-              phase: 'queued'
-            })
+            checkpointJson: JSON.stringify(saved)
           })
           const preparing = database.transitionTaskRun({ id, status: 'preparing' })
           return toFactExtractionJob(database.transitionTaskRun({ id: preparing.id, status: 'running' }), database)
-        })
+        }, () => factExtraction.assertPrepared(run))
+        prepared.set(key(workItemId, id), run)
+        return job
       },
       read: async (workItemId, id) => {
         const database = await databases.openExisting(workItemId)
@@ -175,7 +184,14 @@ export function createFactExtractionRuntime(dependencies: Dependencies) {
         }
       },
       transition: async ({ workItemId, id, status, error }) => {
-        return withWorkspaceDatabaseWrite(workItemId, (database) => {
+        const run = prepared.get(key(workItemId, id)), task = await readTask(workItemId, id)
+        if (!task || task.taskType !== 'fact_extraction') throw stale()
+        const original = checkpoint(task.checkpointJson).recovery?.bookIdentity
+        const guard = async () => {
+          await assertPhysical(workItemId, original)
+          if (status === 'completed') { if (!run) throw stale(); await factExtraction.assertPrepared(run) }
+        }
+        const result = await withWorkspaceDatabaseWrite(workItemId, (database) => {
           const current = database.taskRun(id)
           if (!current || current.taskType !== 'fact_extraction')
             throw new AppError('NOT_FOUND', '变化提炼任务不存在。', { recoverable: true })
@@ -188,11 +204,27 @@ export function createFactExtractionRuntime(dependencies: Dependencies) {
             }),
             database
           )
-        })
+        }, guard)
+        if (status !== 'running') prepared.delete(key(workItemId, id))
+        return result
       }
     }
   )
   return { factExtractionJobs }
+}
+
+const hash = (text: string) => createHash('sha256').update(text).digest('hex')
+const stale = () => new AppError('CONFLICT', '原事实提取依据或方法版本无法继续，请保留历史并从当前章节重新发起。', { recoverable: true })
+function checkpoint(json: string): { version: 1; workItemId: string; chapterId: number; bodyVersionId: string; phase: string; recovery?: FactExtractionRecovery } {
+  try {
+    if (Buffer.byteLength(json) > 384 * 1024) throw stale()
+    const value = JSON.parse(json)
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(k => !['version', 'workItemId', 'chapterId', 'bodyVersionId', 'phase', 'recovery'].includes(k))
+      || value.version !== 1 || typeof value.workItemId !== 'string' || !value.workItemId || !Number.isSafeInteger(value.chapterId) || value.chapterId < 1
+      || typeof value.bodyVersionId !== 'string' || !value.bodyVersionId || value.phase !== 'queued') throw stale()
+    if (value.recovery !== undefined) value.recovery = decodeFactExtractionRecovery(value.recovery)
+    return value
+  } catch { throw stale() }
 }
 
 function checkpointWorkItemId(value: string): string {

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync, StatementSync } from 'node:sqlite'
 import { AppError } from '../../../core/errors/app-error'
 import {
   assertStoryEventVersionPayload, assertStoryIdentifier, storyEventVersionPayload,
@@ -132,19 +132,48 @@ const fail = (code: 'CONFLICT' | 'NOT_FOUND' | 'DATABASE_INTEGRITY_FAILED', mess
 
 /** Uses the owning database transaction; this adapter never starts or commits one. */
 export class CanonicalEventVersions {
-  constructor(private readonly database: DatabaseSync, private readonly projectId: string, private readonly id: () => string) {}
+  private readonly statements = new Map<string, StatementSync>()
+  private readonly verifiedHistories = new Map<string, StoryEventVersion[]>()
+  private cachedHistoryBytes = 0
+
+  /** pinnedReadOnly is used only by the owner of an immutable read snapshot;
+   * ordinary and transactional readers must always observe fresh data. */
+  constructor(private readonly database: DatabaseSync, private readonly projectId: string, private readonly id: () => string,
+    private readonly pinnedReadOnly = false) {
+    if (pinnedReadOnly && database.prepare('PRAGMA query_only').get()?.query_only !== 1) {
+      throw new AppError('FEATURE_UNAVAILABLE', '事件历史复用仅适用于固定的只读快照。', { recoverable: false })
+    }
+  }
+
+  private assertOpen(): void {
+    if (!this.database.isOpen) throw new AppError('STORAGE_ERROR', '事件只读快照已关闭，请重新读取。', { recoverable: true })
+  }
+
+  private statement(sql: string): StatementSync {
+    this.assertOpen()
+    let statement = this.statements.get(sql)
+    if (!statement) { statement = this.database.prepare(sql); this.statements.set(sql, statement) }
+    return statement
+  }
 
   heads(eventId: string): StoryEventVersionHeads | null {
     assertStoryIdentifier(eventId)
+    this.assertOpen()
+    const cached = this.verifiedHistories.get(eventId)
+    if (cached) return cached.length ? { latestVersionId: cached.at(-1)!.id,
+      approvedVersionId: cached.filter(version => version.status === 'approved').at(-1)?.id ?? null } : null
     this.assertEvent(eventId)
-    const row = this.database.prepare('SELECT * FROM canonical_event_version_heads WHERE project_id = ? AND event_id = ?').get(this.projectId, eventId)
+    const row = this.statement('SELECT * FROM canonical_event_version_heads WHERE project_id = ? AND event_id = ?').get(this.projectId, eventId)
     return row ? { latestVersionId: String(row.latest_version_id), approvedVersionId: row.approved_version_id === null ? null : String(row.approved_version_id) } : null
   }
 
   list(eventId: string): StoryEventVersion[] {
     assertStoryIdentifier(eventId)
+    this.assertOpen()
+    const cached = this.verifiedHistories.get(eventId)
+    if (cached) return structuredClone(cached)
     this.assertEvent(eventId)
-    const versions = this.database.prepare('SELECT * FROM canonical_event_versions WHERE project_id = ? AND event_id = ? ORDER BY version_no').all(this.projectId, eventId)
+    const versions = this.statement('SELECT * FROM canonical_event_versions WHERE project_id = ? AND event_id = ? ORDER BY version_no').all(this.projectId, eventId)
       .map((row) => this.decode(row))
     const heads = this.heads(eventId)
     const approved = versions.filter((version) => version.status === 'approved').at(-1)
@@ -152,10 +181,20 @@ export class CanonicalEventVersions {
       || versions.some((version, index) => version.version !== index + 1 || version.previousVersionId !== (versions[index - 1]?.id ?? null))) {
       fail('DATABASE_INTEGRITY_FAILED', '事件版本链或正式指针不完整。')
     }
+    if (this.pinnedReadOnly) {
+      // Bound retained encoded history; over-budget histories are still fully
+      // validated and returned, just not memoized. Never truncate a read.
+      const bytes = Buffer.byteLength(JSON.stringify(versions)) + Buffer.byteLength(eventId)
+      if (this.verifiedHistories.size < 100_000 && this.cachedHistoryBytes + bytes <= 64 * 1024 * 1024) {
+        this.verifiedHistories.set(eventId, structuredClone(versions))
+        this.cachedHistoryBytes += bytes
+      }
+    }
     return versions
   }
 
   append(eventId: string, expectedVersionId: string | null, payload: StoryEventVersionPayload, timestamp: string): StoryEventVersion {
+    if (this.pinnedReadOnly) throw new AppError('FEATURE_UNAVAILABLE', '只读事件快照不能追加版本。', { recoverable: true })
     const versions = this.list(eventId)
     const previous = versions.at(-1)
     if ((previous?.id ?? null) !== expectedVersionId) fail('CONFLICT', '事件已产生新版本，请重新核对后保存。')
@@ -205,7 +244,7 @@ export class CanonicalEventVersions {
   }
 
   private assertEvent(eventId: string): void {
-    if (!this.database.prepare('SELECT id FROM canonical_events WHERE project_id = ? AND id = ?').get(this.projectId, eventId)) {
+    if (!this.statement('SELECT id FROM canonical_events WHERE project_id = ? AND id = ?').get(this.projectId, eventId)) {
       fail('NOT_FOUND', '事件不存在于当前作品。')
     }
   }
@@ -236,10 +275,10 @@ export class CanonicalEventVersions {
       if (hash(payloadJson) !== row.content_hash) throw new Error('hash mismatch')
       const payload: unknown = JSON.parse(payloadJson)
       assertStoryEventVersionPayload(payload)
-      const sources = this.database.prepare('SELECT * FROM canonical_event_version_sources WHERE version_id = ? ORDER BY ordinal').all(String(row.id))
+      const sources = this.statement('SELECT * FROM canonical_event_version_sources WHERE version_id = ? ORDER BY ordinal').all(String(row.id))
         .map((edge) => ({ source: { kind: edge.source_kind, id: edge.source_id, revision: edge.source_revision }, relation: edge.relation }))
       if (JSON.stringify(sources) !== JSON.stringify(payload.sources)
-        || !this.database.prepare('SELECT version_id FROM canonical_event_version_seals WHERE version_id = ?').get(String(row.id))) throw new Error('unsealed sources')
+        || !this.statement('SELECT version_id FROM canonical_event_version_seals WHERE version_id = ?').get(String(row.id))) throw new Error('unsealed sources')
       return { ...payload, id: String(row.id), projectId: String(row.project_id), eventId: String(row.event_id), version: Number(row.version_no),
         previousVersionId: row.previous_version_id === null ? null : String(row.previous_version_id), contentHash: String(row.content_hash), createdAt: String(row.created_at) }
     } catch (error) {

@@ -1,8 +1,11 @@
 import { AppError } from '../../../core/errors/app-error'
 import type { AssistantConversationRequest } from '../../../../contracts/assistant/assistant-conversation-contracts'
 import type { TextCompletionInput } from '../../models/domain/model-provider'
+import type { CreativePolicyRun } from '../../writing-plugins/domain/creative-policy'
+import { creativePolicyContext } from '../../writing-plugins/domain/creative-policy-context'
 
 export type SampleCompletion = { complete(instruction:string,draft:string,context:string,signal:AbortSignal):Promise<{content:string}>;completeMessages?(messages:TextCompletionInput['messages'],signal?:AbortSignal):Promise<{content:string}> }
+export type AssistantSampleExecution = { policy: CreativePolicyRun; assertAuthorized: () => Promise<void> }
 const chineseLength = (text:string) => (text.match(/\p{Script=Han}/gu) || []).length
 function newParagraphs(text:string,reference:string):string {
   if(reference.includes(text))return ''
@@ -16,23 +19,27 @@ function newParagraphs(text:string,reference:string):string {
 }
 
 /** Non-canon conversation output: no document, field, database or adoption port. */
-export async function draftAssistantSample(input:AssistantConversationRequest,instruction:string,model:SampleCompletion,context:string,signal:AbortSignal,progress?:(message:string)=>void):Promise<string> {
+export async function draftAssistantSample(input:AssistantConversationRequest,instruction:string,model:SampleCompletion,context:string,signal:AbortSignal,progress?:(message:string)=>void,execution?:AssistantSampleExecution):Promise<string> {
   const requested = /(?:约|大约|至少)?\s*(\d{2,5})\s*(?:个)?(?:汉字|中文字|字)/.exec(input.message)
   const words = requested ? Number(requested[1]) : 500
   if(words>2000)throw new AppError('VALIDATION_ERROR','单次对话试写支持最多 2000 字；可以分次续写。',{recoverable:true})
+  signal.throwIfAborted()
+  if(!execution)throw new AppError('CONFLICT','样稿缺少原作品、章节与作者确认依据，请从已确认的章节发起。',{recoverable:true})
+  const guard=async()=>{signal.throwIfAborted();await execution.assertAuthorized();await execution.policy.assertAuthorized?.();signal.throwIfAborted()}
+  await guard()
+  const methods=creativePolicyContext([...execution.policy.resolve('assistant-sample'),...execution.policy.resolve('genre-guidance',{genre:'',subgenre:''})])
   const history = input.history.map(item=>(item.role==='user'?'作者：':'先前对话：')+item.content).join('\n\n')
   const previousStory=input.history.filter(item=>item.role==='assistant').map(item=>item.content).join('\n\n')
   const continuing=/^(?:请)?(?:继续|接着|往下|续写)/.test(input.message.trim())
   const system = [
     '你是中文小说写作者。当前操作只创作独立对话样稿，不修改任何作品字段或正式正文。只输出真实小说正文，不输出 JSON、写作计划、说明、占位符或工具调用。',
-    '直接构思人物与情节，保持人名一致，以动作、环境与对话推进。若作者要求继续，从已有故事结尾往下写，不重复前文。',
-    '作品已明确的动态境界和系统显示模板仍需遵守；不要宣称试写内容已保存、已确认或已发生在正式作品中。', context
+    '必须遵守当前已确认总纲、对应卷纲与章纲，以及正式事实、作者要求、动态境界和固定系统模板。样稿不是批准或正式事实，不宣称保存或采用。', methods, context
   ].join('\n')
   let content=''
   let repeated=false
   const messages:TextCompletionInput['messages']=[{role:'system',content:system},...input.history]
   for(let round=0;round<6;round++) {
-    signal.throwIfAborted()
+    await guard()
     const remaining=Math.max(0,words-chineseLength(content))
     progress?.(repeated?'检测到重复前文，正在要求模型重新续写……':round?`已生成 ${chineseLength(content)} 个汉字，正在补写至 ${words} 字……`:`正在生成约 ${words} 字样稿；完成后会检查篇幅……`)
     const prompt=[`作者原话：${input.message}`,`本次写作要求：${instruction}`,`本次正文目标至少 ${words} 个汉字，分成若干自然段。`,
@@ -43,7 +50,7 @@ export async function draftAssistantSample(input:AssistantConversationRequest,in
     ].filter(Boolean).join('\n\n')
     messages.push({role:'user',content:prompt})
     const result:{content:string}=model.completeMessages?await model.completeMessages(messages,signal):await model.complete(prompt,content,system,signal)
-    signal.throwIfAborted()
+    await guard()
     const returned=result.content.trim()
     if(!returned)throw new AppError('AI_RESPONSE_INVALID','模型没有生成样稿正文，请重试。',{recoverable:true})
     const reference=(continuing?previousStory:'')+'\n'+content
@@ -53,7 +60,7 @@ export async function draftAssistantSample(input:AssistantConversationRequest,in
     if(next!==returned)progress?.('已剔除重复段落，正在检查新增正文的篇幅……')
     messages.push({role:'assistant',content:next})
     content += (content?'\n\n':'')+next
-    if(chineseLength(content)>=words)return content
+    if(chineseLength(content)>=words){await guard();return content}
   }
   throw new AppError('AI_RESPONSE_INVALID',repeated?'模型反复重复了已有样稿，没有完成后续内容，请重试。':'模型未完成要求的试写篇幅，请减少单次字数后重试。',{recoverable:true})
 }

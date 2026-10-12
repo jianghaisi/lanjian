@@ -1,0 +1,14 @@
+{
+  "name": "@lanjian/writing-plugin-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "build": "tsc"
+  },
+  "devDependencies": { "typescript": "^7.0.2" }
+}

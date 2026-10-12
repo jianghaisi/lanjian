@@ -8,7 +8,19 @@ import sys
 import time
 
 ROOT = Path(sys.argv[1]).resolve(strict=True)
-sys.path.insert(0, str(ROOT / "venv/Lib/site-packages"))
+BOOTSTRAP = json.loads(sys.argv[2])
+if set(BOOTSTRAP) != {"modelPath", "sitePackages", "promptProfile"}:
+    raise ValueError("BOOTSTRAP_INVALID")
+MODEL_PATH = Path(BOOTSTRAP["modelPath"]).resolve(strict=True)
+PACKAGES = Path(BOOTSTRAP["sitePackages"]).resolve(strict=True)
+if not MODEL_PATH.is_file() or not PACKAGES.is_dir():
+    raise ValueError("BOOTSTRAP_INVALID")
+sys.path.insert(0, str(PACKAGES))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from text_prompts import PROFILES, prompt_for, stop_tokens, VisibleOutput
+PROFILE = BOOTSTRAP["promptProfile"]
+if PROFILE not in PROFILES:
+    raise ValueError("BOOTSTRAP_INVALID")
 os.environ.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", HF_HUB_DISABLE_TELEMETRY="1")
 INPUT, OUTPUT = sys.stdin.buffer, sys.stdout.buffer
 MODEL = None
@@ -30,21 +42,6 @@ def send(value):
     OUTPUT.write(struct.pack("<I", len(raw)) + raw)
     OUTPUT.flush()
 
-def safe_content(text):
-    # Author text cannot inject special chat delimiters into the model template.
-    return text.replace("<|", "<\u200b|")
-
-def prompt_for(messages):
-    result = ""
-    for message in messages:
-        if not isinstance(message, dict) or set(message) != {"role", "content"}:
-            raise ValueError("INPUT_INVALID")
-        role, content = message["role"], message["content"]
-        if role not in ("system", "user", "assistant") or not isinstance(content,str) or len(content)>250000:
-            raise ValueError("INPUT_INVALID")
-        result += "<|im_start|>" + role + "\n" + safe_content(content) + "<|im_end|>\n"
-    return result + "<|im_start|>assistant\n<think>\n\n</think>\n\n"
-
 def infer(request):
     global MODEL
     allowed = {"v","id","action","messages","maxTokens","temperature","topP","schema"}
@@ -62,10 +59,8 @@ def infer(request):
     started=time.perf_counter()
     from llama_cpp import Llama, LlamaGrammar
     if MODEL is None:
-        path=(ROOT/"models/llm/Qwen3-1.7B-Q8_0.gguf").resolve(strict=True)
-        path.relative_to(ROOT)
-        MODEL=Llama(model_path=str(path),n_ctx=8192,n_threads=4,n_threads_batch=4,n_gpu_layers=0,verbose=False)
-    prompt=prompt_for(messages)
+        MODEL=Llama(model_path=str(MODEL_PATH),n_ctx=8192,n_threads=4,n_threads_batch=4,n_gpu_layers=0,verbose=False)
+    prompt=prompt_for(messages, PROFILE, request.get("schema") is not None)
     tokens=MODEL.tokenize(prompt.encode("utf-8"),add_bos=False,special=True)
     if len(tokens)+max_tokens>8192:
         raise ValueError("CONTEXT_LIMIT")
@@ -75,19 +70,23 @@ def infer(request):
     if schema is not None and (not isinstance(schema,dict) or len(json.dumps(schema))>32000):
         raise ValueError("INPUT_INVALID")
     grammar=LlamaGrammar.from_json_schema(json.dumps(schema,ensure_ascii=False),verbose=False) if schema is not None else None
-    result="";sequence=0;finish=None;first=None;count=0
+    result="";raw_result="";sequence=0;finish=None;first=None
+    visible=VisibleOutput(PROFILE=="deepseek-r1" and schema is None)
     for chunk in MODEL.create_completion(prompt=tokens,max_tokens=max_tokens,temperature=temperature,top_p=top_p,stream=True,
-                                         stop=["<|im_end|>","<|endoftext|>"],grammar=grammar,seed=42):
+                                         stop=stop_tokens(PROFILE),grammar=grammar,seed=42):
         choice=chunk["choices"][0];delta=choice.get("text","")
         finish=choice.get("finish_reason") or finish
+        raw_result+=delta
+        if len(raw_result.encode("utf-8"))>256*1024: raise ValueError("OUTPUT_LIMIT")
+        delta=visible.push(delta)
         if delta:
-            result+=delta;count+=1
-            if len(result.encode("utf-8"))>256*1024: raise ValueError("OUTPUT_LIMIT")
+            result+=delta
             if first is None and delta.strip():first=time.perf_counter()-started
             send({"v":1,"id":request["id"],"kind":"delta","seq":sequence,"text":delta});sequence+=1
+    visible.finish()
     if finish not in ("stop", "length"): raise ValueError("INFERENCE_FAILED")
     return {"content":result,"finishReason":finish,"promptTokens":len(tokens),
-            "completionTokens":len(MODEL.tokenize(result.encode("utf-8"),add_bos=False)),
+            "completionTokens":len(MODEL.tokenize(raw_result.encode("utf-8"),add_bos=False)),
             "seconds":time.perf_counter()-started,"firstTextSeconds":first}
 
 def main():
@@ -104,7 +103,7 @@ def main():
                 result=infer(request)
             send({"v":1,"id":request["id"],"kind":"result",**result})
         except Exception as error:
-            code=str(error) if isinstance(error,ValueError) and str(error) in ("INPUT_INVALID","OUTPUT_BUDGET","CONTEXT_LIMIT","OUTPUT_LIMIT") else "INFERENCE_FAILED"
+            code=str(error) if isinstance(error,ValueError) and str(error) in ("INPUT_INVALID","OUTPUT_BUDGET","CONTEXT_LIMIT","OUTPUT_LIMIT","REASONING_INCOMPLETE") else "INFERENCE_FAILED"
             send({"v":1,"id":request["id"],"kind":"error","code":code})
 if __name__=="__main__":
     main()

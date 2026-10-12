@@ -1,26 +1,39 @@
 // Explicit live ports preserve the existing book/request scope and draft ownership.
 export function createLibraryContinuationActions(ports) {
   async function resumeImportManifest(recovery) {
-    if (!recovery.canResume || ports.recoveryBusyId.value) return
+    if (!recovery.canResume || ports.recoveryBusyId.value || !ports.current.value) return
+    const request = ports.workspaceRequests.capture(ports.current.value)
+    const current = () => ports.workspaceRequests.isCurrent(request, ports.current.value)
     ports.recoveryBusyId.value = recovery.id
     try {
-      const result = await ports.guard(() => ports.desktop.imports.resumeManifest(recovery.id))
-      await ports.loadWorkspace()
+      const result = await ports.guard(async () => {
+        try { return await ports.desktop.imports.resumeManifest(recovery.id, request.path) }
+        catch (error) { if (current()) throw error; return null }
+      })
+      if (!result || !current()) return
+      await ports.loadWorkspace(request)
+      if (!current()) return
       ports.notice(`文稿接续已恢复完成：处理 ${result.results.length} 份文件`)
     } finally {
-      ports.recoveryBusyId.value = ''
+      if (current()) ports.recoveryBusyId.value = ''
     }
   }
 
   async function generateContinuationAnalysis() {
-    if (!ports.continuationManifestId.value || ports.busy.value || ports.continuationBlockedReason.value) return
-    ports.continuationAnalysis.value = await ports.guard(
-      () => ports.desktop.imports.generateContinuationAnalysis(ports.continuationManifestId.value),
-      '接续分析候选已经生成；确认前不会进入正式设定、大纲或人物记忆'
-    )
+    if (!ports.current.value || !ports.continuationManifestId.value || ports.busy.value || ports.continuationBlockedReason.value) return
+    const request = ports.workspaceRequests.capture(ports.current.value)
+    const current = () => ports.workspaceRequests.isCurrent(request, ports.current.value)
+    const manifestId = ports.continuationManifestId.value
+    const candidate = await ports.guard(async () => {
+      try { return await ports.desktop.imports.generateContinuationAnalysis(manifestId) }
+      catch (error) { if (current()) throw error; return null }
+    })
+    if (!candidate || !current()) return
+    ports.continuationAnalysis.value = candidate
     ports.continuationManifestId.value = ''
     ports.active.value = 'preparation'
     ports.preparationMode.value = 'continuation'
+    ports.notice('接续分析候选已经生成；确认前不会进入正式设定、大纲或人物记忆')
   }
 
   async function saveContinuationAnalysis(showNotice = true) {

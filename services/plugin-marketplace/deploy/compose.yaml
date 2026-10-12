@@ -1,0 +1,40 @@
+name: lanjian-plugin-market
+services:
+  market:
+    profiles: [production]
+    build:
+      context: ../../..
+      dockerfile: services/plugin-marketplace/deploy/Dockerfile
+    environment:
+      MARKET_OIDC_ISSUER: ${MARKET_OIDC_ISSUER:-https://identity.example.invalid/realms/plugins}
+      MARKET_OIDC_JWKS: ${MARKET_OIDC_JWKS:-https://identity.example.invalid/realms/plugins/protocol/openid-connect/certs}
+      MARKET_OIDC_AUDIENCE: ${MARKET_OIDC_AUDIENCE:-lanjian-plugin-market}
+    ports: ["127.0.0.1:43120:43120"]
+    volumes: ["market-data:/data"]
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 128
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:43120/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  keycloak-test:
+    profiles: [test]
+    image: quay.io/keycloak/keycloak:26.7.4@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c
+    command: [start-dev, --import-realm, --http-port=43121, --hostname=http://127.0.0.1:43121]
+    ports: ["127.0.0.1:43121:43121"]
+    volumes: ["./keycloak-test-realm.json:/opt/keycloak/data/import/lanjian-plugins-test-realm.json:ro"]
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 256
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+volumes:
+  market-data:

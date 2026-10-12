@@ -23,6 +23,7 @@ import { FoundationDraftService, parseFoundationDraft } from '../../src/main/mod
 import { ContinuationAnalysisService, parseContinuationAnalysis } from '../../src/main/modules/library/application/continuation-analysis-service'
 import { CharacterStateService } from '../../src/main/modules/characters/application/character-state-service'
 import { LocalRetrievalService } from '../../src/main/modules/assistant/application/local-retrieval-service'
+import { genrePromptTemplate } from '../../src/main/modules/worldbuilding/domain/genre-writing'
 
 const codec = {
   available: () => true,
@@ -75,7 +76,7 @@ test('audits total and volume outlines locally without rewriting or blocking the
     scope: 'total', content: '主角醒来。', eventCount: 1, chapterCount: 0, volumeCount: 2, unplacedEventCount: 1
   })
   assert.deepEqual(new Set(total.issues.map((item) => item.code)), new Set([
-    'OUTLINE_TOO_BRIEF', 'CAUSE_CHAIN_UNCLEAR', 'EVENTS_WAITING_FOR_VOLUME'
+    'OUTLINE_TOO_BRIEF', 'EVENTS_WAITING_FOR_VOLUME'
   ]))
   assert.equal(total.metrics.characterCount, 5)
 
@@ -354,7 +355,7 @@ test('uses imported work-related TXT cards as model material without requiring a
   const { projects } = await fixture()
   const library = new ResearchLibraryService(projects)
   const workspace = new WorkspaceService(projects, undefined, library)
-  await library.importManualDocument('作品相关', '人物：林知夏。背景：示例中学。路线：离谱但合理的校园轻喜剧。')
+  await library.importManualDocument('作品相关', '人物：陈景安。背景：示例中学。路线：离谱但合理的校园轻喜剧。')
   assert.equal(await workspace.hasPlanningMaterials(), true)
 
   let receivedContext = ''
@@ -370,7 +371,7 @@ test('uses imported work-related TXT cards as model material without requiring a
   }, workspace)
 
   const proposal = await service.generate()
-  assert.match(receivedContext, /林知夏/)
+  assert.match(receivedContext, /陈景安/)
   assert.match(receivedContext, /示例中学/)
   assert.match(proposal.worldView, /现实中国校园/)
   assert.equal((await workspace.foundation()).worldView, '')
@@ -393,8 +394,8 @@ test('canonicalizes imported project aliases and refuses to overwrite an existin
 
 test('reports the exact total manuscript word count for each shelf item', async () => {
   const { projects, project } = await fixture()
-  await writeFile(join(project.path, '正文', '第1章-入学.md'), '林知夏 KING 2026', 'utf8')
-  await writeFile(join(project.path, '正文', '第2章-同桌.md'), '机器人同桌', 'utf8')
+  await writeFile(join(project.path, '正文', '第1章-入学.md'), '陈景安 KING 2026', 'utf8')
+  await writeFile(join(project.path, '正文', '第2章-同桌.md'), '发明家同桌', 'utf8')
   await writeFile(join(project.path, '正文', '写作备注.txt'), '这份资料不属于正文', 'utf8')
 
   const listed = await projects.list()
@@ -489,10 +490,10 @@ test('diagnoses a cross-book legacy project and refuses to write through ambiguo
   const root = await mkdtemp(join(tmpdir(), 'novel-migration-conflict-'))
   const settings = new SettingsStore(join(root, 'user-data'), codec)
   const projects = new ProjectService(settings)
-  const legacy = join(root, '亲亲就能强，从幼儿园开始无敌')
+  const legacy = join(root, '雾港调查手记')
   await Promise.all(['.webnovel', '正文', '大纲', 'config'].map((folder) => mkdir(join(legacy, folder), { recursive: true })))
-  const original = JSON.stringify({ project_info: { title: '杀死那个寄生虫', genre: '都市' }, inspiration: '蜂巢寄生故事' }, null, 2)
-  const outline = '# 杀死那个寄生虫\n\n林默发现蜂巢。'
+  const original = JSON.stringify({ project_info: { title: '旧钟楼的秘密', genre: '都市' }, inspiration: '钟楼探索故事' }, null, 2)
+  const outline = '# 旧钟楼的秘密\n\n周砚发现旧钟楼。'
   await writeFile(join(legacy, '.webnovel', 'state.json'), original, 'utf8')
   await writeFile(join(legacy, '大纲', '总纲.md'), outline, 'utf8')
   await writeFile(join(legacy, '正文', '第1章.md'), '临时占位。', 'utf8')
@@ -501,13 +502,13 @@ test('diagnoses a cross-book legacy project and refuses to write through ambiguo
   await writeFile(join(legacy, 'config', 'levels.json'), '{"levels":[]}', 'utf8')
   const imported = await projects.importProject(legacy)
 
-  assert.equal(imported.project.title, '杀死那个寄生虫')
+  assert.equal(imported.project.title, '旧钟楼的秘密')
   assert.deepEqual(imported.project.manuscript, {
     chapterCount: 1,
     fileCount: 2,
     wordCount: 8,
     status: 'identity-review',
-    message: '项目清单是《杀死那个寄生虫》，文件夹名却是《亲亲就能强，从幼儿园开始无敌》；第 1 章还存在同编号稿件。书名与正文归属需要核对，原稿没有改动。'
+    message: '项目清单是《旧钟楼的秘密》，文件夹名却是《雾港调查手记》；第 1 章还存在同编号稿件。书名与正文归属需要核对，原稿没有改动。'
   })
   const preview = await projects.migrationPreview()
   assert.equal(preview.required, true)
@@ -819,7 +820,7 @@ test('builds a multi-file import manifest with conservative role suggestions and
   const imports = new BookImportService(projects, documents, researchLibrary)
   const manuscript = join(root, '星城少年们的日常录-第一卷.txt')
   const notes = join(root, '星城少年们的日常录-作品相关.md')
-  await writeFile(manuscript, '第一章 入学\n林知夏来到示例中学。\n第二章 同桌\n她的身份很离谱，但误会仍能解释。', 'utf8')
+  await writeFile(manuscript, '第一章 入学\n陈景安来到示例中学。\n第二章 同桌\n她的身份很离谱，但误会仍能解释。', 'utf8')
   await writeFile(notes, '# 人物与大纲\n杀手、机器人、特工都服务于校园喜剧，不走战斗升级路线。', 'utf8')
 
   const manifest = await imports.previewFiles([manuscript, notes])
@@ -880,7 +881,7 @@ test('journals a multi-file import and resumes after a safe between-file interru
   const manuscript = join(root, '第一卷.txt')
   const notes = join(root, '作品相关.txt')
   await writeFile(manuscript, '第一章 初见\n正文一。\n第二章 再会\n正文二。', 'utf8')
-  await writeFile(notes, '人物：林知夏。\n地点：示例中学。', 'utf8')
+  await writeFile(notes, '人物：陈景安。\n地点：示例中学。', 'utf8')
   const manifest = await imports.previewFiles([manuscript, notes])
   const request = {
     id: manifest.id,
@@ -933,8 +934,8 @@ test('generates and persists an evidence-backed continuation candidate without c
   const workspace = new WorkspaceService(projects, outlinePlanning, researchLibrary, documents)
   const manuscript = join(root, '第一卷.txt')
   const notes = join(root, '作品相关.txt')
-  await writeFile(manuscript, '第一章 入学\n林知夏走进示例中学，发现同桌像一台过分认真的机器人。', 'utf8')
-  await writeFile(notes, '作品类型：轻小说搞笑路线。\n世界观：现实中国校园为底，不出现公开超自然大战。\n力量体系：日常逻辑与人物选择构成成长，不设置可量化境界。\n特殊优势：林知夏能察觉怪物少女们藏不住的异常细节，但不能直接控制她们。\n总纲：怪物少女们用离谱但合理的方式融入日常。\n卷纲：第一卷围绕机器人同桌在校园里暴露异常又设法圆场。\n章纲：第一章从入学发现异常，到用值日安排试探机器人同桌。', 'utf8')
+  await writeFile(manuscript, '第一章 入学\n陈景安走进示例中学，发现同桌像一台过分认真的机器人。', 'utf8')
+  await writeFile(notes, '作品类型：轻小说搞笑路线。\n世界观：现实中国校园为底，不出现公开超自然大战。\n力量体系：日常逻辑与人物选择构成成长，不设置可量化境界。\n特殊优势：陈景安能察觉发明社员们藏不住的异常细节，但不能直接控制她们。\n总纲：发明社员们用离谱但合理的方式融入日常。\n卷纲：第一卷围绕发明家同桌在校园里暴露异常又设法圆场。\n章纲：第一章从入学发现异常，到用值日安排试探发明家同桌。', 'utf8')
   const manifest = await imports.previewFiles([manuscript, notes])
   await imports.commitManifest({ id: manifest.id, files: [
     { token: manifest.files[0].token, ownership: 'owned', creationMethod: 'human', title: '第一卷', selectedChapterIndexes: [0] },
@@ -947,14 +948,14 @@ test('generates and persists an evidence-backed continuation candidate without c
   }
   const sections = [
     { area: 'projectDefinition', status: 'found', content: '轻小说搞笑路线。', evidence: [{ fileName: '作品相关.txt', excerpt: '作品类型：轻小说搞笑路线。' }] },
-    { area: 'existingPlot', status: 'found', content: '林知夏进入示例中学并遇见异常同桌。', evidence: [{ fileName: '第一卷.txt', excerpt: '林知夏走进示例中学' }] },
-    { area: 'characters', status: 'found', content: '林知夏；疑似机器人的同桌。', evidence: [{ fileName: '第一卷.txt', excerpt: '同桌像一台过分认真的机器人' }] },
+    { area: 'existingPlot', status: 'found', content: '陈景安进入示例中学并遇见异常同桌。', evidence: [{ fileName: '第一卷.txt', excerpt: '陈景安走进示例中学' }] },
+    { area: 'characters', status: 'found', content: '陈景安；疑似机器人的同桌。', evidence: [{ fileName: '第一卷.txt', excerpt: '同桌像一台过分认真的机器人' }] },
     { area: 'worldView', status: 'found', content: '现实中国校园为底，不出现公开超自然大战。', evidence: [{ fileName: '作品相关.txt', excerpt: '世界观：现实中国校园为底，不出现公开超自然大战。' }] },
     { area: 'powerSystem', status: 'found', content: '日常逻辑与人物选择构成成长，不设置可量化境界。', evidence: [{ fileName: '作品相关.txt', excerpt: '力量体系：日常逻辑与人物选择构成成长，不设置可量化境界。' }] },
-    { area: 'cheatSystem', status: 'found', content: '林知夏能察觉怪物少女们藏不住的异常细节，但不能直接控制她们。', evidence: [{ fileName: '作品相关.txt', excerpt: '特殊优势：林知夏能察觉怪物少女们藏不住的异常细节，但不能直接控制她们。' }] },
-    { area: 'totalOutline', status: 'found', content: '怪物少女融入日常。', evidence: [{ fileName: '作品相关.txt', excerpt: '怪物少女们用离谱但合理的方式融入日常' }] },
-    { area: 'volumeOutline', status: 'found', content: '机器人同桌在校园里暴露异常又设法圆场。', evidence: [{ fileName: '作品相关.txt', excerpt: '卷纲：第一卷围绕机器人同桌在校园里暴露异常又设法圆场。' }] },
-    { area: 'chapterOutline', status: 'found', content: boundedChapterOutline('进入状态：林知夏刚进入示例中学，尚未确认同桌的异常。\n1. 林知夏观察同桌机械般执行校规\n2. 他用值日安排试探对方并得到异常反应\n退出状态：林知夏确认同桌并非普通学生，但决定暂时保密\n允许扩写：校园日常误会\n禁止：公开超自然大战'), evidence: [{ fileName: '作品相关.txt', excerpt: '章纲：第一章从入学发现异常，到用值日安排试探机器人同桌。' }] }
+    { area: 'cheatSystem', status: 'found', content: '陈景安能察觉发明社员们藏不住的异常细节，但不能直接控制她们。', evidence: [{ fileName: '作品相关.txt', excerpt: '特殊优势：陈景安能察觉发明社员们藏不住的异常细节，但不能直接控制她们。' }] },
+    { area: 'totalOutline', status: 'found', content: '发明社员融入日常。', evidence: [{ fileName: '作品相关.txt', excerpt: '发明社员们用离谱但合理的方式融入日常' }] },
+    { area: 'volumeOutline', status: 'found', content: '发明家同桌在校园里暴露异常又设法圆场。', evidence: [{ fileName: '作品相关.txt', excerpt: '卷纲：第一卷围绕发明家同桌在校园里暴露异常又设法圆场。' }] },
+    { area: 'chapterOutline', status: 'found', content: boundedChapterOutline('进入状态：陈景安刚进入示例中学，尚未确认同桌的异常。\n1. 陈景安观察同桌机械般执行校规\n2. 他用值日安排试探对方并得到异常反应\n退出状态：陈景安确认同桌并非普通学生，但决定暂时保密\n允许扩写：校园日常误会\n禁止：公开超自然大战'), evidence: [{ fileName: '作品相关.txt', excerpt: '章纲：第一章从入学发现异常，到用值日安排试探发明家同桌。' }] }
   ]
   const characterStates = new CharacterStateService(projects)
   const analysis = new ContinuationAnalysisService({ complete: async () => ({ content: JSON.stringify({ sections, rationale: '已有开篇与类型方向，需先补世界边界再续写。' }) }) }, projects, imports, workspace, characterStates, outlinePlanning)
@@ -993,14 +994,14 @@ test('generates and persists an evidence-backed continuation candidate without c
   assert.equal(adopted.candidate.adoption?.projectDefinition?.candidateFingerprint, preview.candidateFingerprint)
 
   const plotPreview = await analysis.previewExistingPlot(candidate.id)
-  assert.equal(plotPreview.candidateEvent, '林知夏进入示例中学并遇见异常同桌。')
+  assert.equal(plotPreview.candidateEvent, '陈景安进入示例中学并遇见异常同桌。')
   assert.equal(plotPreview.canAdopt, true)
   assert.equal(plotPreview.evidence[0].fileName, '第一卷.txt')
   const plotInput = {
     candidateId: candidate.id,
     candidateFingerprint: plotPreview.candidateFingerprint,
     currentTimelineFingerprint: plotPreview.currentTimelineFingerprint,
-    event: { time: '入学第一天', characters: '林知夏、同桌', location: '示例中学教室', event: '林知夏进入示例中学并发现同桌行为异常。' }
+    event: { time: '入学第一天', characters: '陈景安、同桌', location: '示例中学教室', event: '陈景安进入示例中学并发现同桌行为异常。' }
   }
   const plotAdopted = await analysis.adoptExistingPlot(plotInput)
   assert.equal(plotAdopted.timeline.events.length, 1)
@@ -1010,7 +1011,7 @@ test('generates and persists an evidence-backed continuation candidate without c
   assert.deepEqual(await documents.outlines(), formalBefore.outlines)
   assert.deepEqual(await workspace.foundation(), formalBefore.foundation)
 
-  const characterInput = { candidateId: candidate.id, character: { name: '林知夏', role: '努力维持普通生活的高中生', arcSeed: '从被动隐瞒异常，到主动理解并守住怪物少女们的日常。' } }
+  const characterInput = { candidateId: candidate.id, character: { name: '陈景安', role: '努力维持普通生活的高中生', arcSeed: '从被动隐瞒异常，到主动理解并守住发明社员们的日常。' } }
   const characterPreview = await analysis.previewCharacter(characterInput)
   assert.equal(characterPreview.action, 'create')
   assert.equal(characterPreview.canAdopt, true)
@@ -1024,10 +1025,10 @@ test('generates and persists an evidence-backed continuation candidate without c
     character: characterPreview.character
   })
   assert.equal(characterAdopted.characters.anchors.length, 1)
-  assert.equal(characterAdopted.characters.anchors[0].name, '林知夏')
+  assert.equal(characterAdopted.characters.anchors[0].name, '陈景安')
   assert.equal(characterAdopted.characters.anchors[0].role, characterInput.character.role)
   assert.equal(characterAdopted.characters.snapshots[0].lastEventId, '')
-  assert.equal(characterAdopted.candidate.adoption?.characters?.[0].name, '林知夏')
+  assert.equal(characterAdopted.candidate.adoption?.characters?.[0].name, '陈景安')
   assert.deepEqual(await documents.outlines(), formalBefore.outlines)
   assert.deepEqual(await workspace.foundation(), formalBefore.foundation)
   const confirmedCharacterPreview = await analysis.previewCharacter(characterInput)
@@ -1132,7 +1133,7 @@ test('generates and persists an evidence-backed continuation candidate without c
   }
   const cheatPreview = await analysis.previewCheatSystem(candidate.id)
   assert.equal(cheatPreview.currentOverview, cheatBefore.cheatSystem.overview)
-  assert.equal(cheatPreview.candidateOverview, '林知夏能察觉怪物少女们藏不住的异常细节，但不能直接控制她们。')
+  assert.equal(cheatPreview.candidateOverview, '陈景安能察觉发明社员们藏不住的异常细节，但不能直接控制她们。')
   assert.equal(cheatPreview.preserved.systemEnabled, cheatBefore.foundation.useSystem)
   assert.equal(cheatPreview.preserved.templateConfigured, Boolean(cheatBefore.systemTemplate.template.trim()))
   assert.equal(cheatPreview.evidence[0].fileName, '作品相关.txt')
@@ -1174,7 +1175,7 @@ test('generates and persists an evidence-backed continuation candidate without c
   }
   const totalPreview = await analysis.previewTotalOutline(candidate.id)
   assert.equal(totalPreview.currentOutline, totalBefore.outlines.total?.content || '')
-  assert.equal(totalPreview.candidateOutline, '怪物少女融入日常。')
+  assert.equal(totalPreview.candidateOutline, '发明社员融入日常。')
   assert.equal(totalPreview.canAdopt, true)
   assert.ok(totalPreview.prerequisiteFingerprint)
   assert.equal(totalPreview.affected.volumeOutlines, totalBefore.outlines.volumes.length)
@@ -1206,9 +1207,8 @@ test('generates and persists an evidence-backed continuation candidate without c
   planningForVolume = await outlinePlanning.confirmPlanningOutline('total')
   assert.equal(planningForVolume.totalApproval.status, 'confirmed')
   planningForVolume = await outlinePlanning.createVolume('异常同桌')
-  assert.notEqual(planningForVolume.totalApproval.status, 'confirmed')
-  if (planningForVolume.totalReview.issues.length) planningForVolume = await outlinePlanning.acknowledgeOutlineReview('total')
-  planningForVolume = await outlinePlanning.confirmPlanningOutline('total')
+  // Adding a directory volume preserves approval of the unchanged total text.
+  assert.equal(planningForVolume.totalApproval.status, 'confirmed')
   assert.equal(planningForVolume.totalApproval.status, 'confirmed')
 
   const staleVolumePreview = await analysis.previewVolumeOutline(candidate.id, 1)
@@ -1248,13 +1248,13 @@ test('generates and persists an evidence-backed continuation candidate without c
   let planningForChapter = volumeAdopted.planning
   const volumeReview = planningForChapter.volumes.find((item) => item.volume === 1)?.review
   if (volumeReview?.issues.length) planningForChapter = await outlinePlanning.acknowledgeOutlineReview(1)
-  planningForChapter = await outlinePlanning.confirmPlanningOutline(1)
+  if (planningForChapter.volumes.find(v => v.volume === 1)?.approval.status !== 'confirmed') planningForChapter = await outlinePlanning.confirmPlanningOutline(1)
   planningForChapter = await outlinePlanning.placeChapter(1, 1)
   if (planningForChapter.totalReview.issues.length) planningForChapter = await outlinePlanning.acknowledgeOutlineReview('total')
-  planningForChapter = await outlinePlanning.confirmPlanningOutline('total')
+  if (planningForChapter.totalApproval.status !== 'confirmed') planningForChapter = await outlinePlanning.confirmPlanningOutline('total')
   const placedVolumeReview = planningForChapter.volumes.find((item) => item.volume === 1)?.review
   if (placedVolumeReview?.issues.length) planningForChapter = await outlinePlanning.acknowledgeOutlineReview(1)
-  planningForChapter = await outlinePlanning.confirmPlanningOutline(1)
+  if (planningForChapter.volumes.find(v => v.volume === 1)?.approval.status !== 'confirmed') planningForChapter = await outlinePlanning.confirmPlanningOutline(1)
   assert.equal(planningForChapter.totalApproval.status, 'confirmed')
   assert.equal(planningForChapter.volumes[0]?.approval.status, 'confirmed')
 
@@ -1309,7 +1309,7 @@ test('generates and persists an evidence-backed continuation candidate without c
     prerequisiteFingerprint: staleTotalPreview.prerequisiteFingerprint
   }), /发生变化|已经变化/)
 
-  const staleCharacterInput = { candidateId: candidate.id, character: { name: '机器人同桌', role: '以绝对认真制造日常笑料的异常少女', arcSeed: '从机械执行规则，到学会理解同伴的言外之意。' } }
+  const staleCharacterInput = { candidateId: candidate.id, character: { name: '发明家同桌', role: '以绝对认真制造日常笑料的异常少女', arcSeed: '从机械执行规则，到学会理解同伴的言外之意。' } }
   const staleCharacterPreview = await analysis.previewCharacter(staleCharacterInput)
   const unrelatedPreview = await characterStates.previewStableAnchor('manual-change', { name: '班主任', role: '维持校园秩序', arcSeed: '逐渐察觉班级异常。' })
   await characterStates.adoptStableAnchor({ sourceId: 'manual-change', seed: { name: '班主任', role: '维持校园秩序', arcSeed: '逐渐察觉班级异常。' }, candidateFingerprint: unrelatedPreview.candidateFingerprint, currentFingerprint: unrelatedPreview.currentFingerprint })
@@ -1324,7 +1324,7 @@ test('generates and persists an evidence-backed continuation candidate without c
   const duplicatePreview = await analysis.previewExistingPlot(candidate.id)
   await assert.rejects(analysis.adoptExistingPlot({ ...plotInput, currentTimelineFingerprint: duplicatePreview.currentTimelineFingerprint }), /已经确认过/)
   const stalePlotPreview = await analysis.previewExistingPlot(candidate.id)
-  await workspace.saveTimeline([...(await workspace.timeline()).events, { id: 'manual-event', time: '第二日', characters: '林知夏', location: '示例中学', event: '作者补写另一项纪事。' }])
+  await workspace.saveTimeline([...(await workspace.timeline()).events, { id: 'manual-event', time: '第二日', characters: '陈景安', location: '示例中学', event: '作者补写另一项纪事。' }])
   await assert.rejects(analysis.adoptExistingPlot({ ...plotInput, event: { ...plotInput.event, time: '第三日' }, currentTimelineFingerprint: stalePlotPreview.currentTimelineFingerprint }), /已经变化/)
 
   const staleProfilePreview = await analysis.previewProjectDefinition(candidate.id)
@@ -1424,7 +1424,7 @@ test('extracts a Word manuscript into reviewable chapters and archives the exact
   const zip = new JSZip()
   zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
   zip.folder('_rels')!.file('.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
-  zip.folder('word')!.file('document.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>第一章 入学</w:t></w:r></w:p><w:p><w:r><w:t>林知夏走进示例中学。</w:t></w:r></w:p><w:p><w:r><w:t>第二章 怪同学</w:t></w:r></w:p><w:p><w:r><w:t>离谱的误会却有合理解释。</w:t></w:r></w:p></w:body></w:document>')
+  zip.folder('word')!.file('document.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>第一章 入学</w:t></w:r></w:p><w:p><w:r><w:t>陈景安走进示例中学。</w:t></w:r></w:p><w:p><w:r><w:t>第二章 怪同学</w:t></w:r></w:p><w:p><w:r><w:t>离谱的误会却有合理解释。</w:t></w:r></w:p></w:body></w:document>')
   const original = await zip.generateAsync({ type: 'nodebuffer' })
   await writeFile(source, original)
 
@@ -1475,7 +1475,7 @@ test('imports an owned related-work TXT as bounded manual source cards without c
   const researchLibrary = new ResearchLibraryService(projects)
   const imports = new BookImportService(projects, documents, researchLibrary)
   const source = join(root, '作品相关.txt')
-  const content = `人物大纲\n${'李远明把同学看成怪物，但这是都市校园日常。'.repeat(600)}\n\n后续情节\n${'误会推动关系变化，不能自动成为正式大纲。'.repeat(500)}`
+  const content = `人物大纲\n${'周文衡把同学看成怪物，但这是都市校园日常。'.repeat(600)}\n\n后续情节\n${'误会推动关系变化，不能自动成为正式大纲。'.repeat(500)}`
   await writeFile(source, content, 'utf8')
 
   const preview = await imports.previewFile(source)
@@ -1758,6 +1758,7 @@ test('projects assigned event provenance and bounded prior character state into 
     location: '临江酒馆',
     event: '发现半枚铜符',
     result: '决定次日复查',
+    phase: 'legacy-unknown',
     provenance: '资料库正式事件',
     evidenceRefs: [{ sourceId: 'source-note-1', excerpt: '沈砚找到半枚铜符' }]
   }])
@@ -1775,7 +1776,7 @@ test('projects assigned event provenance and bounded prior character state into 
 test('question context retrieves prior prose by the asked subject instead of the current outline', async () => {
   const { projects } = await fixture()
   const documents = new DocumentService(projects)
-  await documents.updateChapter(1, { title: '借来的笔记', content: '班长把数学笔记递给李远明：“明天还我。”' })
+  await documents.updateChapter(1, { title: '借来的笔记', content: '班长把数学笔记递给周文衡：“明天还我。”' })
   await documents.updateChapter(2, { title: '旧城追踪', content: '众人循着城门脚印追查古井线索。' })
   await documents.updateChapter(3, { title: '公交车', content: '你借我数学笔记的恩情，我还没报答。' })
   await documents.updateChapter(4, { title: '未来的笔记', content: '数学笔记未来凭空变成一本魔法书。' })
@@ -1789,10 +1790,10 @@ test('question context retrieves prior prose by the asked subject instead of the
   assert.deepEqual(pack.evidence.map(item => item.chapterId), [1])
   const context = await workspace.promptContext(3, 'review', { question })
   assert.match(context, /第 1 章｜借来的笔记｜正文版本/)
-  assert.match(context, /班长把数学笔记递给李远明/)
+  assert.match(context, /班长把数学笔记递给周文衡/)
   assert.doesNotMatch(context, /未来凭空变成一本魔法书|恩情，我还没报答/)
   const candidates = await workspace.promptContextCandidates(3, 'review', { question })
-  assert.ok(candidates.some(item => item.content.includes('班长把数学笔记递给李远明')))
+  assert.ok(candidates.some(item => item.content.includes('班长把数学笔记递给周文衡')))
   assert.deepEqual(await documents.chapters(), before)
 })
 
@@ -1874,7 +1875,9 @@ test('builds one chapter workspace projection from one planning snapshot and one
 
 test('keeps generated prose as a reviewed proposal and checks every ordered outline beat', async () => {
   let calls = 0
+  let serverError: unknown
   const server = createServer(async (request, response) => {
+    try {
     assert.equal(request.url, '/chat/completions')
     let body = ''
     for await (const chunk of request) body += chunk
@@ -1890,7 +1893,9 @@ test('keeps generated prose as a reviewed proposal and checks every ordered outl
       assert.match(prompt, /【允许扩写的事实范围】/)
       assert.match(prompt, /不得新增会改变人物状态/)
       assert.match(prompt, /按网络小说节奏充分展开/)
-      assert.match(prompt, /男主吐槽是喜剧来源之一/)
+      assert.match(prompt, /按本书题材承诺承载梗、误会、人物反应或严肃冲突/)
+      assert.match(prompt, /笑点来自具体压力、习惯、时机或理解差异/)
+      assert.match(prompt, /严肃题材不强塞吐槽/)
       assert.match(prompt, /不要把现场写成流程说明书/)
       assert.match(prompt, /事实边界都只用于静默控制生成/)
       assert.match(prompt, /谁借给谁、物品最后在谁手里/)
@@ -1912,11 +1917,15 @@ test('keeps generated prose as a reviewed proposal and checks every ordered outl
           { id: 'B2', status: 'covered', evidence: '循迹进入酒馆' }
         ],
         boundary: { entryRespected: true, exitReached: true, evidence: '从既有地点承接，并在完成最后节点后停止' },
-        violations: [], introducedFacts: [], characterChanges: [
+        violations: [], introducedFacts: [], literaryFindings: [], characterChanges: [
           { character: '沈砚', field: 'location', value: '酒馆', evidence: '沈砚循迹进入酒馆' },
           { character: '沈砚', field: 'knowledge', value: '发现脚印通往酒馆', evidence: '并不存在于正文的证据' }
         ], characterConflicts: [], passed: true
       }) } }] }))
+    }
+    } catch (error) {
+      serverError ??= error
+      response.statusCode = 500; response.end('{}')
     }
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -1968,7 +1977,10 @@ test('keeps generated prose as a reviewed proposal and checks every ordered outl
     const untouched = await documents.chapter(1)
     assert.equal(untouched.content, '')
     assert.equal(untouched.title, '循迹')
+  } catch (error) {
+    throw serverError ?? error
   } finally {
+    server.closeAllConnections()
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
   }
 })
@@ -1982,13 +1994,17 @@ test('legacy fast preferences now use full generation and an actual review resul
         summary: '两个节点按顺序完成',
         beats: [{ id: 'B1', status: 'covered', evidence: '沈砚在城门外发现脚印' }, { id: 'B2', status: 'covered', evidence: '走到酒馆门前' }],
         boundary: { entryRespected: true, exitReached: true, evidence: '沈砚在城门外发现脚印，沿着雨水留下的痕迹走到酒馆门前。' },
-        violations: [], introducedFacts: [], characterChanges: [], characterConflicts: [], passed: true
+        violations: [], introducedFacts: [], characterChanges: [], characterConflicts: [], literaryFindings: [], passed: true
       }) }
       assert.match(instruction, /前情与章节交接/)
       assert.match(instruction, /不为凑对白或解释亲近、恩情而凭空补旧事/)
       assert.match(instruction, /不要求日常动作逐项举证/)
       assert.match(instruction, /不能把将来或假设写成过去事实/)
-      return { content: '沈砚在城门外发现脚印，沿着雨水留下的痕迹走到酒馆门前。'.repeat(100) }
+      assert.match(instruction, /严格区分作者、读者和每个角色/)
+      assert.match(instruction, /照片、录音、聊天、账号/)
+      assert.match(instruction, /持续时长、先后与重叠关系/)
+      assert.match(instruction, /中文网文可读性/)
+      return { content: Array.from({ length: 100 }, () => '沈砚在城门外发现脚印，沿着雨水留下的痕迹走到酒馆门前。').join('\n\n') }
     }
   }
   const documents = {
@@ -2001,7 +2017,7 @@ test('legacy fast preferences now use full generation and an actual review resul
     chapterContractVersion: async () => testContractVersion(),
     bookProfile: async () => ({ targetWordsPerChapter: 3000, proseExpansionMode: 'web-serial', reviewStrictness: 'balanced', chapterGenerationMode: 'fast' }),
     promptContext: async (_chapterId: number, task: string, options?: unknown) => {
-      assert.ok(['prose', 'review'].includes(task)); assert.equal(options, undefined)
+      assert.ok(['prose', 'review'].includes(task)); assert.deepEqual(options, { policyManaged: true })
       return '完整正文与审校上下文'
     },
     contextBudgetPreferences: async () => ({ structuredRepairAttempts: 0 })
@@ -2044,10 +2060,51 @@ test('treats chapter target words as a minimum completeness guide without imposi
     characterChanges: [],
     characterConflicts: []
   }
-  const longChapter = `沈砚完成了本章场景。${'细节自然展开。'.repeat(900)}`
+  const longChapter = Array.from({ length: 90 }, () => `沈砚完成了本章场景。${'细节自然展开。'.repeat(10)}`).join('\n\n')
   const checked = applyDeterministicDraftChecks(report, longChapter, 3500)
   assert.equal(checked.passed, true)
   assert.deepEqual(checked.violations, [])
+})
+
+test('keeps narrative knowledge, evidence and chronology constraints in every writing stage', () => {
+  const profile = {
+    genre: '都市', subgenre: '都市日常', coreIdea: '多人关系喜剧。',
+    plannedVolumes: 3, chaptersPerVolume: 40, targetWordsPerChapter: 3000, targetWords: 360_000,
+    audienceScale: '', defaultPov: '', narrativeDistance: '', writingStyle: '',
+    proseExpansionMode: 'web-serial', reviewStrictness: 'balanced', chapterGenerationMode: 'reviewed',
+    autosaveEnabled: true, autosaveDelayMs: 1_500, autosaveMergeWindowMs: 30_000, revision: 'profile-test'
+  } as const
+  for (const task of ['outline', 'chapterOutline', 'prose', 'review'] as const) {
+    const prompt = genrePromptTemplate(profile, task).content
+    assert.match(prompt, /严格区分作者、读者和每个角色/)
+    assert.match(prompt, /照片、录音、聊天、账号/)
+    assert.match(prompt, /持续时长、先后与重叠关系/)
+  }
+  assert.match(genrePromptTemplate(profile, 'prose').content, /中文网文可读性/)
+  assert.match(genrePromptTemplate(profile, 'review').content, /中文网文可读性/)
+})
+
+test('blocks extreme unbroken paragraphs while allowing long chapters made of readable web-fiction paragraphs', () => {
+  const report = {
+    passed: true,
+    summary: '章纲与事实边界均通过',
+    beats: [],
+    boundary: { entryRespected: true, exitReached: true, evidence: '完整承接' },
+    foreshadowing: [],
+    violations: [],
+    introducedFacts: [],
+    characterChanges: [],
+    characterConflicts: []
+  }
+  const wallOfText = `许嘉树停在门口。${'他没有立刻回答，只看着对方。'.repeat(45)}`
+  const blocked = applyDeterministicDraftChecks(report, wallOfText, 600)
+  assert.equal(blocked.passed, false)
+  assert.match(blocked.violations.join('\n'), /不少于 500 字的超长段落/)
+
+  const readable = Array.from({ length: 12 }, (_, index) => `第${index + 1}次交锋落下。${'两人一边走一边说，话题也跟着眼前的事往前推。'.repeat(4)}`).join('\n\n')
+  const accepted = applyDeterministicDraftChecks(report, readable, 600)
+  assert.equal(accepted.passed, true)
+  assert.deepEqual(accepted.violations, [])
 })
 
 test('extracts capability and institutional claims without flagging ordinary narrative wording', () => {
@@ -2306,7 +2363,7 @@ test('explicit unknown-model routes do not require default API credentials or si
       temperature: payload.temperature, topP: payload.top_p, maxTokens: payload.max_tokens })
     if (payload.stream) {
       response.setHeader('content-type', 'text/event-stream')
-      response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: '选定接口回答' } }] })}\n\ndata: [DONE]\n\n`)
+      response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: '选定接口回答' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`)
     } else {
       response.setHeader('content-type', 'application/json')
       response.end(JSON.stringify({ choices: [{ message: { content: '选定接口回答' } }] }))
@@ -2339,8 +2396,11 @@ test('explicit unknown-model routes do not require default API credentials or si
   assert.deepEqual(deltas, ['选定接口回答'])
   assert.equal(requests.length, 3)
   assert.deepEqual(requests.map(item => item.model), ['private-writing-model', 'custom/provider-model', 'private-writing-model'])
-  assert.ok(requests.every(item => item.path === '/selected/chat/completions'
-    && item.authorization === 'Bearer fixture-selected-key' && item.temperature === 0.75 && item.topP === 0.85 && item.maxTokens === 2048))
+  assert.ok(requests.every(item => item.path === '/selected/chat/completions' && item.authorization === 'Bearer fixture-selected-key'))
+  assert.ok([requests[0], requests[2]].every(item => item.temperature === 0.75 && item.topP === 0.85 && item.maxTokens === 2048))
+  assert.equal(requests[1].temperature, undefined, 'a different model uses automatic sampling rather than leaking the old model parameters')
+  assert.equal(requests[1].topP, undefined)
+  assert.equal(requests[1].maxTokens, 8192)
   await assert.rejects(() => ai.complete('不允许退回其他接口'), /尚未配置/)
   await assert.rejects(() => ai.complete('接口不存在', '', '', 'prose', undefined, 'private-writing-model', 'removed'), /不存在/)
   assert.equal(requests.length, 3, 'rejected routes must send no request to another API')
@@ -2637,14 +2697,14 @@ test('edits working material while preserving immutable web provenance and forma
   const candidate = await library.createEventCandidate({ sourceId: manual.id, time: '开学日', characters: ['阿水'], location: '教室', event: '被同学误认成转学生' })
 
   const updatedManual = await library.updateSource(manual.id, {
-    title: '林知夏人物笔记',
-    excerpt: '人物名确定为林知夏。',
+    title: '陈景安人物笔记',
+    excerpt: '人物名确定为陈景安。',
     userNotes: '用于校园喜剧线。',
     author: '作者本人',
     url: 'https://example.com/jiang-shui-yao'
   })
-  assert.equal(updatedManual.title, '林知夏人物笔记')
-  assert.equal(updatedManual.excerpt, '人物名确定为林知夏。')
+  assert.equal(updatedManual.title, '陈景安人物笔记')
+  assert.equal(updatedManual.excerpt, '人物名确定为陈景安。')
   assert.equal(updatedManual.author, '作者本人')
   assert.equal(updatedManual.url, 'https://example.com/jiang-shui-yao')
   assert.ok(updatedManual.updatedAt)
@@ -2802,11 +2862,60 @@ test('assigns only approved events to the total outline and keeps the operation 
   await library.approveEvent(event.id)
   const assigned = await planning.assignEvent(event.id)
   assert.deepEqual(assigned.assignedEventIds, [event.id])
-  assert.equal(assigned.totalRevision, 1)
-  assert.equal((await planning.assignEvent(event.id)).totalRevision, 1)
+  assert.equal(assigned.totalRevision, 0)
+  assert.equal((await planning.assignEvent(event.id)).totalRevision, 0)
   const removed = await planning.unassignEvent(event.id)
   assert.deepEqual(removed.assignedEventIds, [])
-  assert.equal(removed.totalRevision, 2)
+  assert.equal(removed.totalRevision, 0)
+})
+
+test('unified approved events can be assigned to chapters while candidates and missing placed events fail closed', async () => {
+  const { projects, project } = await fixture()
+  const documents = new DocumentService(projects)
+  const library = new ResearchLibraryService(projects)
+  let eventVersion = 1
+  const projected = (state: 'approved' | 'candidate' | 'missing') => ({
+    version: 1 as const,
+    workItemId: project.id,
+    revision: 'a'.repeat(64),
+    approvedRevision: state === 'approved' ? (eventVersion === 1 ? 'b' : 'f').repeat(64) : 'c'.repeat(64),
+    candidateRevision: 'd'.repeat(64),
+    operationId: '00000000-0000-4000-8000-000000000001:1',
+    committedAt: '2026-09-20T00:00:00.000Z',
+    ordering: 'author-display' as const,
+    state: {
+      order: { id: 'order-1', revision: 1, eventIds: state === 'missing' ? [] : ['unified-event'], contentHash: 'e'.repeat(64), createdAt: '2026-09-20T00:00:00.000Z' },
+      lifecycles: state === 'missing' ? [] : [{ id: 'life-1', eventId: 'unified-event', revision: eventVersion, expectedEventVersionId: `version-${eventVersion}`, state: 'active' as const, createdAt: '2026-09-20T00:00:00.000Z' }]
+    },
+    approved: state === 'approved' ? [{ eventId: 'unified-event', versionId: `version-${eventVersion}`, version: eventVersion, content: { time: '第一幕', characters: ['沈砚'], location: '旧塔', event: eventVersion === 1 ? '取得密信' : '取得伪造密信', evidenceRefs: [], confidence: 1 }, granularity: 'macro' as const, phase: 'planned' as const, creator: 'author' as const, sources: [], createdAt: '2026-09-20T00:00:00.000Z' }] : [],
+    candidates: state === 'candidate' ? [{ eventId: 'unified-event', versionId: 'version-1', version: 1, content: { time: '第一幕', characters: ['沈砚'], location: '旧塔', event: '取得密信', evidenceRefs: [], confidence: 1 }, granularity: 'macro' as const, phase: 'planned' as const, creator: 'model-candidate' as const, sources: [], createdAt: '2026-09-20T00:00:00.000Z' }] : [],
+    archived: [], mirror: null
+  })
+  let state: 'approved' | 'candidate' | 'missing' = 'candidate'
+  const planning = new OutlinePlanningService(projects, documents, library, undefined, { read: async () => projected(state) })
+  await documents.updateChapter(1, { title: '旧塔密信', content: '' })
+  await planning.createVolume('密信卷')
+  await planning.placeChapter(1, 1)
+  await assert.rejects(planning.placeEventInChapter('unified-event', 1), { code: 'CONFLICT' })
+  state = 'approved'
+  await planning.placeEventInChapter('unified-event', 1)
+  const events = await planning.chapterEvents(1)
+  assert.equal(events[0]!.versionId, 'version-1')
+  assert.equal(events[0]!.phase, 'planned')
+  await planning.updateOutline('total', '# 总纲\n\n沈砚进入旧塔取得密信，因此决定追查幕后伪造者。')
+  await planning.updateOutline(1, '# 密信卷\n\n沈砚进入旧塔，取得密信并离开。')
+  await confirmPlanningScope(planning, 'total')
+  await confirmPlanningScope(planning, 1)
+  await planning.updateChapterOutline(1, boundedChapterOutline('1. 沈砚进入旧塔\n2. 沈砚取得密信\n禁止：提前揭示伪造者身份'))
+  const confirmed = await planning.confirmChapterOutline(1)
+  assert.deepEqual(confirmed.chapter?.contractVersion?.eventVersions, [{ eventId: 'unified-event', versionId: 'version-1', phase: 'planned' }])
+  assert.equal(confirmed.chapter?.contractVersion?.eventApprovedRevision, 'b'.repeat(64))
+  eventVersion = 2
+  const stale = await planning.status(1)
+  assert.equal(stale.chapter?.review.status, 'stale')
+  assert.equal(stale.chapter?.contractVersion, undefined)
+  state = 'missing'
+  await assert.rejects(planning.chapterEvents(1), { code: 'INVALID_PROJECT_STATE' })
 })
 
 test('creates ordered volumes and moves approved events between them without duplicating assignments', async () => {
@@ -2865,7 +2974,7 @@ test('initializes a complete candidate volume directory without replacing volume
   ])
   assert.equal(await documents.outline(1).then((item) => item.content), '作者已有的第一卷正文式卷纲，不得被目录初始化覆盖。')
   assert.equal(await documents.outline(2).then((item) => item.content), '')
-  assert.equal(initialized.totalRevision, before.totalRevision + 1)
+  assert.equal(initialized.totalRevision, before.totalRevision)
 
   const unchanged = await planning.initializeVolumeStructure([
     { order: 1, title: '城门旧雨' },
@@ -3078,7 +3187,7 @@ test('audits and explicitly confirms a chapter outline before opening the prose 
   assert.equal(review.canConfirm, false)
   assert.deepEqual(
     new Set(review.issues.map((issue) => issue.code)),
-    new Set(['TOO_FEW_BEATS', 'MISSING_FORBIDDEN', 'MISSING_ENTRY_STATE', 'MISSING_EXIT_STATE', 'MISSING_ALLOWED_FACTS', 'UNSTRUCTURED_BEATS'])
+    new Set(['STORY_CONTRACT_REQUIRED'])
   )
   await assert.rejects(
     () => planning.confirmChapterOutline(1),
@@ -3213,7 +3322,7 @@ test('serializes concurrent event assignments without losing either outline refe
   await Promise.all([planning.assignEvent(first.id), planning.assignEvent(second.id)])
   const status = await planning.status()
   assert.deepEqual(new Set(status.assignedEventIds), new Set([first.id, second.id]))
-  assert.equal(status.totalRevision, 2)
+  assert.equal(status.totalRevision, 0)
 })
 
 test('blocks planning writes when the version ledger is corrupted', async () => {

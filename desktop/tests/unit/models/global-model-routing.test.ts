@@ -434,7 +434,7 @@ test('guarded SSE retains the existing event protocol and native deltas', async 
   t.mock.method(globalThis, 'fetch', async (_url: string, init: RequestInit) => {
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer ' + secret)
     assert.equal(JSON.parse(String(init.body)).stream, true)
-    return new Response('data: {"choices":[{"delta":{"content":"第一段"}}]}\n\ndata: {"choices":[{"delta":{"content":"第二段"}}]}\n\ndata: [DONE]\n\n',
+    return new Response('data: {"choices":[{"delta":{"content":"第一段"}}]}\n\ndata: {"choices":[{"delta":{"content":"第二段"}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
       { headers: { 'Content-Type': 'text/event-stream' } })
   })
   const result = await f.ai.streamComplete('写', '', '', 'prose', undefined, undefined, delta => { deltas.push(delta) })

@@ -1,0 +1,155 @@
+{
+  "format": 1,
+  "members": [
+    {
+      "id": "editor",
+      "name": "主编",
+      "initials": "编",
+      "task": "outline",
+      "color": "jade",
+      "responsibility": "澄清创作目标，协调成员，把握故事方向与采用顺序。",
+      "capabilities": [
+        "book.read",
+        "planning.read",
+        "author.ask",
+        "group.prepare",
+        "group.delegate",
+        "group.create",
+        "planning.candidate"
+      ],
+      "preparationKinds": [
+        "definition",
+        "outline",
+        "research",
+        "adaptation"
+      ]
+    },
+    {
+      "id": "world",
+      "name": "世界观设定师",
+      "initials": "世",
+      "task": "outline",
+      "color": "blue",
+      "responsibility": "设计世界规则、地点、动态境界及固定系统界面。",
+      "capabilities": [
+        "book.read",
+        "planning.read",
+        "group.prepare",
+        "author.ask",
+        "group.delegate",
+        "group.create"
+      ],
+      "preparationKinds": [
+        "world",
+        "research"
+      ]
+    },
+    {
+      "id": "character",
+      "name": "人物设计师",
+      "initials": "人",
+      "task": "outline",
+      "color": "rose",
+      "responsibility": "设计人物动机、关系、声音及成长轨迹。",
+      "capabilities": [
+        "book.read",
+        "planning.read",
+        "group.prepare",
+        "author.ask",
+        "group.delegate",
+        "group.create"
+      ],
+      "preparationKinds": [
+        "characters",
+        "research"
+      ]
+    },
+    {
+      "id": "outline",
+      "name": "总纲策划师",
+      "initials": "纲",
+      "task": "outline",
+      "color": "amber",
+      "responsibility": "建立完整总纲与含时间、人物、地点、事件的因果时间线。",
+      "capabilities": [
+        "book.read",
+        "planning.read",
+        "planning.candidate",
+        "group.prepare",
+        "author.ask",
+        "group.delegate",
+        "group.create"
+      ],
+      "preparationKinds": [
+        "outline",
+        "timeline",
+        "research"
+      ]
+    },
+    {
+      "id": "chapter",
+      "name": "章节策划师",
+      "initials": "章",
+      "task": "chapterOutline",
+      "color": "violet",
+      "responsibility": "从已采用父级大纲逐层展开卷纲和章纲。",
+      "capabilities": [
+        "book.read",
+        "planning.read",
+        "planning.candidate",
+        "group.prepare",
+        "author.ask",
+        "group.delegate",
+        "group.create"
+      ],
+      "preparationKinds": [
+        "outline",
+        "research"
+      ]
+    },
+    {
+      "id": "writer",
+      "name": "正文作者",
+      "initials": "文",
+      "task": "prose",
+      "color": "orange",
+      "responsibility": "仅在作者确认对应大纲并另行发起正文任务后，依据章纲、人物、境界与固定系统模板准备正文候选。",
+      "capabilities": [
+        "book.read",
+        "planning.read",
+        "manuscript.read",
+        "manuscript.candidate",
+        "group.prepare",
+        "author.ask",
+        "group.delegate",
+        "group.create"
+      ],
+      "preparationKinds": [
+        "adaptation",
+        "research"
+      ]
+    },
+    {
+      "id": "reviewer",
+      "name": "审校编辑",
+      "initials": "审",
+      "task": "review",
+      "color": "slate",
+      "responsibility": "核对因果、人物声音、日常逻辑及跨章节一致性。",
+      "capabilities": [
+        "book.read",
+        "planning.read",
+        "manuscript.read",
+        "group.prepare",
+        "author.ask",
+        "group.delegate",
+        "group.create",
+        "review.read"
+      ],
+      "preparationKinds": [
+        "research",
+        "adaptation"
+      ]
+    }
+  ]
+}

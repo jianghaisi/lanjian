@@ -1,4 +1,13 @@
+import { inspirationIpcResults } from '../inspiration/bridge'
+import { decodeGroupBookCreated } from '../group-chat/creation'
+import { decodeGroupAdoptionPreview } from '../group-chat/adoption'
+import { decodeGroupView } from '../group-chat/group-chat'
+import { groupChatResults } from '../group-chat/group-chat'
+import { decodeParameterPolicy } from '../models/parameter-policy'
 import { localModelResultDecoders, isLocalConnection, isModelConnectionId } from '../models/local-model-contracts'
+import { decodeReceipt, reviewResultDecoders } from '../document-review/validation'
+import { annotationResultDecoders } from '../document-review/annotation-validation'
+import { revisionGenerationResultDecoders } from '../document-review/generation-validation'
 import { modelConnectionResults, decodeModelCreationResult } from '../models/model-connections-contracts'
 import type {
   AiConnectionTestResult,
@@ -29,10 +38,31 @@ import { researchIpcValueDecoders } from '../worldbuilding/ipc-research-result-c
 import { workspaceConfigIpcValueDecoders } from '../library/ipc-workspace-config-result-contracts'
 import { workspaceDataIpcValueDecoders } from '../library/ipc-workspace-data-result-contracts'
 import { decodeWorldMapBackgroundView, decodeWorldMapCancelResult, decodeWorldMapImageCandidate, decodeWorldMapLayoutView, decodeWorldMapView } from '../world-map/world-map'
+import { eventIpcValueDecoders } from '../timeline/event-contracts'
+import { settlementResultDecoders } from '../timeline/prose-event-settlement-contracts'
+import { decodeThinkingLevel } from '../models/thinking-level'
 
 type ValueDecoder = (value: unknown, path: string) => unknown
 
 const valueDecoders: Readonly<Record<string, ValueDecoder>> = {
+  ...inspirationIpcResults,
+  ...groupChatResults,
+  'group-chat:saveDraft': (v, p) => boolean(v, p),
+  'group-chat:createBook': decodeGroupBookCreated, 'group-chat:prepareAdoption': decodeGroupAdoptionPreview, 'group-chat:adopt': decodeGroupView,
+  ...reviewResultDecoders,
+  ...annotationResultDecoders,
+  ...revisionGenerationResultDecoders,
+  'ai:background-tasks': (value, path) => {
+    array(value, path).forEach((item, index) => {
+      const row = object(item, `${path}[${index}]`)
+      for (const key of ['bookId', 'bookPath', 'bookTitle', 'taskId', 'kind', 'status']) boundedString(row[key], `${path}[${index}].${key}`, 32_767)
+      if (row.chapterId !== undefined && (!Number.isSafeInteger(row.chapterId) || Number(row.chapterId) < 1)) fail(`${path}[${index}].chapterId`)
+      if (Object.keys(row).some(key => !['bookId', 'bookPath', 'bookTitle', 'taskId', 'kind', 'status', 'chapterId'].includes(key))) fail(path)
+    })
+    return value
+  },
+  ...eventIpcValueDecoders,
+  ...settlementResultDecoders,
   ...Object.fromEntries(Object.entries(modelConnectionResults).map(([name, decode]) => [`model-connections:${name}`, decode])),
   'model-connections:createProject': value => decodeModelCreationResult(value, v => projectSummary(v, 'project')),
   'model-connections:retryCreation': value => decodeModelCreationResult(value, v => projectSummary(v, 'project')),
@@ -57,6 +87,7 @@ const valueDecoders: Readonly<Record<string, ValueDecoder>> = {
     return value
   },
   'workspace:bootstrap': workspaceBootstrap,
+  'workspace:recheck-load-issues': workspaceLoadCheck,
   'projects:list': (value, path) => {
     const result = object(value, path)
     array(result.projects, `${path}.projects`).forEach((item, index) => projectSummary(item, `${path}.projects[${index}]`))
@@ -166,11 +197,12 @@ function workspaceBootstrap(value: unknown, path: string): unknown {
   validateNestedChannel('projects:migration-preview', result.migration, `${path}.migration`)
   validateNestedChannel('research:list-sources', result.sources, `${path}.sources`)
   validateNestedChannel('research:list-events', result.events, `${path}.events`)
+  if (result.eventProjection !== null) validateNestedChannel('events:projection', result.eventProjection, `${path}.eventProjection`)
   validateNestedChannel('planning:draft', result.planningDraft, `${path}.planningDraft`)
   validateNestedChannel('workspace:get-prompt-profile', result.promptProfile, `${path}.promptProfile`)
   validateNestedChannel('imports:recoverable-manifests', result.importRecoveries, `${path}.importRecoveries`)
   validateNestedChannel('imports:continuation-analysis', result.continuation, `${path}.continuation`)
-  const issues = boundedArray(result.issues, `${path}.issues`, 8)
+  const issues = boundedArray(result.issues, `${path}.issues`, 9)
   const ids = issues.map((issue, index) => bootstrapIssue(issue, `${path}.issues[${index}]`))
   if (new Set(ids).size !== ids.length) fail(`${path}.issues`)
   if (result.aiSettings === null && !ids.includes('modelSettingsUnreadable')) fail(`${path}.aiSettings`)
@@ -183,14 +215,38 @@ function validateNestedChannel(channel: string, value: unknown, path: string): v
   decoder(value, path)
 }
 
+function workspaceLoadCheck(value: unknown, path: string): unknown {
+  const result = object(value, path)
+  if (Object.keys(result).some(key => !['workItem', 'checkedIds', 'issues', 'aiSettings', 'eventProjection'].includes(key))) fail(path)
+  const workItem = object(result.workItem, `${path}.workItem`)
+  const id = boundedString(workItem.id, `${path}.workItem.id`, 32_767)
+  if (!id.trim() || id !== workItem.path || Object.keys(workItem).some(key => !['id', 'path'].includes(key))) fail(`${path}.workItem`)
+  const ids = boundedArray(result.checkedIds, `${path}.checkedIds`, 2).map(id => oneOf(id, ['modelSettingsUnreadable', 'unifiedEventsUnreadable'], `${path}.checkedIds`))
+  if (!ids.length || new Set(ids).size !== ids.length) fail(`${path}.checkedIds`)
+  const issues = boundedArray(result.issues, `${path}.issues`, 2).map((issue, index) => bootstrapIssue(issue, `${path}.issues[${index}]`))
+  if (new Set(issues).size !== issues.length || issues.some(id => !ids.includes(id))) fail(`${path}.issues`)
+  for (const [id, field, channel] of [
+    ['modelSettingsUnreadable', 'aiSettings', 'ai:get-settings'],
+    ['unifiedEventsUnreadable', 'eventProjection', 'events:projection']
+  ]) {
+    if (ids.includes(id) !== Object.hasOwn(result, field)) fail(`${path}.${field}`)
+    if (!ids.includes(id)) continue
+    if (issues.includes(id) && result[field] !== null) fail(`${path}.${field}`)
+    if (id === 'modelSettingsUnreadable' && !issues.includes(id) && result[field] === null) fail(`${path}.${field}`)
+    if (result[field] !== null) validateNestedChannel(channel, result[field], `${path}.${field}`)
+  }
+  return value
+}
+
 function bootstrapIssue(value: unknown, path: string): string {
   const result = object(value, path)
-  const id = oneOf(result.id, ['planningDraftUnreadable', 'promptProfileUnreadable', 'researchSourcesUnreadable', 'researchEventsUnreadable', 'outlinePlanningUnreadable', 'characterStateUnreadable', 'chapterOrderUnreadable', 'modelSettingsUnreadable'], `${path}.id`)
+  const id = oneOf(result.id, ['planningDraftUnreadable', 'promptProfileUnreadable', 'researchSourcesUnreadable', 'researchEventsUnreadable', 'unifiedEventsUnreadable', 'outlinePlanningUnreadable', 'characterStateUnreadable', 'chapterOrderUnreadable', 'modelSettingsUnreadable'], `${path}.id`)
   const expected = {
     planningDraftUnreadable: ['planningDraft', 'quarantinePlanningDraft'],
     promptProfileUnreadable: ['promptProfile', 'quarantinePromptProfile'],
     researchSourcesUnreadable: ['researchSources', 'manualReview'],
     researchEventsUnreadable: ['researchEvents', 'manualReview'],
+    unifiedEventsUnreadable: ['unifiedEvents', 'manualReview'],
     outlinePlanningUnreadable: ['outlinePlanning', 'manualReview'],
     characterStateUnreadable: ['characterState', 'manualReview'],
     chapterOrderUnreadable: ['chapterOrder', 'manualReview'],
@@ -201,15 +257,27 @@ function bootstrapIssue(value: unknown, path: string): string {
   literal(result.recovery, recovery, `${path}.recovery`)
   boundedString(result.title, `${path}.title`, 500)
   boundedString(result.message, `${path}.message`, 10_000)
+  if (Object.keys(result).some(key => !['id', 'area', 'recovery', 'title', 'message', 'reason'].includes(key))) fail(path)
+  if (result.reason !== undefined) {
+    if (!['unifiedEventsUnreadable', 'modelSettingsUnreadable'].includes(id)) fail(`${path}.reason`)
+    oneOf(result.reason, ['busy', 'recovery-required', 'invalid-data', 'unavailable'], `${path}.reason`)
+  }
   return id
 }
 
 export function unwrapValidatedIpcResponse<T>(channel: string, response: unknown): T {
-  const envelope = ipcEnvelope(response, channel)
+  const envelope = validateIpcResponse(channel, response)
   if (!envelope.ok) throw envelope.error
+  return envelope.value as T
+}
+
+/** Shared by preload and fixed hosted endpoints; errors retain the validated DTO. */
+export function validateIpcResponse(channel: string, response: unknown): IpcResponse<unknown> {
+  const envelope = ipcEnvelope(response, channel)
+  if (!envelope.ok) return envelope
   try {
     const decoder = valueDecoders[channel]
-    return (decoder ? decoder(envelope.value, 'value') : envelope.value) as T
+    return { ok: true, value: decoder ? decoder(envelope.value, 'value') : envelope.value }
   } catch {
     throw invalidResponse(channel)
   }
@@ -330,6 +398,11 @@ function chapterRevision(value: unknown, path: string): ChapterRevision {
   if (result.sourceTaskRunId !== undefined && result.sourceTaskRunId !== null) identifier(result.sourceTaskRunId, `${path}.sourceTaskRunId`)
   if (result.generationArtifactId !== undefined && result.generationArtifactId !== null) identifier(result.generationArtifactId, `${path}.generationArtifactId`)
   if (Boolean(result.sourceTaskRunId) !== Boolean(result.generationArtifactId)) fail(`${path}.generationArtifactId`)
+  if (result.reviewedSource !== undefined) {
+    const source = object(result.reviewedSource, `${path}.reviewedSource`)
+    if (source.kind !== 'inline-review' || result.reason !== 'ai' || result.sourceTaskRunId || result.generationArtifactId) fail(`${path}.reviewedSource`)
+    decodeReceipt(source.application)
+  }
   if ((result.sourceTaskRunId || result.generationArtifactId) && result.reason !== 'ai') fail(`${path}.reason`)
   return value as ChapterRevision
 }
@@ -364,7 +437,7 @@ function aiSettings(value: unknown, path: string): AiSettings {
   // Settings returned to the renderer are intentionally secret-free.  A
   // presence flag is enough for the UI; raw and encrypted keys stay in main.
   if (Object.prototype.hasOwnProperty.call(result, 'apiKey') || Object.prototype.hasOwnProperty.call(result, 'encryptedApiKey')) fail(`${path}.apiKey`)
-  if (result.version !== 2 && result.version !== 3 && result.version !== 4) fail(`${path}.version`)
+  if (result.version !== 2 && result.version !== 3 && result.version !== 4 && result.version !== 5) fail(`${path}.version`)
   if (!Array.isArray(result.connections) || result.connections.length > 101) fail(`${path}.connections`)
   for (const [index, entry] of result.connections.entries()) {
     const connection = object(entry, `${path}.connections[${index}]`)
@@ -401,10 +474,16 @@ function modelProfile(value: unknown, path: string): ModelProfile {
   if (!isModelConnectionId(connectionId)) fail(`${path}.connectionId`)
   const model = boundedString(result.model, `${path}.model`, 500)
   if (!model.trim()) fail(`${path}.model`)
+  if (Object.hasOwn(result, 'parameterPolicy')) {
+    if (Object.keys(result).some(k => !['connectionId', 'model', 'parameterPolicy'].includes(k))) fail(path)
+    decodeParameterPolicy(result.parameterPolicy)
+    return value as ModelProfile
+  }
   boundedNumber(result.temperature, `${path}.temperature`, 0, 2)
   boundedNumber(result.topP, `${path}.topP`, 0, 1)
   const maxTokens = boundedNumber(result.maxTokens, `${path}.maxTokens`, 128, 128_000)
   if (!Number.isInteger(maxTokens)) fail(`${path}.maxTokens`)
+  if (Object.hasOwn(result, 'thinkingLevel')) decodeThinkingLevel(result.thinkingLevel)
   return value as ModelProfile
 }
 

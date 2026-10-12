@@ -1,27 +1,43 @@
+import { assertUpstreamReviewHistory, reviewRefinements } from '../domain/upstream-review'
+import { decodeUpstreamReviewArgs, type UpstreamReviewInput, type UpstreamReviewRecord } from '../../../../contracts/planning/upstream-review-contracts'
+import { assertPlanningSources, assertSkeletonHistory, assertSkeletonHistoryAppend, changedPlanningSources, planningHash, skeletonHeads, skeletonRevision, type FormalSkeletonRevision, type PlanningSources } from '../domain/planning-dependencies'
+import { assertChapterEventOutputs, chapterEventOutputItems, chapterContentHash, type ChapterEventAdoption, type ChapterEventInput, type ChapterEventOutput, type ChapterEventStorageSnapshot } from '../domain/chapter-event-adoption'
+import { MAX_CHAPTER_ADOPTION_EVENTS } from '../../../../contracts/planning/chapter-event-contracts'
+import { randomUUID } from 'node:crypto'
+import type { ChapterEventReference, ChapterEventReplacementImpact, FormalSkeletonView, PlanningChapterSkeletonEntry } from '../../../../contracts/planning/types'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AppError } from '../../../core/errors/app-error'
-import { auditChapterOutline } from '../domain/chapter-outline'
+import { decodeChapterStoryConstraints, type ChapterStoryConstraints } from '../../../../contracts/planning/chapter-story-contract'
+import { auditChapterOutline, parseChapterOutline } from '../domain/chapter-outline'
 import { auditPlanningOutline } from '../domain/outline-quality'
 import { projectDirectory } from '../../../platform/storage/project-path'
-import type { CanonicalEvent, ChapterOutlineDocument, ChapterOutlineReview, OutlinePlanningStatus, OutlinePlanningVolume, OutlineUpdateResult, OutlineVolume, PlanningOutlineApproval, PlanningOutlineReview, VolumeOutline } from '../../../../contracts/index'
+import type { CanonicalEvent, ChapterOutlineDocument, ChapterOutlineReview, OutlineList, OutlinePlanningStatus, OutlinePlanningVolume, OutlineUpdateResult, OutlineVolume, PlanningOutlineApproval, PlanningOutlineReview, VolumeOutline } from '../../../../contracts/index'
 import { DocumentService } from '../../manuscript/application/document-service'
 import { writeJson } from '../../../platform/storage/json-store'
 import { ProjectService } from '../../library/application/project-service'
 import { ResearchLibraryService } from '../../library/application/research-library-service'
 import type { PlannedChapterStartInput, PlannedChapterStartResult } from '../../../../contracts/index'
+import type { ProjectedStoryEvent, UnifiedEventProjection } from '../../timeline/domain/event-projection'
 
 type OutlineAssignment = { eventId: string; assignedAt: string }
 type PlannedVolume = { volume: number; title: string; eventIds: string[]; revision: number; outlineHash: string; createdAt: string; updatedAt: string }
 type ChapterPlacement = { chapterId: number; volume: number; assignedAt: string; updatedAt: string }
 type ManuscriptStart = { chapterId: number; revision: string; volume: number | null; completed: boolean }
 type EventChapterPlacement = { eventId: string; chapterId: number; assignedAt: string; updatedAt: string }
-type ChapterDependency = { chapterId: number; volume?: number; basedOnTotalRevision: number; basedOnVolumeRevision?: number; outlineHash: string; savedAt: string }
-type ChapterConfirmation = { chapterId: number; outlineHash: string; basedOnTotalRevision: number; basedOnVolumeRevision?: number; eventIds: string[]; confirmedAt: string }
+type ChapterDependency = { sources?: PlanningSources; chapterId: number; volume?: number; basedOnTotalRevision: number; basedOnVolumeRevision?: number; outlineHash: string; savedAt: string }
+type PlanningEventVersion = { eventId: string; versionId: string; phase: NonNullable<PlanningApprovedEvent['phase']> }
+type ChapterConfirmation = { sources?: PlanningSources; chapterId: number; outlineHash: string; basedOnTotalRevision: number; basedOnVolumeRevision?: number; eventIds: string[]; eventVersions?: PlanningEventVersion[]; eventApprovedRevision?: string; confirmedAt: string }
 type PlanningReviewAcknowledgement = { scope: OutlineVolume; fingerprint: string; issueCodes: string[]; acknowledgedAt: string }
 type PlanningConfirmation = { scope: OutlineVolume; fingerprint: string; basedOnTotalFingerprint?: string; confirmedAt: string }
 type EffectiveVolume = Omit<OutlinePlanningVolume, 'review' | 'approval'>
+type PlanningApprovedEvent = CanonicalEvent & {
+  title?: string
+  versionId?: string
+  phase?: ProjectedStoryEvent['phase'] | 'legacy-unknown'
+  granularity?: ProjectedStoryEvent['granularity']
+}
 type OutlineState = {
   version: 1
   total: { revision: number; hash: string; updatedAt?: string }
@@ -31,12 +47,20 @@ type OutlineState = {
   manuscriptStarts: ManuscriptStart[]
   eventChapterPlacements: EventChapterPlacement[]
   chapters: ChapterDependency[]
+  chapterStoryContracts?: Array<{ chapterId: number; outlineHash: string; sources: PlanningSources; constraints: ChapterStoryConstraints }>
   chapterConfirmations: ChapterConfirmation[]
   outlineReviewAcknowledgements: PlanningReviewAcknowledgement[]
   planningConfirmations: PlanningConfirmation[]
+  formalSkeleton?: FormalSkeletonRevision[]
+  chapterEventOutputs?: ChapterEventOutput[]
+  upstreamReviewDecisions?: UpstreamReviewRecord[]
 }
 
 type FormalOutlinePlanningStatePort = {
+  recoverChapterEvent?(workItemId: string, operationId: string, guard?: () => Promise<void>): Promise<{ output: ChapterEventOutput; mirrorsPending: boolean; planningMirrorsPending: boolean }>
+  chapterEventSnapshot?(workItemId: string, chapterId: number, volume: number): Promise<ChapterEventStorageSnapshot>
+  adoptChapterEvent?(workItemId: string, input: ChapterEventAdoption, guard?: () => Promise<void>): Promise<{ output: ChapterEventOutput; mirrorsPending: boolean; planningMirrorsPending: boolean }>
+  readOutlinePlanningState?(workItemId: string): Promise<{ content: string; contentHash: string } | null>
   active(workItemId: string): Promise<boolean>
   outlinePlanningStateReady(workItemId: string): Promise<boolean>
   outlinePlanningState(workItemId: string): Promise<{ content: string; contentHash: string }>
@@ -60,18 +84,263 @@ const emptyState = (): OutlineState => ({
 
 export class OutlinePlanningService {
   private mutationQueue: Promise<void> = Promise.resolve()
-  private readonly stateSources = new WeakMap<OutlineState, { root: string; contentHash?: string }>()
+  private readonly stateSources = new WeakMap<OutlineState, { root: string; contentHash?: string; history?: FormalSkeletonRevision[] }>()
 
   constructor(
     private readonly projects: ProjectService,
     private readonly documents: DocumentService,
     private readonly research: ResearchLibraryService,
-    private readonly formalStates?: FormalOutlinePlanningStatePort
+    private readonly formalStates?: FormalOutlinePlanningStatePort,
+    private readonly unifiedEvents?: { read: () => Promise<UnifiedEventProjection | null>; sync?: (root: string) => Promise<boolean> }
   ) {}
 
+  async storyContractSnapshot(chapterId: number) {
+    const state = await this.inspectState()
+    const root = this.stateSources.get(state)!.root
+    const chapter = await this.documents.chapterOutline(chapterId)
+    const sources = await this.chapterSources(state, chapterId)
+    if (root !== await this.projects.currentPath()) throw new AppError('CONFLICT', '章纲为空或作品已切换。', { recoverable: true })
+    return { root, chapterId, content: chapter.content, outlineHash: hashText(chapter.content), sources, fingerprint: planningHash({ root, chapterId, content: chapter.content, sources }) }
+  }
+
+  async bindStoryContract(chapterId: number, expected: string, constraints: ChapterStoryConstraints): Promise<OutlinePlanningStatus> {
+    return this.serialize(async () => {
+      const snapshot = await this.storyContractSnapshot(chapterId)
+      if (snapshot.fingerprint !== expected) throw new AppError('CONFLICT', '作品、章纲或来源已变化，请重新准备写作约束。', { recoverable: true })
+      const state = await this.state()
+      const fresh = await this.storyContractSnapshot(chapterId)
+      if (fresh.fingerprint !== expected || this.stateSources.get(state)?.root !== fresh.root) throw new AppError('CONFLICT', '依据在核对中变化。', { recoverable: true })
+      state.chapterStoryContracts = [...(state.chapterStoryContracts ?? []).filter(c => c.chapterId !== chapterId), { chapterId, outlineHash: fresh.outlineHash, sources: fresh.sources, constraints: decodeChapterStoryConstraints(constraints) }]
+      state.chapterConfirmations = state.chapterConfirmations.filter(c => c.chapterId !== chapterId)
+      await this.saveState(state)
+      return this.projectStatus(state, chapterId)
+    })
+  }
+
   async status(chapterId?: number): Promise<OutlinePlanningStatus> {
-    const state = await this.state()
+    const state = await this.inspectState()
     return this.projectStatus(state, chapterId)
+  }
+
+  /** Map guards need saved placement identities, never outline synchronization. */
+  async worldMapEventChapterPlacements(): Promise<Pick<OutlinePlanningStatus, 'eventChapterPlacements'>> {
+    const state = await this.inspectState()
+    if (this.stateSources.get(state)?.root !== await this.projects.currentPath()) {
+      throw new AppError('CONFLICT', '地图章节关联所属的作品已变化，请重新读取。', { recoverable: true })
+    }
+    return { eventChapterPlacements: state.eventChapterPlacements.map(({ eventId, chapterId }) => ({ eventId, chapterId })) }
+  }
+
+  async inspectFormalSkeleton(entries: PlanningChapterSkeletonEntry[], volume: number): Promise<FormalSkeletonView> {
+    const state = await this.inspectState()
+    return (await this.skeletonReview(state, entries, volume)).view
+  }
+
+  async adoptFormalSkeleton(entries: PlanningChapterSkeletonEntry[], volume: number, fingerprint: string): Promise<FormalSkeletonView> {
+    return this.serialize(async () => {
+      const state = await this.inspectState()
+      const root = this.stateSources.get(state)!.root
+      const reviewed = await this.skeletonReview(state, entries, volume)
+      if (reviewed.view.fingerprint !== fingerprint || !reviewed.view.canAdopt) {
+        throw new AppError('CONFLICT', '章节安排或正式依据已变化，请重新预览后采用。', { recoverable: true })
+      }
+      // Inspection is zero-write. Initialize the legacy state only after explicit adoption.
+      const writable = await this.state()
+      if (root !== await this.projects.currentPath()
+        || planningHash(writable) !== planningHash(state)) throw new AppError('CONFLICT', '谋篇状态已变化，未采用骨架。', { recoverable: true })
+      if ((await this.skeletonReview(writable, entries, volume)).view.fingerprint !== fingerprint) {
+        throw new AppError('CONFLICT', '正式依据在核对期间变化，请重新预览。', { recoverable: true })
+      }
+      const heads = skeletonHeads(writable.formalSkeleton ?? [])
+      const history = [...(writable.formalSkeleton ?? [])]
+      for (const entry of entries) {
+        const sources = reviewed.sources.get(entry.chapter)!
+        const old = heads.get(entry.chapter)
+        if (old && planningHash(old.entry) === planningHash(entry) && !changedPlanningSources(old.sources, sources).length) continue
+        const previous = old?.revision ?? null
+        history.push({ entryId: `chapter:${entry.chapter}`, revision: skeletonRevision(entry, sources, previous), previous,
+          entry: structuredClone(entry), sources, adoptedAt: new Date().toISOString() })
+      }
+      writable.formalSkeleton = history
+      await this.saveState(writable)
+      return (await this.skeletonReview(writable, entries, volume)).view
+    })
+  }
+
+  private async skeletonReview(state: OutlineState, entries: PlanningChapterSkeletonEntry[], volume: number) {
+    if (!entries.length || entries.length > 50_000 || entries.some(e => e.volume !== volume)
+      || new Set(entries.map(e => e.chapter)).size !== entries.length) throw new AppError('VALIDATION_ERROR', '章节安排的卷或章序无效。', { recoverable: true })
+    const context = await this.sourceContext(state, entries.map(e => e.chapter))
+    const status = await this.projectStatus(state)
+    const formalVolume = status.volumes.find(v => v.volume === volume)
+    const heads = skeletonHeads(state.formalSkeleton ?? [])
+    const sources = new Map(entries.map(entry => [entry.chapter, this.sourcesForChapter(state, entry.chapter, volume, context, true)]))
+    const rows: FormalSkeletonView['entries'] = entries.map(entry => {
+      const old = heads.get(entry.chapter)
+      const reasons = old ? changedPlanningSources(old.sources, sources.get(entry.chapter)!) : []
+      const changed = old && planningHash(old.entry) !== planningHash(entry)
+      return { chapter: entry.chapter, title: entry.title, revision: old?.revision ?? null,
+        status: !old ? 'untracked' : reasons.length ? 'stale' : changed ? 'changed' : 'current', reasons }
+    })
+    const omitted = [...heads.values()].some(h => h.entry.volume === volume && !entries.some(e => e.chapter === h.entry.chapter))
+    const missingEvent = [...sources.values()].some(s => s.events.some(e => e.revision === 'missing'))
+    const canAdopt = status.totalApproval.status === 'confirmed' && formalVolume?.approval.status === 'confirmed' && !omitted && !missingEvent
+    const view: FormalSkeletonView = {
+      volume, canAdopt,
+      fingerprint: planningHash({ state, entries, sources: [...sources], total: status.totalApproval, volume: formalVolume?.approval }),
+      reason: missingEvent ? '关联的正式事件缺失或已归档，请先核对事件归属。'
+        : omitted ? '候选缺少已采用的章节；请保留这些条目，不能通过重新生成删除正式骨架。'
+        : !canAdopt ? '请先确认当前总纲与本卷卷纲，再采用章节安排。' : '逐章保存正式版本；不会改写章纲或正文。',
+      entries: rows,
+      affectedChapterIds: rows.filter(row => row.status !== 'current' && state.chapters.some(c => c.chapterId === row.chapter)).map(row => row.chapter)
+    }
+    if (await this.projects.currentPath() !== this.stateSources.get(state)?.root) throw new AppError('CONFLICT', '作品已切换，请重新读取章节安排。', { recoverable: true })
+    return { view, sources }
+  }
+
+  private async sourceContext(state: OutlineState, chapterIds: number[], providedOutlines?: OutlineList) {
+    const root = this.stateSources.get(state)?.root
+    const documents = providedOutlines ?? await this.documents.outlines()
+    const events = state.eventChapterPlacements.some(p => chapterIds.includes(p.chapterId)) ? await this.approvedEvents(root) : []
+    if (root && await this.projects.currentPath() !== root) throw new AppError('CONFLICT', '作品已切换，未读取上一部作品的依据。', { recoverable: true })
+    const chapterStages = new Map((documents.chapterOutlines ?? []).map(chapter => [chapter.chapterId, chapter.stage]))
+    const stages = new Map<number, NonNullable<PlanningSources['stage']>>()
+    // StageOutline.stage is display sequence in older books. Resolve stable identity
+    // from each chapter's actual parent, using the stage's explicit child membership.
+    for (const stage of documents.stages ?? []) for (const chapterId of stage.chapterIds) {
+      const id = chapterStages.get(chapterId)
+      if (id) stages.set(chapterId, { id, volume: stage.volume, revision: hashText(`stage-${id}\u0000${stage.title}\u0000${stage.content}`) })
+    }
+    return {
+      total: hashText(documents.total?.content ?? ''),
+      volumes: new Map(documents.volumes.map(v => [v.volume, planningHash({ content: v.content.replace(/\r\n?/g, '\n'), title: state.volumes.find(p => p.volume === v.volume)?.title ?? v.title })])),
+      stages, chapterStages,
+      events: new Map(events.map(e => [e.id, e.versionId ?? planningHash({ time: e.time, characters: e.characters, location: e.location, event: e.event, result: e.result })]))
+    }
+  }
+
+  private sourcesForChapter(state: OutlineState, chapterId: number, volume: number | null, context: Awaited<ReturnType<OutlinePlanningService['sourceContext']>>, skeleton = false): PlanningSources {
+    const outputs = new Set(skeleton ? (state.chapterEventOutputs ?? []).filter(o => o.chapterId === chapterId).flatMap(o => chapterEventOutputItems(o).map(e => e.eventId)) : [])
+    const events = chapterEventIds(state, chapterId).filter(id => !outputs.has(id)).map(id => ({ id, revision: context.events.get(id) ?? 'missing' })).sort((a, b) => a.id.localeCompare(b.id))
+    const stageId = skeleton ? null : context.chapterStages.get(chapterId)
+    const stage = stageId ? context.stages.get(chapterId) : undefined
+    if (stageId && !stage) throw new AppError('INVALID_PROJECT_STATE', '本章所属阶段缺失，请先核对大纲层级。', { recoverable: true })
+    return { total: context.total, volume, volumeHash: volume === null ? null : context.volumes.get(volume) ?? hashText(''), events, ...(stage ? { stage } : {}) }
+  }
+
+  private async skeletonSources(state: OutlineState, entry: PlanningChapterSkeletonEntry, providedOutlines?: OutlineList): Promise<PlanningSources> {
+    return this.sourcesForChapter(state, entry.chapter, entry.volume, await this.sourceContext(state, [entry.chapter], providedOutlines), true)
+  }
+
+  private async chapterSources(state: OutlineState, chapterId: number, providedOutlines?: OutlineList): Promise<PlanningSources> {
+    const sources = this.sourcesForChapter(state, chapterId, state.chapterPlacements.find(p => p.chapterId === chapterId)?.volume ?? null, await this.sourceContext(state, [chapterId], providedOutlines))
+    const head = skeletonHeads(state.formalSkeleton ?? []).get(chapterId)
+    return { ...sources, ...(head ? { skeleton: head.revision } : {}) }
+  }
+
+  async prepareChapterEvent(chapterId: number, volume: number, title: string, content: string, event: ChapterEventInput | ChapterEventInput[], constraints?: ChapterStoryConstraints): Promise<{ root: string; command: ChapterEventAdoption; replacementImpact?: ChapterEventReplacementImpact }> {
+    const events = Array.isArray(event) ? event : [event]
+    if (!events.length || events.length > MAX_CHAPTER_ADOPTION_EVENTS) throw new AppError('VALIDATION_ERROR', '请选择 1 到 20 个细节事件。', { recoverable: true })
+    const root = await this.projects.currentPath()
+    if (!this.formalStates?.chapterEventSnapshot || !this.formalStates.adoptChapterEvent) throw new AppError('FEATURE_UNAVAILABLE', '本书暂不支持章纲与事件联合采用。', { recoverable: true })
+    const snapshot = await this.formalStates.chapterEventSnapshot(root, chapterId, volume)
+    const state = normalizeState(JSON.parse(snapshot.planning.content))
+    this.stateSources.set(state, { root, contentHash: snapshot.planning.contentHash })
+    const head = skeletonHeads(state.formalSkeleton ?? []).get(chapterId)
+    const status = await this.projectStatus(state, chapterId)
+    const formalVolume = status.volumes.find(v => v.volume === volume)
+    if (!head || head.entry.volume !== volume || changedPlanningSources(head.sources, await this.skeletonSources(state, head.entry)).length
+      || status.totalApproval.status !== 'confirmed' || formalVolume?.approval.status !== 'confirmed') throw new AppError('CONFLICT', '正式骨架或上游尚未确认，请重新核对。', { recoverable: true })
+    const storedVolume = state.volumes.find(v => v.volume === volume)
+    if (!storedVolume) throw new AppError('CONFLICT', '章纲归卷已变化，请先调整归属。', { recoverable: true })
+    if (events.some(event => event.refines || event.replaces)) {
+      const linked = await this.inspectChapterEvents(chapterId)
+      for (const event of events) {
+        const selected = event.replaces ?? event.refines
+        if (!selected) continue
+        if (!linked.some(source => source.id === selected.eventId && source.version === selected.eventVersionId && source.phase === 'planned'
+          && snapshot.eventHeads.some(head => head.id === source.id && head.revision === source.version)
+          && (!event.replaces || (source.replaceable && snapshot.eventStates?.some(s => s.eventId === source.id && s.latestVersionId === source.version))))) {
+          throw new AppError('CONFLICT', '事件来源已变化或存在待审版本；替代仅限本章联合采纳的细节计划事件，请重新核对。', { recoverable: true })
+        }
+      }
+    }
+    const replaced = new Set(events.flatMap(e => e.replaces ? [e.replaces.eventId] : []))
+    const replacementImpact = replaced.size ? {
+      chapterIds: state.chapters.filter(c => c.chapterId !== chapterId && c.sources?.events.some(e => replaced.has(e.id))).map(c => c.chapterId).sort((a, b) => a - b),
+      skeletonChapterIds: [...skeletonHeads(state.formalSkeleton ?? []).values()].filter(s => s.sources.events.some(e => replaced.has(e.id))).map(s => s.entry.chapter).sort((a, b) => a - b)
+    } : undefined
+    const items = events.map(({ refines, replaces, ...event }) => ({ eventId: replaces?.eventId ?? randomUUID(), eventVersionId: randomUUID(), lifecycleId: randomUUID(), event,
+      ...(refines ? { refines: { ...refines } } : {}),
+      ...(replaces ? { replaces: { ...replaces }, expectedLifecycleId: snapshot.eventStates!.find(s => s.eventId === replaces.eventId)!.lifecycleId } : {}) }))
+    const created = items.filter(e => !e.replaces)
+    const timestamp = new Date().toISOString()
+    const sources = this.sourcesForChapter(state, chapterId, volume, await this.sourceContext(state, [chapterId]))
+    const stageParent = snapshot.parents[2]
+    if (sources.stage?.id !== (stageParent ? Number(stageParent.key.slice(6)) : undefined)
+      || sources.stage?.revision !== stageParent?.revision || (sources.stage && sources.stage.volume !== volume)) {
+      throw new AppError('CONFLICT', '本章阶段在读取中变化，请重新核对。', { recoverable: true })
+    }
+    if (JSON.stringify(sources.events) !== JSON.stringify(snapshot.eventHeads)) throw new AppError('CONFLICT', '事件版本在读取中变化，请重试。', { recoverable: true })
+    sources.skeleton = head.revision
+    sources.events = [...sources.events.filter(e => !replaced.has(e.id)), ...items.map(e => ({ id: e.eventId, revision: e.eventVersionId }))].sort((a, b) => a.id.localeCompare(b.id))
+    if (sources.events.length > 50_000) throw new AppError('VALIDATION_ERROR', '本章事件关联已达上限。', { recoverable: true })
+    state.assignments.push(...created.map(e => ({ eventId: e.eventId, assignedAt: timestamp })))
+    storedVolume.eventIds.push(...created.map(e => e.eventId))
+    state.chapterPlacements = [...state.chapterPlacements.filter(p => p.chapterId !== chapterId), { chapterId, volume, assignedAt: timestamp, updatedAt: timestamp }]
+    state.eventChapterPlacements.push(...created.map(e => ({ chapterId, eventId: e.eventId, assignedAt: timestamp, updatedAt: timestamp })))
+    state.chapters = [...state.chapters.filter(c => c.chapterId !== chapterId), { chapterId, volume, basedOnTotalRevision: state.total.revision,
+      basedOnVolumeRevision: storedVolume.revision, sources, outlineHash: chapterContentHash(content), savedAt: timestamp }]
+    state.chapterConfirmations = state.chapterConfirmations.filter(c => c.chapterId !== chapterId)
+    if (constraints) state.chapterStoryContracts = [...(state.chapterStoryContracts ?? []).filter(c => c.chapterId !== chapterId), { chapterId, outlineHash: chapterContentHash(content), sources, constraints: decodeChapterStoryConstraints(constraints) }]
+    if (await this.projects.currentPath() !== root) throw new AppError('CONFLICT', '作品已切换，请重试。', { recoverable: true })
+    return { root, ...(replacementImpact ? { replacementImpact } : {}), command: { operationId: randomUUID(), chapterId, volume, title: snapshot.chapter?.title ?? title, content,
+      expectedOutlineRevision: snapshot.chapter?.revision ?? null, parents: snapshot.parents, expectedPlanningHash: snapshot.planning.contentHash,
+      planningContent: JSON.stringify(state), expectedOrderId: snapshot.orderId, eventHeads: snapshot.eventHeads,
+      ...items[0], ...(items.length > 1 ? { additionalEvents: items.slice(1) } : {}), orderId: randomUUID(), timestamp } }
+  }
+
+  async recoverChapterEvent(operationId: string) {
+    return this.serialize(async () => {
+      const root = await this.projects.currentPath()
+      if (!this.formalStates?.recoverChapterEvent) throw new AppError('FEATURE_UNAVAILABLE', '联合采用恢复暂不可用。', { recoverable: true })
+      const result = await this.formalStates.recoverChapterEvent(root, operationId, async () => {
+        if (await this.projects.currentPath() !== root) throw new AppError('CONFLICT', '作品已切换，请重新核对。', { recoverable: true })
+      })
+      if (this.unifiedEvents?.sync) {
+        try { if (await this.unifiedEvents.sync(root)) result.mirrorsPending = result.planningMirrorsPending } catch { /* Retain pending status. */ }
+      }
+      return result
+    })
+  }
+
+  async commitChapterEvent(root: string, command: ChapterEventAdoption, guard?: () => Promise<void>): Promise<{ output: ChapterEventOutput; mirrorsPending: boolean; planningMirrorsPending: boolean }> {
+    return this.serialize(async () => {
+      if (await this.projects.currentPath() !== root || !this.formalStates?.adoptChapterEvent) throw new AppError('CONFLICT', '作品已切换，请重新核对。', { recoverable: true })
+      const result = await this.formalStates.adoptChapterEvent(root, command, async () => {
+        await guard?.()
+        if (await this.projects.currentPath() !== root) throw new AppError('CONFLICT', '作品已切换，请重新核对。', { recoverable: true })
+      })
+      if (this.unifiedEvents?.sync) {
+        try { if (await this.unifiedEvents.sync(root)) result.mirrorsPending = result.planningMirrorsPending } catch { /* Formal commit remains durable. */ }
+      }
+      return result
+    })
+  }
+
+  private async inspectState(): Promise<OutlineState> {
+    const root = await this.projects.currentPath()
+    const formal = await this.formalStates?.readOutlinePlanningState?.(root)
+    if (formal) {
+      const state = normalizeState(JSON.parse(formal.content))
+      this.stateSources.set(state, { root, contentHash: formal.contentHash, history: structuredClone(state.formalSkeleton ?? []) })
+      return state
+    }
+    // Compatibility adapters without the read port keep their existing state reader.
+    if (this.formalStates && !this.formalStates.readOutlinePlanningState) return this.state()
+    const legacy = await this.readLegacy(root)
+    this.stateSources.set(legacy.state, { root, history: structuredClone(legacy.state.formalSkeleton ?? []) })
+    return legacy.state
   }
 
   async validateLedger(): Promise<void> {
@@ -120,6 +389,30 @@ export class OutlinePlanningService {
     })
   }
 
+  async decideUpstreamReview(raw: UpstreamReviewInput): Promise<OutlinePlanningStatus> {
+    const [input] = decodeUpstreamReviewArgs([raw])
+    return this.serialize(async () => {
+      if ((await this.projects.currentSummary()).id !== input.workItemId) throw new AppError('CONFLICT', '作品已切换，请重新读取复核项。', { recoverable: true })
+      const state = await this.inspectState()
+      const status = await this.projectStatus(state, input.chapterId)
+      const finding = status.chapter?.review.upstream?.findings.find(f => f.fingerprint === input.fingerprint)
+      if (!finding || finding.status === 'blocked' || !finding.sourceVersion) throw new AppError('CONFLICT', '复核依据已变化或来源不可用，请重新核对。', { recoverable: true })
+      if ((await this.projects.currentSummary()).id !== input.workItemId) throw new AppError('CONFLICT', '作品已切换，未保存判断。', { recoverable: true })
+      if (finding.decision?.decision === input.decision && finding.decision.reason === input.reason) return status
+      state.upstreamReviewDecisions = [...(state.upstreamReviewDecisions ?? []), {
+        chapterId: input.chapterId, eventId: finding.eventId, sourceId: finding.sourceId, fingerprint: finding.fingerprint,
+        decision: input.decision, reason: input.reason, decidedAt: new Date().toISOString(),
+        evidence: { eventVersion: finding.eventVersion, sourceVersion: finding.sourceVersion,
+          provenanceRevision: finding.provenanceRevision, fields: structuredClone(finding.fields) }
+      }]
+      assertUpstreamReviewHistory(state.upstreamReviewDecisions)
+      await this.saveState(state)
+      // A concurrent event edit can only make this an historical decision. Recompute
+      // before reporting success; confirmation also derives its gate from current heads.
+      return this.projectStatus(state, input.chapterId)
+    })
+  }
+
   async reviewChapterOutline(chapterId: number): Promise<ChapterOutlineReview> {
     await this.documents.chapter(chapterId)
     const status = await this.status(chapterId)
@@ -142,13 +435,17 @@ export class OutlinePlanningService {
       const dependency = state.chapters.find((item) => item.chapterId === chapterId)
       if (!dependency) throw new AppError('INVALID_PROJECT_STATE', '当前章纲没有可确认的版本记录。', { recoverable: true })
       const eventIds = chapterEventIds(state, chapterId)
+      const eventSnapshot = await this.chapterEventDependencies(state, chapterId)
       state.chapterConfirmations = state.chapterConfirmations.filter((item) => item.chapterId !== chapterId)
       state.chapterConfirmations.push({
         chapterId,
         outlineHash: dependency.outlineHash,
+        ...(dependency.sources ? { sources: dependency.sources } : {}),
         basedOnTotalRevision: dependency.basedOnTotalRevision,
         ...(dependency.basedOnVolumeRevision !== undefined ? { basedOnVolumeRevision: dependency.basedOnVolumeRevision } : {}),
         eventIds,
+        ...(eventSnapshot.eventVersions.length ? { eventVersions: eventSnapshot.eventVersions } : {}),
+        ...(eventSnapshot.approvedRevision ? { eventApprovedRevision: eventSnapshot.approvedRevision } : {}),
         confirmedAt: new Date().toISOString()
       })
       await this.saveState(state)
@@ -192,7 +489,7 @@ export class OutlinePlanningService {
       state.planningConfirmations.push({
         scope,
         fingerprint: approval.fingerprint,
-        ...(scope !== 'total' ? { basedOnTotalFingerprint: projected.totalReview.fingerprint } : {}),
+        ...(scope !== 'total' ? { basedOnTotalFingerprint: projected.totalApproval.fingerprint } : {}),
         confirmedAt
       })
       await this.saveState(state)
@@ -393,6 +690,7 @@ export class OutlinePlanningService {
           volume: placement.volume,
           basedOnVolumeRevision: volume.revision,
           basedOnTotalRevision: state.total.revision,
+          sources: await this.chapterSources(state, input.chapterId),
           outlineHash: nextHash,
           savedAt: new Date().toISOString()
         })
@@ -402,7 +700,7 @@ export class OutlinePlanningService {
     })
   }
 
-  async updateChapterOutline(chapterId: number, content: string, plannedVolume?: number): Promise<ChapterOutlineDocument> {
+  async updateChapterOutline(chapterId: number, content: string, plannedVolume?: number, constraints?: ChapterStoryConstraints): Promise<ChapterOutlineDocument> {
     return this.serialize(async () => {
       const state = await this.state()
       const snapshot = await this.totalSnapshot(state)
@@ -425,17 +723,24 @@ export class OutlinePlanningService {
         if (!volume) throw new AppError('INVALID_PROJECT_STATE', '章节引用的篇卷不存在，已停止写入章纲。', { recoverable: true })
         volumeRevision = (await this.materializeVolume(state, volume)).revision
       }
-      const result = await this.documents.updateChapterOutline(chapterId, content, placement?.volume)
+      // A failed ledger write can be retried without appending the same manuscript again.
+      const existing = constraints ? await this.documents.chapterOutline(chapterId) : undefined
+      const result = existing?.content === content ? existing : await this.documents.updateChapterOutline(chapterId, content, placement?.volume)
       state.chapters = state.chapters.filter((item) => item.chapterId !== chapterId)
       if (content.trim()) {
         state.chapters.push({
           chapterId,
           ...(placement ? { volume: placement.volume, basedOnVolumeRevision: volumeRevision } : {}),
           basedOnTotalRevision: state.total.revision,
+          sources: await this.chapterSources(state, chapterId),
           outlineHash: hashText(content),
           savedAt: new Date().toISOString()
         })
       } else state.chapterConfirmations = state.chapterConfirmations.filter((item) => item.chapterId !== chapterId)
+      if (constraints) {
+        state.chapterStoryContracts = [...(state.chapterStoryContracts ?? []).filter(c => c.chapterId !== chapterId), { chapterId, outlineHash: hashText(content), sources: await this.chapterSources(state, chapterId), constraints: decodeChapterStoryConstraints(constraints) }]
+        state.chapterConfirmations = state.chapterConfirmations.filter(c => c.chapterId !== chapterId)
+      }
       await this.saveState(state)
       return result
     })
@@ -443,13 +748,12 @@ export class OutlinePlanningService {
 
   async assignEvent(eventId: string): Promise<OutlinePlanningStatus> {
     return this.serialize(async () => {
-      await this.approvedEvent(eventId)
       const state = await this.state()
+      await this.approvedEvent(eventId, this.stateSources.get(state)?.root)
       const snapshot = await this.totalSnapshot(state)
       await this.reconcileState(state, snapshot)
       if (state.assignments.some((item) => item.eventId === eventId)) return this.projectStatus(state)
       state.assignments.push({ eventId, assignedAt: new Date().toISOString() })
-      bumpTotalRevision(state)
       await this.saveState(state)
       return this.projectStatus(state)
     })
@@ -470,7 +774,6 @@ export class OutlinePlanningService {
         volume.eventIds = next
       })
       state.eventChapterPlacements = state.eventChapterPlacements.filter((item) => item.eventId !== eventId)
-      bumpTotalRevision(state)
       await this.saveState(state)
       return this.projectStatus(state)
     })
@@ -491,7 +794,6 @@ export class OutlinePlanningService {
       if (nextVolume > 1_000) throw new AppError('VALIDATION_ERROR', '篇卷数量已达到 1000 卷上限。', { recoverable: true })
       const now = new Date().toISOString()
       state.volumes.push({ volume: nextVolume, title: normalizedTitle, eventIds: [], revision: 0, outlineHash: hashText(''), createdAt: now, updatedAt: now })
-      bumpTotalRevision(state)
       await this.saveState(state)
       return this.projectStatus(state)
     })
@@ -539,7 +841,6 @@ export class OutlinePlanningService {
         changed = true
       }
       if (!changed) return this.projectStatus(state)
-      bumpTotalRevision(state)
       await this.saveState(state)
       return this.projectStatus(state)
     })
@@ -572,7 +873,6 @@ export class OutlinePlanningService {
         persisted.title = normalizedTitle
         persisted.updatedAt = now
       }
-      bumpTotalRevision(state)
       await this.saveState(state)
       return this.projectStatus(state)
     })
@@ -580,8 +880,8 @@ export class OutlinePlanningService {
 
   async placeEvent(eventId: string, volumeNumber: number | null): Promise<OutlinePlanningStatus> {
     return this.serialize(async () => {
-      await this.approvedEvent(eventId)
       const state = await this.state()
+      await this.approvedEvent(eventId, this.stateSources.get(state)?.root)
       const snapshot = await this.totalSnapshot(state)
       await this.reconcileState(state, snapshot)
       const effectiveVolumes = await this.effectiveVolumes(state)
@@ -610,7 +910,6 @@ export class OutlinePlanningService {
         persisted.eventIds.push(eventId)
         persisted.updatedAt = now
       }
-      bumpTotalRevision(state)
       await this.saveState(state)
       return this.projectStatus(state)
     })
@@ -652,7 +951,6 @@ export class OutlinePlanningService {
           target.eventIds.push(...linkedEventIds.filter((eventId) => !target.eventIds.includes(eventId)))
           target.updatedAt = new Date().toISOString()
         }
-        bumpTotalRevision(state)
       }
       await this.saveState(state)
       return this.projectStatus(state, chapterId)
@@ -660,10 +958,10 @@ export class OutlinePlanningService {
   }
 
   async placeEventInChapter(eventId: string, chapterId: number): Promise<OutlinePlanningStatus> {
-    await this.approvedEvent(eventId)
     await this.documents.chapter(chapterId)
     return this.serialize(async () => {
       const state = await this.state()
+      await this.approvedEvent(eventId, this.stateSources.get(state)?.root)
       const snapshot = await this.totalSnapshot(state)
       await this.reconcileState(state, snapshot)
       const chapter = state.chapterPlacements.find((item) => item.chapterId === chapterId)
@@ -680,22 +978,41 @@ export class OutlinePlanningService {
       target.updatedAt = now
       state.eventChapterPlacements = state.eventChapterPlacements.filter((item) => item.eventId !== eventId)
       state.eventChapterPlacements.push({ eventId, chapterId, assignedAt: previous?.assignedAt || now, updatedAt: now })
-      bumpTotalRevision(state)
       await this.saveState(state)
       return this.projectStatus(state, chapterId)
     })
   }
 
-  async chapterEvents(chapterId: number): Promise<CanonicalEvent[]> {
+  async chapterEvents(chapterId: number): Promise<PlanningApprovedEvent[]> {
     const state = await this.state()
     const ids = state.eventChapterPlacements.filter((item) => item.chapterId === chapterId).map((item) => item.eventId)
     if (!ids.length) return []
-    const events = new Map((await this.research.listEvents()).events.filter((item) => item.status === 'approved').map((item) => [item.id, item]))
-    return ids.map((id) => events.get(id)).filter((item): item is CanonicalEvent => Boolean(item))
+    const events = new Map((await this.approvedEvents(this.stateSources.get(state)?.root)).map((item) => [item.id, item]))
+    const missing = ids.filter((id) => !events.has(id))
+    if (missing.length) throw new AppError('INVALID_PROJECT_STATE', '本章引用的正式事件已归档、缺失或损坏，请先在谋篇中核对。', { recoverable: true, details: { eventIds: missing } })
+    return ids.map((id) => events.get(id)!)
   }
 
-  async chapterVolumeContext(chapterId: number): Promise<{ volume: number; title: string; content: string } | null> {
-    const status = await this.status(chapterId)
+  async inspectChapterEvents(chapterId: number): Promise<ChapterEventReference[]> {
+    const state = await this.inspectState()
+    const root = this.stateSources.get(state)?.root
+    const ids = chapterEventIds(state, chapterId)
+    if (ids.length > 200) throw new AppError('VALIDATION_ERROR', '本章关联事件超过单次核对上限，请在纪事中核对。', { recoverable: true })
+    const events = ids.length ? new Map((await this.approvedEvents(root)).map(event => [event.id, event])) : new Map<string, PlanningApprovedEvent>()
+    if (root !== await this.projects.currentPath()) throw new AppError('CONFLICT', '作品已切换，请重新核对。', { recoverable: true })
+    return ids.map(id => {
+      const event = events.get(id)
+      if (!event) throw new AppError('INVALID_PROJECT_STATE', '本章关联的正式事件缺失或已归档，请先核对纪事。', { recoverable: true })
+      return { id, version: event.versionId ?? null, phase: event.phase ?? 'legacy-unknown', time: event.time,
+        replaceable: event.phase === 'planned' && event.granularity === 'chapter-detail' && (state.chapterEventOutputs ?? []).some(o => o.chapterId === chapterId && chapterEventOutputItems(o).some(e => e.eventId === id)),
+        characters: [...event.characters], location: event.location, event: event.event, result: event.result ?? null }
+    })
+  }
+
+  async chapterVolumeContext(chapterId: number, statusSnapshot?: OutlinePlanningStatus): Promise<{ volume: number; title: string; content: string } | null> {
+    if (statusSnapshot?.chapter?.chapterId !== undefined && statusSnapshot.chapter.chapterId !== chapterId)
+      throw new AppError('CONFLICT', '章节规划在上下文读取期间发生变化，请重新预览。', { recoverable: true })
+    const status = statusSnapshot ?? await this.status(chapterId)
     const volumeNumber = status.chapter?.volume
     if (!volumeNumber) return null
     const volume = status.volumes.find((item) => item.volume === volumeNumber)
@@ -735,10 +1052,10 @@ export class OutlinePlanningService {
         ], {})
       }
     })
-    const totalApproval = planningApproval(state, 'total', Boolean(snapshot.content.trim()), totalReview)
+    const totalApproval = planningApproval(state, 'total', Boolean(snapshot.content.trim()), totalReview, undefined, undefined, hashText(JSON.stringify({ scope: 'total', content: snapshot.hash })))
     const volumes: OutlinePlanningVolume[] = reviewedVolumes.map(({ content, ...volume }) => ({
       ...volume,
-      approval: planningApproval(state, volume.volume, Boolean(content.trim()), volume.review, totalApproval, totalReview.fingerprint)
+      approval: planningApproval(state, volume.volume, Boolean(content.trim()), volume.review, totalApproval, totalApproval.fingerprint, hashText(JSON.stringify({ scope: volume.volume, title: volume.title, content: hashText(content) })))
     }))
     const status: OutlinePlanningStatus = {
       totalRevision,
@@ -767,22 +1084,45 @@ export class OutlinePlanningService {
       || dependency.basedOnVolumeRevision !== placedVolume.revision
       || placedVolume.externalChangeDetected
     ))
-    const stale = hasContent && (basedOnTotalRevision === undefined || basedOnTotalRevision !== totalRevision || snapshot.externalChange || contentChangedOutsideApp || volumeChanged || volumeStale)
+    // One status uses the outlines it just read; independent mutations still
+    // acquire fresh sources and every event/root check remains in the helpers.
+    const currentSources = await this.chapterSources(state, chapterId, outlineDocuments)
+    const sourceReasons = dependency?.sources ? changedPlanningSources(dependency.sources, currentSources) : []
+    const skeleton = skeletonHeads(state.formalSkeleton ?? []).get(chapterId)
+    if (skeleton) {
+      const latestSkeletonSources = await this.skeletonSources(state, skeleton.entry, outlineDocuments)
+      if (changedPlanningSources(skeleton.sources, latestSkeletonSources).length) sourceReasons.push('本章正式骨架的上游已变化，请先复核章节安排')
+    }
+    const stale = hasContent && (dependency?.sources
+      ? sourceReasons.length > 0 || contentChangedOutsideApp
+      : (basedOnTotalRevision === undefined || basedOnTotalRevision !== totalRevision || snapshot.externalChange || contentChangedOutsideApp || volumeChanged || volumeStale))
     const eventIds = chapterEventIds(state, chapterId)
-    const audit = auditChapterOutline(chapter.content, eventIds.length)
+    const eventSnapshot = await this.chapterEventDependencies(state, chapterId)
+    const record = state.chapterStoryContracts?.find(c => c.chapterId === chapterId)
+    const contractCurrent = record && record.outlineHash === hashText(chapter.content) && !changedPlanningSources(record.sources, currentSources).length
+    const parsed = parseChapterOutline(chapter.content)
+    const legacy = !record && Boolean(parsed.entryState || parsed.exitState || parsed.allowedFacts.length || parsed.forbiddenEvents.length)
+    const audit = auditChapterOutline(chapter.content, eventIds.length, contractCurrent ? record.constraints : undefined)
+    if (hasContent && !contractCurrent && !legacy) audit.issues = [{ code: 'STORY_CONTRACT_REQUIRED', level: 'error', message: record ? '故事章纲或其依据已变化，请重新准备并核对写作约束。' : '请准备并核对写作约束；故事章纲无需添加机器标签。' }]
     const upstreamIssue = totalApproval.status !== 'confirmed'
       ? { code: 'TOTAL_OUTLINE_UNCONFIRMED', level: 'error' as const, message: '请先确认当前总纲版本，再确认章纲。' }
       : placement && placedVolume?.approval.status !== 'confirmed'
         ? { code: 'VOLUME_OUTLINE_UNCONFIRMED', level: 'error' as const, message: '请先确认当前卷纲版本，再确认本章章纲。' }
         : null
-    const issues = upstreamIssue ? [...audit.issues, upstreamIssue] : audit.issues
+    const projection = await this.unifiedProjection(this.stateSources.get(state)?.root)
+    const upstream = reviewRefinements({ chapterId, outlineHash: hashText(chapter.content), sources: currentSources,
+      eventIds, approved: projection?.approved ?? [], history: state.upstreamReviewDecisions ?? [] })
+    const upstreamPending = upstream.findings.some(f => f.status !== 'clear' && f.status !== 'no-conflict')
+    const reviewIssue = upstreamPending ? [{ code: 'UPSTREAM_REVIEW_REQUIRED', level: 'error' as const, message: '本章细化事件与来源需要作者复核；请在上行复核中记录判断。' }] : []
+    const issues = [ ...audit.issues, ...reviewIssue, ...(upstreamIssue ? [upstreamIssue] : []), ...sourceReasons.map(message => ({ code: 'PLANNING_SOURCE_CHANGED', level: 'error' as const, message })) ]
     const confirmation = state.chapterConfirmations.find((item) => item.chapterId === chapterId)
     const confirmationCurrent = Boolean(confirmation && dependency
       && confirmation.outlineHash === hashText(chapter.content)
-      && confirmation.basedOnTotalRevision === totalRevision
+      && (confirmation.sources ? changedPlanningSources(confirmation.sources, currentSources).length === 0 : confirmation.basedOnTotalRevision === totalRevision)
       && confirmation.basedOnVolumeRevision === dependency.basedOnVolumeRevision
       && sameStrings(confirmation.eventIds, eventIds)
-      && !upstreamIssue)
+      && sameEventVersions(confirmation.eventVersions ?? [], eventSnapshot.eventVersions)
+      && !upstreamIssue && !upstreamPending)
     const hasAuditErrors = audit.issues.some((item) => item.level === 'error')
     const reviewStatus: ChapterOutlineReview['status'] = !hasContent
       ? 'missing'
@@ -792,12 +1132,15 @@ export class OutlinePlanningService {
           ? 'confirmed'
           : stale || confirmation
             ? 'stale'
-            : upstreamIssue ? 'needs-changes' : 'ready'
-    const contractVersion = confirmationCurrent && !stale && confirmation ? {
+            : upstreamIssue || upstreamPending ? 'needs-changes' : 'ready'
+    const contractVersion = confirmationCurrent && !stale && !hasAuditErrors && confirmation ? {
+      ...(contractCurrent ? { storyConstraints: structuredClone(record.constraints) } : {}),
       totalFingerprint: totalApproval.fingerprint,
       ...(placedVolume ? { volumeFingerprint: placedVolume.approval.fingerprint } : {}),
       outlineHash: confirmation.outlineHash,
       eventIds: [...eventIds].sort(),
+      ...(eventSnapshot.eventVersions.length ? { eventVersions: eventSnapshot.eventVersions.map((item) => ({ ...item })) } : {}),
+      ...(eventSnapshot.approvedRevision ? { eventApprovedRevision: eventSnapshot.approvedRevision } : {}),
       confirmedAt: confirmation.confirmedAt,
       fingerprint: hashText(JSON.stringify({
         chapterId,
@@ -805,6 +1148,9 @@ export class OutlinePlanningService {
         volumeFingerprint: placedVolume?.approval.fingerprint || '',
         outlineHash: confirmation.outlineHash,
         eventIds: [...eventIds].sort(),
+        eventVersions: eventSnapshot.eventVersions,
+        sources: currentSources,
+        ...(contractCurrent ? { storyConstraints: record.constraints } : {}),
         confirmedAt: confirmation.confirmedAt
       }))
     } : undefined
@@ -818,7 +1164,8 @@ export class OutlinePlanningService {
       reason: !hasContent ? 'missing' : (!dependency && !legacyBaseline) || contentChangedOutsideApp ? 'untracked' : stale ? 'upstream-changed' : 'current',
       review: {
         status: reviewStatus,
-        canConfirm: hasContent && !stale && !hasAuditErrors && !upstreamIssue,
+        canConfirm: hasContent && !stale && !hasAuditErrors && !upstreamIssue && !upstreamPending,
+        ...(upstream.findings.length || upstream.history.length ? { upstream } : {}),
         issues,
         metrics: audit.metrics,
         ...(confirmation ? { confirmedAt: confirmation.confirmedAt } : {})
@@ -828,11 +1175,56 @@ export class OutlinePlanningService {
     return status
   }
 
-  private async approvedEvent(eventId: string): Promise<CanonicalEvent> {
+  private async approvedEvent(eventId: string, expectedRoot?: string): Promise<PlanningApprovedEvent> {
+    const unified = await this.unifiedProjection(expectedRoot)
+    if (unified) {
+      const event = unified.approved.find((item) => item.eventId === eventId)
+      if (event) return projectedPlanningEvent(event)
+      if (unified.candidates.some((item) => item.eventId === eventId)) {
+        throw new AppError('CONFLICT', '事件仍是候选，必须先确认入库才能参与谋篇。', { recoverable: true })
+      }
+      if (unified.archived.some((item) => item.lifecycle.eventId === eventId)) {
+        throw new AppError('CONFLICT', '事件已归档，恢复后才能参与谋篇。', { recoverable: true })
+      }
+      throw new AppError('NOT_FOUND', '要分配的事件不存在。', { recoverable: true })
+    }
     const event = (await this.research.listEvents()).events.find((item) => item.id === eventId)
+    if (expectedRoot && await this.projects.currentPath() !== expectedRoot) throw new AppError('CONFLICT', '作品已切换，请重新操作。', { recoverable: true })
     if (!event) throw new AppError('NOT_FOUND', '要分配的事件不存在。', { recoverable: true })
     if (event.status !== 'approved') throw new AppError('CONFLICT', '事件仍是候选，必须先确认入库才能参与谋篇。', { recoverable: true })
     return event
+  }
+
+  private async approvedEvents(expectedRoot?: string): Promise<PlanningApprovedEvent[]> {
+    const unified = await this.unifiedProjection(expectedRoot)
+    if (unified) return unified.approved.map(projectedPlanningEvent)
+    const events = (await this.research.listEvents()).events.filter((item) => item.status === 'approved')
+    if (expectedRoot && await this.projects.currentPath() !== expectedRoot) throw new AppError('CONFLICT', '作品已切换，请重新操作。', { recoverable: true })
+    return events
+  }
+
+  private async chapterEventDependencies(state: OutlineState, chapterId: number): Promise<{ approvedRevision: string | null; eventVersions: PlanningEventVersion[] }> {
+    const ids = chapterEventIds(state, chapterId)
+    if (!ids.length) return { approvedRevision: null, eventVersions: [] }
+    const expectedRoot = this.stateSources.get(state)?.root
+    const unified = await this.unifiedProjection(expectedRoot)
+    if (!unified) return { approvedRevision: null, eventVersions: [] }
+    const events = new Map(unified.approved.map((item) => [item.eventId, item]))
+    const missing = ids.filter((id) => !events.has(id))
+    if (missing.length) throw new AppError('INVALID_PROJECT_STATE', '本章引用的正式事件已归档、缺失或损坏，请先在谋篇中核对。', { recoverable: true, details: { eventIds: missing } })
+    return {
+      approvedRevision: unified.approvedRevision,
+      eventVersions: ids.map((eventId) => {
+        const event = events.get(eventId)!
+        return { eventId, versionId: event.versionId, phase: event.phase }
+      })
+    }
+  }
+
+  private async unifiedProjection(expectedRoot?: string): Promise<UnifiedEventProjection | null> {
+    const projection = await this.unifiedEvents?.read() ?? null
+    if (expectedRoot && await this.projects.currentPath() !== expectedRoot) throw new AppError('CONFLICT', '作品已切换，请重新操作。', { recoverable: true })
+    return projection
   }
 
   private async effectiveVolumes(state: OutlineState, existingOutlines?: VolumeOutline[]): Promise<EffectiveVolume[]> {
@@ -919,11 +1311,11 @@ export class OutlinePlanningService {
         if (error instanceof AppError) throw error
         throw new AppError('INVALID_PROJECT_STATE', 'SQLite 中的谋篇工作流损坏，已停止写入。', { recoverable: false })
       }
-      this.stateSources.set(state, { root, contentHash: formal.contentHash })
+      this.stateSources.set(state, { root, contentHash: formal.contentHash, history: structuredClone(state.formalSkeleton ?? []) })
       return state
     }
     const legacy = await this.readLegacy(root, file)
-    this.stateSources.set(legacy.state, { root })
+    this.stateSources.set(legacy.state, { root, history: structuredClone(legacy.state.formalSkeleton ?? []) })
     return legacy.state
   }
 
@@ -942,11 +1334,12 @@ export class OutlinePlanningService {
     const source = this.stateSources.get(state)
     const root = source?.root ?? await this.projects.currentPath()
     if (await this.projects.currentPath() !== root) throw new AppError('CONFLICT', '作品已切换，未写入上一部作品的谋篇状态。', { recoverable: true })
+    assertSkeletonHistoryAppend(source?.history ?? [], state.formalSkeleton ?? [])
     const content = JSON.stringify(state)
     if (this.formalStates && await this.formalStates.active(root)) {
       const expectedContentHash = source?.contentHash ?? hashText(content)
       const saved = await this.formalStates.replaceOutlinePlanningState(root, expectedContentHash, content)
-      this.stateSources.set(state, { root, contentHash: saved.contentHash })
+      this.stateSources.set(state, { root, contentHash: saved.contentHash, history: structuredClone(state.formalSkeleton ?? []) })
       return
     }
     await writeJson(await this.file(root), state)
@@ -1019,13 +1412,14 @@ function planningApproval(
   hasContent: boolean,
   review: PlanningOutlineReview,
   totalApproval?: PlanningOutlineApproval,
-  totalFingerprint?: string
+  totalFingerprint?: string,
+  approvalFingerprint = review.fingerprint
 ): PlanningOutlineApproval {
   const confirmation = state.planningConfirmations.find((item) => item.scope === scope)
   const reviewReady = review.status === 'clear' || review.status === 'acknowledged'
   const parentReady = scope === 'total' || totalApproval?.status === 'confirmed'
   const current = Boolean(confirmation
-    && confirmation.fingerprint === review.fingerprint
+    && confirmation.fingerprint === approvalFingerprint
     && (scope === 'total' || confirmation.basedOnTotalFingerprint === totalFingerprint)
     && parentReady)
   const status: PlanningOutlineApproval['status'] = !hasContent
@@ -1055,7 +1449,7 @@ function planningApproval(
     status,
     canConfirm: hasContent && reviewReady && parentReady && !current,
     reason,
-    fingerprint: review.fingerprint,
+    fingerprint: approvalFingerprint,
     ...(current ? { confirmedAt: confirmation?.confirmedAt } : {})
   }
 }
@@ -1064,6 +1458,15 @@ function normalizeState(value: unknown): OutlineState {
   if (!value || typeof value !== 'object') throw corruptState()
   const candidate = value as Partial<OutlineState>
   if (candidate.version !== 1 || !candidate.total || typeof candidate.total !== 'object') throw corruptState()
+  const records = candidate.chapterStoryContracts
+  if (records !== undefined) {
+    if (!Array.isArray(records) || records.length > 50_000 || new Set(records.map(r => r?.chapterId)).size !== records.length) throw corruptState()
+    for (const r of records) {
+      if (!r || !Number.isSafeInteger(r.chapterId) || r.chapterId < 1 || r.chapterId > 1_000_000 || !/^[a-f0-9]{64}$/.test(r.outlineHash)) throw corruptState()
+      assertPlanningSources(r.sources)
+      try { decodeChapterStoryConstraints(r.constraints) } catch { throw corruptState() }
+    }
+  }
   const revision = Number(candidate.total.revision)
   const manuscriptStarts = candidate.manuscriptStarts === undefined ? [] : candidate.manuscriptStarts
   if (!Array.isArray(manuscriptStarts) || !manuscriptStarts.every(item => item
@@ -1108,6 +1511,10 @@ function normalizeState(value: unknown): OutlineState {
   const chapterPlacements = rawPlacements as ChapterPlacement[]
   const eventChapterPlacements = rawEventChapterPlacements as EventChapterPlacement[]
   const chapters = candidate.chapters as ChapterDependency[]
+  for (const item of chapters) if (item.sources !== undefined) assertPlanningSources(item.sources)
+  if (candidate.upstreamReviewDecisions !== undefined) assertUpstreamReviewHistory(candidate.upstreamReviewDecisions)
+  if (candidate.formalSkeleton !== undefined) assertSkeletonHistory(candidate.formalSkeleton)
+  if (candidate.chapterEventOutputs !== undefined) assertChapterEventOutputs(candidate.chapterEventOutputs)
   const rawConfirmations = candidate.chapterConfirmations === undefined ? [] : candidate.chapterConfirmations
   if (!Array.isArray(rawConfirmations) || !rawConfirmations.every((item) => (
     item && Number.isInteger(item.chapterId) && item.chapterId > 0
@@ -1116,9 +1523,20 @@ function normalizeState(value: unknown): OutlineState {
     && (item.basedOnVolumeRevision === undefined || (Number.isInteger(item.basedOnVolumeRevision) && item.basedOnVolumeRevision >= 0))
     && Array.isArray(item.eventIds) && item.eventIds.every((id) => typeof id === 'string' && id.length > 0)
     && new Set(item.eventIds).size === item.eventIds.length
+    && (item.eventVersions === undefined || (Array.isArray(item.eventVersions)
+      && item.eventVersions.every((entry) => entry && typeof entry.eventId === 'string' && item.eventIds.includes(entry.eventId)
+        && typeof entry.versionId === 'string' && entry.versionId.length > 0
+        && (entry.phase === 'planned' || entry.phase === 'realized' || entry.phase === 'deviated' || entry.phase === 'legacy-unknown'))
+      && new Set(item.eventVersions.map((entry) => entry.eventId)).size === item.eventVersions.length))
+    && (item.eventApprovedRevision === undefined || (typeof item.eventApprovedRevision === 'string' && /^[a-f0-9]{64}$/.test(item.eventApprovedRevision)))
     && typeof item.confirmedAt === 'string' && !Number.isNaN(Date.parse(item.confirmedAt))
   ))) throw corruptState()
-  const chapterConfirmations = rawConfirmations.map((item) => ({ ...item, eventIds: [...item.eventIds].sort() })) as ChapterConfirmation[]
+  for (const item of rawConfirmations) if (item.sources !== undefined) assertPlanningSources(item.sources)
+  const chapterConfirmations = rawConfirmations.map((item) => ({
+    ...item,
+    eventIds: [...item.eventIds].sort(),
+    ...(item.eventVersions ? { eventVersions: [...item.eventVersions].sort((left, right) => left.eventId.localeCompare(right.eventId)) } : {})
+  })) as ChapterConfirmation[]
   if (new Set(chapterConfirmations.map((item) => item.chapterId)).size !== chapterConfirmations.length) throw corruptState()
   const rawAcknowledgements = candidate.outlineReviewAcknowledgements === undefined ? [] : candidate.outlineReviewAcknowledgements
   if (!Array.isArray(rawAcknowledgements) || !rawAcknowledgements.every((item) => (
@@ -1167,8 +1585,12 @@ function normalizeState(value: unknown): OutlineState {
     eventChapterPlacements,
     chapters,
     chapterConfirmations,
+    ...(records !== undefined ? { chapterStoryContracts: records } : {}),
     outlineReviewAcknowledgements,
-    planningConfirmations
+    planningConfirmations,
+    ...(candidate.upstreamReviewDecisions !== undefined ? { upstreamReviewDecisions: candidate.upstreamReviewDecisions } : {}),
+    ...(candidate.formalSkeleton !== undefined ? { formalSkeleton: candidate.formalSkeleton } : {}),
+    ...(candidate.chapterEventOutputs !== undefined ? { chapterEventOutputs: candidate.chapterEventOutputs } : {})
   }
 }
 
@@ -1187,6 +1609,26 @@ function hashText(value: string): string {
   return createHash('sha256').update(value.replace(/\r\n?/g, '\n'), 'utf8').digest('hex')
 }
 
+function projectedPlanningEvent(item: ProjectedStoryEvent): PlanningApprovedEvent {
+  return {
+    id: item.eventId,
+    time: item.content.time,
+    characters: [...item.content.characters],
+    location: item.content.location,
+    event: item.content.event,
+    ...(item.content.result !== undefined ? { result: item.content.result } : {}),
+    evidenceRefs: item.content.evidenceRefs.map((reference) => ({ ...reference })),
+    confidence: item.content.confidence,
+    status: 'approved',
+    createdAt: item.createdAt,
+    approvedAt: item.createdAt,
+    ...(item.content.title !== undefined ? { title: item.content.title } : {}),
+    versionId: item.versionId,
+    phase: item.phase,
+    granularity: item.granularity
+  }
+}
+
 function volumeTitleKey(value: string): string {
   return value.trim().normalize('NFKC').toLocaleLowerCase('zh-CN')
 }
@@ -1202,4 +1644,13 @@ function chapterEventIds(state: OutlineState, chapterId: number): string[] {
 
 function sameStrings(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+function sameEventVersions(left: PlanningEventVersion[], right: PlanningEventVersion[]): boolean {
+  const normalized = (items: PlanningEventVersion[]) => [...items].sort((a, b) => a.eventId.localeCompare(b.eventId))
+  const leftItems = normalized(left), rightItems = normalized(right)
+  return leftItems.length === rightItems.length && leftItems.every((item, index) => {
+    const other = rightItems[index]
+    return other?.eventId === item.eventId && other.versionId === item.versionId && other.phase === item.phase
+  })
 }

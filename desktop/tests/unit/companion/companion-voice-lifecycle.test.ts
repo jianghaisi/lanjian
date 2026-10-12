@@ -34,6 +34,7 @@ test('settings preview is lazy; closing during pending configuration suppresses 
     assert.equal(statusCalls, 0)
     assert.equal(openCalls, 0)
     const opening = voice.open()
+    await new Promise(setImmediate) // Shared settings finish loading before configuration.
     assert.equal(statusCalls, 1)
     voice.close()
     const closedLabel = voice.stateLabel.value
@@ -68,7 +69,7 @@ test('a late preview session is closed, retry opens normally, and unmount releas
   try {
     app.mount({})
     const opening = voice.open()
-    await Promise.resolve()
+    await new Promise(setImmediate)
     assert.equal(opens, 1)
     voice.close()
     pending.resolve({ sessionId: 'late' })
@@ -99,6 +100,7 @@ test('library preparation starts during mount but never warms after unmount whil
   const app=renderer.createApp({setup(){useCompanionRuntime();return()=>null}})
   try {
     app.mount({}); t.mock.timers.tick(1500)
+    await new Promise(setImmediate)
     assert.equal(statusCalls,1)
     app.unmount(); pending.resolve({installed:true})
     await new Promise(setImmediate)

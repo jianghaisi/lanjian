@@ -1,4 +1,7 @@
+import type { ProjectMetadata } from './project-service'
 import { AppError } from '../../../core/errors/app-error'
+import { readLoadCheck, settleLoadCheck } from './workspace-load-checks'
+import type { WorkspaceLoadCheckInput, WorkspaceLoadCheckResult } from '../../../../contracts/library/types'
 import type {
   AiSettings,
   BookProfile,
@@ -7,12 +10,12 @@ import type {
   CheatSystemData,
   ContinuationAnalysisState,
   DocumentImportRecovery,
+  EventProjectionDto,
   FoundationData,
   OutlineList,
   PlanningPackageProposal,
   PowerSystemData,
   ProjectMigrationPreview,
-  ProjectSummary,
   PromptProfileView,
   RealmLevel,
   ResearchSettings,
@@ -24,7 +27,7 @@ import type {
 export type WorkspaceBootstrapDependencies = {
   projects: {
     currentPath: () => Promise<string>
-    currentSummary: () => Promise<ProjectSummary>
+    currentSummary: (options: { includeManuscript: false }) => Promise<ProjectMetadata>
     migrationPreview: () => Promise<ProjectMigrationPreview>
   }
   documents: {
@@ -39,9 +42,9 @@ export type WorkspaceBootstrapDependencies = {
     cheatSystem: () => Promise<CheatSystemData>
     systemTemplate: () => Promise<{ template: string }>
     foundation: () => Promise<FoundationData>
-    bookProfile: (summary?: ProjectSummary) => Promise<BookProfile>
-    promptProfile: (provided?: { profile: BookProfile; summary: ProjectSummary }) => Promise<PromptProfileView>
-    builtInPromptProfile: (provided?: { profile: BookProfile; summary: ProjectSummary }) => Promise<PromptProfileView>
+    bookProfile: (summary?: ProjectMetadata) => Promise<BookProfile>
+    promptProfile: (provided?: { profile: BookProfile; summary: ProjectMetadata }) => Promise<PromptProfileView>
+    builtInPromptProfile: (provided?: { profile: BookProfile; summary: ProjectMetadata }) => Promise<PromptProfileView>
   }
   aiSettings: () => Promise<AiSettings>
   researchSettings: () => Promise<ResearchSettings>
@@ -49,6 +52,7 @@ export type WorkspaceBootstrapDependencies = {
     listSources: () => Promise<{ sources: SourceCard[] }>
     listEvents: () => Promise<{ events: CanonicalEvent[] }>
   }
+  eventProjection?: { read: () => Promise<EventProjectionDto | null> }
   outlinePlanning?: { validateLedger: () => Promise<void> }
   characterStates?: { validateLedger: () => Promise<void> }
   planningDraft: () => Promise<PlanningPackageProposal | null>
@@ -56,13 +60,49 @@ export type WorkspaceBootstrapDependencies = {
   continuation: () => Promise<ContinuationAnalysisState>
 }
 
-type WorkspaceIdentity = { id: string; path: string; summary: ProjectSummary }
+type WorkspaceIdentity = { id: string; path: string; summary: ProjectMetadata }
 
 export class WorkspaceBootstrapService {
+  private generation = 0
   constructor(private readonly dependencies: WorkspaceBootstrapDependencies) {}
 
+  invalidate(): void { this.generation++ }
+
+  private async assertScope(identity: { id: string; path: string }, generation: number): Promise<void> {
+    const path = await this.dependencies.projects.currentPath()
+    if (generation !== this.generation || identity.path !== path) throw changedWorkItem()
+  }
+
+  /** Only the two failed projections; no manuscript reload, compatibility import or mirror sync. */
+  async recheck(input: WorkspaceLoadCheckInput): Promise<WorkspaceLoadCheckResult> {
+    const generation = this.generation
+    const path = await this.dependencies.projects.currentPath()
+    if (input.workItem.id !== path || input.workItem.path !== path) throw changedWorkItem()
+    const workItem = { id: path, path }
+    const assertCurrent = () => this.assertScope(workItem, generation)
+    await assertCurrent()
+    const result: WorkspaceLoadCheckResult = { workItem, checkedIds: [...input.issueIds], issues: [] }
+    await Promise.all(input.issueIds.map(async id => {
+      if (id === 'modelSettingsUnreadable') {
+        const read = () => readLoadCheck(id, this.dependencies.aiSettings)
+        const check = await settleLoadCheck(await read(), read, assertCurrent)
+        result.aiSettings = check.value
+        result.issues.push(...check.issues)
+      } else {
+        const read = () => readLoadCheck(id, () => this.dependencies.eventProjection?.read() ?? Promise.resolve(null))
+        const check = await settleLoadCheck(await read(), read, assertCurrent)
+        result.eventProjection = check.value
+        result.issues.push(...check.issues)
+      }
+    }))
+    await assertCurrent()
+    return result
+  }
+
   async load(): Promise<WorkspaceBootstrapProjection> {
+    const generation = this.generation
     const identity = await this.readIdentity()
+    await this.assertScope(identity, generation)
     const profile = this.dependencies.workspace.bookProfile(identity.summary)
     const chapters = this.dependencies.documents.chapters()
       .then((value) => ({ value, issues: [] as WorkspaceBootstrapProjection['issues'] }))
@@ -132,6 +172,9 @@ export class WorkspaceBootstrapService {
           recovery: 'manualReview' as const
         }]
       }))
+    const readEvents = () => readLoadCheck('unifiedEventsUnreadable', () => this.dependencies.eventProjection?.read() ?? Promise.resolve(null))
+    const readModels = () => readLoadCheck('modelSettingsUnreadable', this.dependencies.aiSettings)
+    const eventProjection = readEvents()
     const outlinePlanning = this.dependencies.outlinePlanning?.validateLedger()
       .then(() => ({ issues: [] as WorkspaceBootstrapProjection['issues'] }))
       .catch((error: unknown) => ({
@@ -156,7 +199,7 @@ export class WorkspaceBootstrapService {
       })) ?? Promise.resolve({ issues: [] as WorkspaceBootstrapProjection['issues'] })
     const [
       chapterResult, outlines, timeline, realms, powerSystem, cheatSystem, systemTemplate, foundation, bookProfile,
-      aiSettings, researchSettings, migration, sourcesResult, eventsResult, outlinePlanningResult, characterStateResult, planningResult, promptProfileResult, importRecoveries, continuation
+      aiSettings, researchSettings, migration, sourcesResult, eventsResult, eventProjectionResult, outlinePlanningResult, characterStateResult, planningResult, promptProfileResult, importRecoveries, continuation
     ] = await Promise.all([
       chapters,
       this.dependencies.documents.outlines(),
@@ -167,14 +210,12 @@ export class WorkspaceBootstrapService {
       this.dependencies.workspace.systemTemplate(),
       this.dependencies.workspace.foundation(),
       profile,
-      this.dependencies.aiSettings().then(value => ({ value, issues: [] as WorkspaceBootstrapProjection['issues'] })).catch(() => ({
-        value: null, issues: [{ id: 'modelSettingsUnreadable' as const, area: 'aiSettings' as const,
-          title: '模型分配暂不可用', message: '模型配置或共享接口库无法读取；原配置已保留，请到模型设置核对。正文仍可读写，不会自动更换接口。', recovery: 'manualReview' as const }]
-      })),
+      readModels(),
       this.dependencies.researchSettings(),
       this.dependencies.projects.migrationPreview(),
       sources,
       events,
+      eventProjection,
       outlinePlanning,
       characterStates,
       planning,
@@ -182,7 +223,16 @@ export class WorkspaceBootstrapService {
       this.dependencies.importRecoveries(),
       this.dependencies.continuation()
     ])
+    const assertCurrent = () => this.assertScope(identity, generation)
+    await assertCurrent()
+    // Opening providers can create/close WAL files or finish compatibility work.
+    // Retry only acquisition drift after those providers have settled.
+    const [settledEvents, settledModels] = await Promise.all([
+      settleLoadCheck(eventProjectionResult, readEvents, assertCurrent),
+      settleLoadCheck(aiSettings, readModels, assertCurrent)
+    ])
     const confirmed = await this.readIdentity()
+    await assertCurrent()
     if (identity.id !== confirmed.id || identity.path !== confirmed.path) throw changedWorkItem()
     return {
       version: 1,
@@ -196,22 +246,23 @@ export class WorkspaceBootstrapService {
       systemTemplate,
       foundation,
       bookProfile,
-      aiSettings: aiSettings.value,
+      aiSettings: settledModels.value,
       researchSettings,
       migration,
       sources: sourcesResult.value,
       events: eventsResult.value,
+      eventProjection: settledEvents.value,
       planningDraft: planningResult.value,
       promptProfile: promptProfileResult.value,
       importRecoveries,
       continuation,
-      issues: [...planningResult.issues, ...promptProfileResult.issues, ...sourcesResult.issues, ...eventsResult.issues, ...outlinePlanningResult.issues, ...characterStateResult.issues, ...chapterResult.issues, ...aiSettings.issues]
+      issues: [...planningResult.issues, ...promptProfileResult.issues, ...sourcesResult.issues, ...eventsResult.issues, ...settledEvents.issues, ...outlinePlanningResult.issues, ...characterStateResult.issues, ...chapterResult.issues, ...settledModels.issues]
     }
   }
 
   private async readIdentity(): Promise<WorkspaceIdentity> {
     const path = await this.dependencies.projects.currentPath()
-    const summary = await this.dependencies.projects.currentSummary()
+    const summary = await this.dependencies.projects.currentSummary({ includeManuscript: false })
     const confirmedPath = await this.dependencies.projects.currentPath()
     if (path !== confirmedPath || summary.path !== path) throw changedWorkItem()
     return { id: summary.id, path, summary }

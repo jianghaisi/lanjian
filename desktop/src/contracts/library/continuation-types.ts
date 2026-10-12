@@ -2,6 +2,7 @@ import type { BookProfile, CheatSystemData, FoundationData, PowerSystemData } fr
 import type { TimelineEvent } from '../timeline/types'
 import type { CharacterStateView } from '../characters/types'
 import type { OutlinePlanningStatus } from '../planning/types'
+import type { CreativePolicyRecord } from '@lanjian/writing-plugin-contracts'
 
 export type ContinuationAnalysisArea =
   | 'projectDefinition'
@@ -43,6 +44,7 @@ export type ContinuationAnalysisCandidate = {
   sections: ContinuationAnalysisSection[]
   gaps: ContinuationGap[]
   rationale: string
+  creativePolicy?: CreativePolicyRecord[]
   adoption?: {
     projectDefinition?: {
       candidateFingerprint: string
@@ -53,6 +55,10 @@ export type ContinuationAnalysisCandidate = {
       candidateFingerprint: string
       eventFingerprint: string
       timelineEventId: string
+      eventVersionId?: string
+      operationId?: string
+      sourceManifestId?: string
+      sourceFingerprint?: string
       adoptedAt: string
     }>
     characters?: Array<{

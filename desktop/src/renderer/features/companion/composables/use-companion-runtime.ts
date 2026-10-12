@@ -13,14 +13,21 @@ export function companionRuntimeOptions(value: CompanionVoicePreferences) {
 
 /** One preparation owner; the opening overlay observes its readiness, not a second load. */
 export function useCompanionRuntime(libraryReady: Ref<boolean> = ref(true)) {
-  const { preferences } = useCompanionVoicePreferences()
+  const { preferences, ready: settingsReady } = useCompanionVoicePreferences()
   const api = window.novelDesktop?.companionVoice
   let epoch = 0, mounted = false
   async function sync() {
-    if (!mounted) return
-    if (!libraryReady.value) return
+    const token = ++epoch
+    await settingsReady
+    if (!mounted || token !== epoch) return
+    if (!libraryReady.value) {
+      companionPreparationPhase.value = 'idle'
+      companionPreparation.value = '等待作品库'
+      companionPreparationError.value = ''
+      return
+    }
     if (!api) { companionPreparationPhase.value = 'failed'; companionPreparation.value = '当前环境不支持本地模型'; return }
-    const token = ++epoch, value = { ...preferences.value }
+    const value = { ...preferences.value }
     companionPreparationPhase.value = 'idle'
     companionPreparationError.value = ''
     companionPreparation.value = value.textModel || !value.mute ? '按需加载' : '预设陪伴 · 不加载模型'

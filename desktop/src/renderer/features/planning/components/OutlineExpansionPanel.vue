@@ -20,12 +20,12 @@ const labels: Record<string, string> = { queued: '排队中', preparing: '准备
     <template v-if="source">
       <details class="expansion-source"><summary>依据：{{ source.title || '当前大纲' }} · 已保存版本</summary><p>{{ source.content }}</p></details>
       <form class="expansion-form" @submit.prevent="emit('start', { count, instruction })">
-        <label>拆为几{{ layer }}<input v-assist-field="{ id: 'OutlineExpansionPanel.count', read: () => count, write: value => { count = Number(value) } }" v-model.number="count" data-testid="outline-expansion-count" type="number" min="1" max="12" required :disabled="busy || Boolean(running)"></label>
+        <label>预计几{{ layer }}<input v-assist-field="{ id: 'OutlineExpansionPanel.count', read: () => count, write: value => { count = Number(value) } }" v-model.number="count" data-testid="outline-expansion-count" type="number" min="1" max="12" required :disabled="busy || Boolean(running)"></label>
         <label class="expansion-instruction">本次要求（可选）<input v-assist-field="{ id: 'OutlineExpansionPanel.instruction', read: () => instruction, write: value => { instruction = String(value) } }" v-model="instruction" maxlength="2000" placeholder="例如：先安排校园日常，保留对话和吐槽" :disabled="busy || Boolean(running)"></label>
         <button v-if="!running" class="control-button primary compact" data-testid="start-outline-expansion" type="submit" :disabled="busy || loading || !source.content.trim() || !Number.isInteger(count) || count < 1 || count > 12">{{ busy ? '正在提交…' : `生成${layer}纲候选` }}</button>
         <button v-else class="control-button secondary compact" type="button" :disabled="busy" @click="emit('cancel', running.id)">停止生成</button>
       </form>
-      <p class="expansion-hint">首次结果若未通过 JSON 或字段校验，会按本书设置尝试修复。结果仍只作为候选，不代表正式采用。</p>
+      <p class="expansion-hint">数量按实际故事节奏调整。生成后复核因果、展开与重复；可修问题最多修正一次。结果仍为候选，需预览采用。</p>
       <p v-if="!tasks.length && !loading" class="expansion-empty">还没有本层候选。可以先拆少量节点，再逐步完善。</p>
       <article v-for="task in tasks" :key="task.id" class="expansion-task" data-testid="outline-expansion-task">
         <header><b>{{ task.adoptedKeys?.length ? '已采用 · 待复核' : labels[task.status] || task.status }}</b><span>{{ task.model }} · {{ new Date(task.createdAt).toLocaleString('zh-CN') }}</span></header>
@@ -37,7 +37,7 @@ const labels: Record<string, string> = { queued: '排队中', preparing: '准备
         </details>
         <details v-for="(child, index) in task.proposal?.children || []" :key="index" :open="index === 0" class="expansion-child">
           <summary>{{ index + 1 }} · {{ child.title }}</summary><p>{{ child.content }}</p>
-          <ol><li v-for="(event, eventIndex) in child.events" :key="eventIndex"><small>{{ event.time }} · {{ event.characters.join('、') }} · {{ event.location }}</small><p>{{ event.event }}</p></li></ol>
+          <details><summary>查看事件依据</summary><ol><li v-for="(event, eventIndex) in child.events" :key="eventIndex"><small>{{ event.time }} · {{ event.characters.join('、') }} · {{ event.location }}</small><p>{{ event.event }}</p></li></ol></details>
         </details>
         <small v-if="task.proposal" class="expansion-hint">{{ task.adoptedKeys?.length ? `已写入 ${task.adoptedKeys.length} 项正式大纲；未自动确认，未生成正文。` : '已保存到本书候选记录；尚未写入正式层级。' }}</small>
         <div v-if="['failed', 'cancelled', 'interrupted'].includes(task.status)" class="expansion-actions">

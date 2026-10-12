@@ -11,5 +11,8 @@ import '../assets/desktop-redesign.css'
 import '../assets/workspace-design.css'
 import '../assets/narrative-terminal.css'
 import '../assets/approved-archive.css'
+import '../assets/archive-workspace.css'
+import '../assets/library-settings.css'
+import '../assets/interaction-motion.css'
 
 createApp(App).directive('assist-field', assistFieldDirective).mount('#app')

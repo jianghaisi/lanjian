@@ -136,9 +136,13 @@ test('a schema 40 backup remains restorable; only the independent restored copy 
   // explicitly known additive structures to reproduce a genuine old snapshot.
   const db = new DatabaseSync(path)
   try {
+    removeEmptyReviewSchema(db)
     const definitions = db.prepare("SELECT type, name FROM sqlite_schema WHERE name LIKE 'manuscript_%' ORDER BY CASE type WHEN 'trigger' THEN 0 WHEN 'index' THEN 1 ELSE 2 END").all()
     for (const { type, name } of definitions) db.exec(`DROP ${String(type).toUpperCase()} "${String(name)}"`)
-    db.exec(`DROP TRIGGER projects_schema_version_v42_after_insert;
+    db.exec(`DROP TABLE event_operation_receipts;
+      DROP TABLE event_display_order_versions;
+      DROP TABLE event_lifecycle_versions;
+      DROP TRIGGER projects_schema_version_v${WORKSPACE_DATABASE_SCHEMA_VERSION}_after_insert;
       ALTER TABLE projects DROP COLUMN text_authority;
       CREATE TRIGGER projects_schema_version_v40_after_insert AFTER INSERT ON projects
       BEGIN UPDATE projects SET current_schema_version = 40 WHERE id = NEW.id; END;
@@ -468,3 +472,4 @@ async function treeContainsText(root: string, needle: string): Promise<boolean> 
   }
   return walk(root)
 }
+import { removeEmptyReviewSchema } from '../../fixtures/remove-empty-review-schema'

@@ -77,6 +77,18 @@ test('row/acknowledgement input ordering is normalized without reordering source
   assert.equal(JSON.stringify(reviewEventMigrationDecisions(snapshot, first)), JSON.stringify(reviewEventMigrationDecisions(snapshot, shuffled)))
 })
 
+test('confirmation exposes deterministic source order with forward-linked identities at their first occurrence', async () => {
+  const snapshot = retained({ sources: { version: 1, sources: [source] }, events: { version: 1, events: [event] },
+    timeline: { events: [direct('a'), direct('b'), direct('a')] } })
+  const { session } = harness(snapshot)
+  const preview = await session.preview(), input = decisions(snapshot)
+  input.rows[2] = { rowIndex: 2, disposition: 'link-existing', targetRowIndex: 4 }
+  input.rows.reverse()
+  const result = await session.review(preview.previewId, input)
+  assert.deepEqual(result.displayOrderRowIndices, [1, 4, 3])
+  assert.ok(Object.isFrozen(result.displayOrderRowIndices))
+})
+
 for (const [name, mutate] of [
   ['missing row', (v: EventMigrationDecisionsInput) => v.rows.pop()],
   ['duplicate row', (v: EventMigrationDecisionsInput) => { v.rows[1] = v.rows[0]! }],

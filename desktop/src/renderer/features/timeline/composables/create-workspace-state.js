@@ -22,11 +22,31 @@ export function createTimelineState(ports) {
 
   const canonicalEvents = ref([])
 
+  const eventProjection = ref(null)
+
+  const unifiedEvents = ref([])
+
+  const archivedUnifiedEvents = ref([])
+
+  const unifiedEventCandidates = ref([])
+
+  const eventMigrationState = ref(null)
+
+  const eventMigrationBusy = ref(false)
+
+  const eventMigrationError = ref('')
+
   const eventDraft = ref({ sourceId: '', time: '', characters: '', location: '', event: '', result: '' })
 
-  const approvedEvents = computed(() => canonicalEvents.value.filter((item) => item.status === 'approved'))
+  const unifiedEventMode = computed(() => eventProjection.value !== null)
 
-  const timelineEntryCount = computed(() => approvedEvents.value.length + timeline.value.length)
+  const approvedEvents = computed(() =>
+    unifiedEventMode.value ? unifiedEvents.value : canonicalEvents.value.filter((item) => item.status === 'approved')
+  )
+
+  const timelineEntryCount = computed(() =>
+    approvedEvents.value.length + (unifiedEventMode.value ? 0 : timeline.value.length)
+  )
 
   const timelineVolumeCards = computed(() =>
     ports.outlinePlanning.value.volumes.map((volume) => {
@@ -56,6 +76,14 @@ export function createTimelineState(ports) {
     timelineVolumeLoading,
     timelineVolumeError,
     canonicalEvents,
+    eventProjection,
+    unifiedEvents,
+    archivedUnifiedEvents,
+    unifiedEventCandidates,
+    eventMigrationState,
+    eventMigrationBusy,
+    eventMigrationError,
+    unifiedEventMode,
     eventDraft,
     approvedEvents,
     timelineEntryCount,

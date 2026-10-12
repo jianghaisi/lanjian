@@ -23,6 +23,16 @@ const sourcePaths: Record<EventSourceKind, string[]> = {
 export class LocalEventSourceSnapshotReader implements EventSourceSnapshotPort {
   constructor(private readonly databases: Pick<WorkspaceDatabaseFactory, 'openEventReadOnly'>) {}
 
+  async assertUnchanged(snapshot: EventSourceSnapshot): Promise<void> {
+    const root = await canonicalDirectory(snapshot.scope.root)
+    if (root !== snapshot.scope.root) throw changedSources()
+    for (const kind of EVENT_SOURCE_KINDS) {
+      const file = await readSourceFile(root, kind, EVENT_SNAPSHOT_MAX_BYTES, false)
+      if (file.hash !== snapshot.files[kind].hash || file.byteLength !== snapshot.files[kind].byteLength) throw changedSources()
+    }
+    if (await canonicalDirectory(root) !== root) throw changedSources()
+  }
+
   async capture(scope: EventSnapshotScope): Promise<EventSourceSnapshot> {
     if (!this.databases.openEventReadOnly) {
       throw new AppError('FEATURE_UNAVAILABLE', '只读事件快照暂不可用，未尝试迁移或修改作品。', { recoverable: true })
@@ -40,46 +50,7 @@ export class LocalEventSourceSnapshotReader implements EventSourceSnapshotPort {
     const db = await this.databases.openEventReadOnly(root)
     let snapshot: Omit<EventSourceSnapshot, 'fingerprint'>
     try {
-      const formal = db?.storageMode() === 'sqlite'
-      const documents = {} as Record<EventSourceKind, EventSourceDocument>
-      const mirrors = {} as EventSourceSnapshot['mirrors']
-      let rows = 0
-      for (const kind of EVENT_SOURCE_KINDS) {
-        const stored = formal && db ? formalDocument(db, kind) : null
-        if (stored) {
-          bytes += Buffer.byteLength(stored.content, 'utf8')
-          if (bytes > EVENT_SNAPSHOT_MAX_BYTES) throw eventSnapshotLimit()
-          if (hash(stored.content) !== stored.contentHash) throw invalidEventSource(kind)
-        }
-        const content = stored?.content ?? fileText(kind, files[kind])
-        const decoded = decodeEventSourceDocument(kind, content)
-        documents[kind] = {
-          authority: stored ? 'sqlite' : 'file', content,
-          contentHash: stored?.contentHash ?? files[kind].hash,
-          revision: stored?.revision ?? null, ...decoded
-        }
-        rows += decoded.occurrences.length
-        if (rows > EVENT_SNAPSHOT_MAX_ROWS) throw eventSnapshotLimit()
-        mirrors[kind] = stored && db ? mirror(db, kind) : null
-      }
-      const eventHistory: EventSourceSnapshot['eventHistory'] = []
-      if (documents.events.authority === 'sqlite' && db) {
-        for (const occurrence of documents.events.occurrences) {
-          if (occurrence.originalId === null) throw invalidEventSource('events')
-          const versions = db.listCanonicalEventVersions(occurrence.originalId)
-          rows += versions.length
-          bytes += Buffer.byteLength(JSON.stringify(versions), 'utf8')
-          if (rows > EVENT_SNAPSHOT_MAX_ROWS || bytes > EVENT_SNAPSHOT_MAX_BYTES) throw eventSnapshotLimit()
-          eventHistory.push({ eventId: occurrence.originalId, versions, heads: db.canonicalEventVersionHeads(occurrence.originalId) })
-        }
-      }
-      const chapterCatalog = db ? db.eventChapterCatalog() : { manuscripts: 'unavailable' as const, outlines: 'unavailable' as const, entries: [] }
-      rows += chapterCatalog.entries.length
-      bytes += Buffer.byteLength(JSON.stringify(chapterCatalog), 'utf8')
-      if (rows > EVENT_SNAPSHOT_MAX_ROWS || bytes > EVENT_SNAPSHOT_MAX_BYTES) throw eventSnapshotLimit()
-      snapshot = { version: 1, scope: { ...scope }, database: db ? {
-        projectId: db.projectId, schemaVersion: db.schemaVersion, storageMode: db.storageMode(), hasMigrationEvidence: db.hasEventMigrationEvidence()
-      } : null, documents, files, mirrors, eventHistory, chapterCatalog }
+      snapshot = eventSnapshotFromDatabase(db, scope, files)
     } finally { db?.close() }
     // Parse only the retained buffers; this second pass hashes current bytes to
     // reject a changed/missing/appeared file across acquisition, not to refresh it.
@@ -93,6 +64,53 @@ export class LocalEventSourceSnapshotReader implements EventSourceSnapshotPort {
     const fingerprint = eventSourceFingerprint(snapshot)
     return freeze({ ...snapshot, fingerprint })
   }
+}
+
+/** Uses the caller's pinned read or BEGIN IMMEDIATE transaction. No file IO,
+ * migrations or nested transactions; identical fingerprint inputs in both lanes. */
+export function eventSnapshotFromDatabase(db: WorkspaceEventReadPort | null, scope: EventSnapshotScope,
+  files: EventSourceSnapshot['files']): Omit<EventSourceSnapshot, 'fingerprint'> {
+  let bytes = EVENT_SOURCE_KINDS.reduce((sum, kind) => sum + files[kind].byteLength, 0)
+  const formal = db?.storageMode() === 'sqlite'
+  const documents = {} as Record<EventSourceKind, EventSourceDocument>
+  const mirrors = {} as EventSourceSnapshot['mirrors']
+  let rows = 0
+  for (const kind of EVENT_SOURCE_KINDS) {
+    const stored = formal && db ? formalDocument(db, kind) : null
+    if (stored) {
+      bytes += Buffer.byteLength(stored.content, 'utf8')
+      if (bytes > EVENT_SNAPSHOT_MAX_BYTES) throw eventSnapshotLimit()
+      if (hash(stored.content) !== stored.contentHash) throw invalidEventSource(kind)
+    }
+    const content = stored?.content ?? fileText(kind, files[kind])
+    const decoded = decodeEventSourceDocument(kind, content)
+    documents[kind] = {
+      authority: stored ? 'sqlite' : 'file', content,
+      contentHash: stored?.contentHash ?? files[kind].hash,
+      revision: stored?.revision ?? null, ...decoded
+    }
+    rows += decoded.occurrences.length
+    if (rows > EVENT_SNAPSHOT_MAX_ROWS) throw eventSnapshotLimit()
+    mirrors[kind] = stored && db ? mirror(db, kind) : null
+  }
+  const eventHistory: EventSourceSnapshot['eventHistory'] = []
+  if (documents.events.authority === 'sqlite' && db) {
+    for (const occurrence of documents.events.occurrences) {
+      if (occurrence.originalId === null) throw invalidEventSource('events')
+      const versions = db.listCanonicalEventVersions(occurrence.originalId)
+      rows += versions.length
+      bytes += Buffer.byteLength(JSON.stringify(versions), 'utf8')
+      if (rows > EVENT_SNAPSHOT_MAX_ROWS || bytes > EVENT_SNAPSHOT_MAX_BYTES) throw eventSnapshotLimit()
+      eventHistory.push({ eventId: occurrence.originalId, versions, heads: db.canonicalEventVersionHeads(occurrence.originalId) })
+    }
+  }
+  const chapterCatalog = db ? db.eventChapterCatalog() : { manuscripts: 'unavailable' as const, outlines: 'unavailable' as const, entries: [] }
+  rows += chapterCatalog.entries.length
+  bytes += Buffer.byteLength(JSON.stringify(chapterCatalog), 'utf8')
+  if (rows > EVENT_SNAPSHOT_MAX_ROWS || bytes > EVENT_SNAPSHOT_MAX_BYTES) throw eventSnapshotLimit()
+  return { version: 1, scope: { ...scope }, database: db ? {
+    projectId: db.projectId, schemaVersion: db.schemaVersion, storageMode: db.storageMode(), hasMigrationEvidence: db.hasEventMigrationEvidence()
+  } : null, documents, files, mirrors, eventHistory, chapterCatalog }
 }
 
 /** The persisted receipt and live acquisition must use the same fingerprint contract. */

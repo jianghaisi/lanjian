@@ -76,12 +76,21 @@ test('retrieves exact evidence only from saved chapters before the target chapte
   assert.doesNotMatch(JSON.stringify(pack), /幕后主使/)
 })
 
+test('cancelled context read does not start formal manuscript retrieval', async () => {
+  const controller = new AbortController()
+  controller.abort()
+  const service = new LocalRetrievalService(project(), {
+    chapters: async () => { throw new Error('cancelled read must not fetch chapters') }
+  })
+  await assert.rejects(service.build({ chapterId: 2, chapterPosition: 2, queryParts: ['线索'], signal: controller.signal }))
+})
+
 test('rebuilds revision evidence from the current manuscript without writing an index', async () => {
-  const values = [chapter(1, 1, '旧信', '林知夏把旧信收进抽屉。'), chapter(2, 2, '复查', '')]
+  const values = [chapter(1, 1, '旧信', '陈景安把旧信收进抽屉。'), chapter(2, 2, '复查', '')]
   const service = new LocalRetrievalService(project(), { chapters: async () => values })
-  const before = await service.build({ chapterId: 2, chapterPosition: 2, queryParts: ['林知夏 旧信'] })
-  values[0] = chapter(1, 1, '旧信', '林知夏把旧信交给了校长。')
-  const after = await service.build({ chapterId: 2, chapterPosition: 2, queryParts: ['林知夏 旧信'] })
+  const before = await service.build({ chapterId: 2, chapterPosition: 2, queryParts: ['陈景安 旧信'] })
+  values[0] = chapter(1, 1, '旧信', '陈景安把旧信交给了校长。')
+  const after = await service.build({ chapterId: 2, chapterPosition: 2, queryParts: ['陈景安 旧信'] })
 
   assert.notEqual(before.evidence[0].manuscriptRevision, after.evidence[0].manuscriptRevision)
   assert.match(after.evidence[0].excerpt, /交给了校长/)
@@ -89,10 +98,10 @@ test('rebuilds revision evidence from the current manuscript without writing an 
 })
 
 test('enforces the character budget and reports omitted lower-priority evidence', async () => {
-  const values = [1, 2, 3].map((position) => chapter(position, position, `旧案${position}`, `林知夏在示例中学核对旧案线索。${'证据'.repeat(100)}`))
+  const values = [1, 2, 3].map((position) => chapter(position, position, `旧案${position}`, `陈景安在示例中学核对旧案线索。${'证据'.repeat(100)}`))
   values.push(chapter(4, 4, '当前章', ''))
   const service = new LocalRetrievalService(project(), { chapters: async () => values }, 200)
-  const pack = await service.build({ chapterId: 4, chapterPosition: 4, queryParts: ['林知夏 示例中学 旧案线索'] })
+  const pack = await service.build({ chapterId: 4, chapterPosition: 4, queryParts: ['陈景安 示例中学 旧案线索'] })
 
   assert.ok(pack.budget.usedCharacters <= 200)
   assert.equal(pack.budget.maxCharacters, 200)

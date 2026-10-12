@@ -111,6 +111,22 @@ function definitionFor(taskType: string, variant: string): TaskContractDefinitio
     allowedOperations: ['generate:artifact', 'read:context-package', 'read:project'],
     forbiddenOperations: [...neverFormalWrites]
   }
+  if (taskType === 'annotation_revision') return {
+    templateId: 'builtin:annotation-revision', templateVersion: 1,
+    templateSource: 'annotation-revision/v1: frozen author annotations, selected document and formal constraints -> exact-quote changes or ask_author',
+    inputSchema: commonInput, outputSchema: proposalEnvelope,
+    allowedOperations: ['generate:artifact', 'derive:diff', 'read:context-package', 'read:project', 'ask:author'],
+    forbiddenOperations: [...neverFormalWrites]
+  }
+  if (taskType === 'prose_event_extraction') return {
+    templateId:'builtin:prose-event-extraction',templateVersion:1,
+    templateSource:'prose-event-extraction/v1: saved chapter with exact UTF-16 quotes -> non-canon event candidates; explicit author settlement only',
+    inputSchema:commonInput,
+    outputSchema:{type:'array',maxItems:30,items:{type:'object',required:['fields','quotes','supplements'],additionalProperties:false,
+      properties:{fields:{type:'object'},quotes:{type:'array',minItems:1,maxItems:5},supplements:{type:'array',maxItems:0}}}},
+    allowedOperations:['generate:artifact','create:event-candidates','read:chapter'],
+    forbiddenOperations:[...neverFormalWrites,'write:canonical-event','confirm:settlement']
+  }
   if (taskType === 'fact_extraction') return {
     templateId: 'builtin:fact-extraction', templateVersion: 1,
     templateSource: 'fact-extraction/v1: frozen confirmed body -> structured fact-change candidates',

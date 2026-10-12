@@ -81,6 +81,7 @@ test('the single composer sends natural dialogue and refuses a prose handoff aft
   const app=renderer.createApp({setup(){assistant=useFieldAssistant(api,{page:()=> 'desk',chapterId:()=>1,selectedCharacters:()=>12,proseSnapshot:()=>snapshot,requiresPreview:()=>false,async prose(input){prose.push(input.message)}});return ()=>null}})
   app.mount({})
   try{
+    await assistant.memory.ready()
     assistant.instruction.value='把选中的这段改得简洁些';const run=assistant.send();assert.equal(sent[0].message,'把选中的这段改得简洁些');assert.equal(assistant.selectedKey.value,'')
     snapshot='author-typed-new-draft';release({kind:'prose',message:'处理正文',instruction:'润色选段',tools:['交给正文助笔']});await run
     assert.equal(prose.length,0);assert.match(assistant.error.value,/已变化/);assert.equal(assistant.instruction.value,'把选中的这段改得简洁些')

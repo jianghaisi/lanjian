@@ -70,15 +70,16 @@ UPDATE projects SET current_schema_version = 42;
 ALTER TABLE manuscript_text_objects ADD COLUMN autosave_temporary INTEGER NOT NULL DEFAULT 0 CHECK(autosave_temporary IN (0, 1));
 ` + fileModeGuards.join('\n') + '\n' + textTables.map(table => `CREATE INDEX manuscript_${table}_hash ON ${table}(content_hash);`).join('\n')
 
-export function assertManuscriptTextSchema(database: DatabaseSync, version: number): void {
+export function assertManuscriptTextSchema(database: DatabaseSync, version: number, providedDefinitions?: ReadonlyMap<string, string | null>): void {
   const guarded = version >= 42 || hasIntermediateManuscriptSchema41(database)
   const definitions = [...manuscriptTextObjectsMigrationSql.matchAll(/CREATE TABLE manuscript_[\s\S]*?\n\);/g)].map(match =>
     guarded && match[0].startsWith('CREATE TABLE manuscript_text_objects ')
       ? match[0].replace('range_end INTEGER NULL,', 'range_end INTEGER NULL, autosave_temporary INTEGER NOT NULL DEFAULT 0 CHECK(autosave_temporary IN (0, 1)),') : match[0])
   const indexes = textTables.map(table => `CREATE INDEX manuscript_${table}_hash ON ${table}(content_hash);`)
+  const lookup = providedDefinitions ? undefined : database.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?')
   for (const definition of [...definitions, ...(guarded ? [...fileModeGuards, ...indexes] : [])]) {
     const [, type, name] = /^CREATE (TABLE|TRIGGER|INDEX) (\w+)/.exec(definition)!
-    const actual = database.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?').get(type.toLowerCase(), name)?.sql
+    const actual = providedDefinitions ? providedDefinitions.get(`${type.toLowerCase()}:${name}`) : lookup!.get(type.toLowerCase(), name)?.sql
     const compact = (sql: string) => sql.trim().replace(/;$/, '').replace(/\s+/g, ' ')
     if (typeof actual !== 'string' || compact(actual) !== compact(definition)) throw integrity('稿件引用结构或保护约束不完整，未尝试自动修复。')
   }

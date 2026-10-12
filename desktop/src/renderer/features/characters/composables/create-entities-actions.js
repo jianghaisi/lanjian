@@ -1,5 +1,54 @@
+import { getCurrentInstance, onMounted, watch } from 'vue'
+import { readWorldbookProfile } from '../../../../contracts/characters/worldbook'
 // Explicit live ports preserve the existing book/request scope and draft ownership.
 export function createCharactersEntitiesActions(ports) {
+  const drafts = new Map()
+  let loadGeneration = 0
+  const emptyDraft = () => ({ id: '', entityType: 'character', canonicalName: '', profileJson: '{}', status: 'approved' })
+  const blockedRecovery = new Set()
+  const recoveryKey = path => `lanjian.worldbook-draft.v1:${encodeURIComponent(path)}`
+  const storage = () => ports.recoveryStorage ?? globalThis.localStorage
+  function restoreDraft(path, fallback = emptyDraft()) {
+    if (!path) return emptyDraft()
+    if (drafts.has(path)) return drafts.get(path)
+    try {
+      const raw = storage()?.getItem(recoveryKey(path))
+      if (!raw) return fallback
+      const saved = JSON.parse(raw)
+      if (saved.version !== 1 || !saved.draft || Object.keys(emptyDraft()).some(key => typeof saved.draft[key] !== 'string')) throw new Error('invalid recovery draft')
+      return saved.draft
+    } catch {
+      blockedRecovery.add(path)
+      ports.notice('世界书恢复草稿暂时无法读取，原记录已保留；本次编辑请手动保存。')
+      return emptyDraft()
+    }
+  }
+  function persistDraft(path, draft) {
+    if (!path || blockedRecovery.has(path)) return
+    try {
+      if (JSON.stringify(draft) === JSON.stringify(emptyDraft())) storage()?.removeItem(recoveryKey(path))
+      else storage()?.setItem(recoveryKey(path), JSON.stringify({ version: 1, draft }))
+    } catch {
+      blockedRecovery.add(path)
+      ports.notice('世界书恢复草稿无法写入本机，当前输入仍保留；关闭前请保存条目。')
+    }
+  }
+  function observeDrafts() {
+    if (ports.current.value?.path) ports.storyEntityDraft.value = restoreDraft(ports.current.value.path, ports.storyEntityDraft.value)
+    watch(() => ports.current.value?.path, (path, previous) => {
+      loadGeneration++
+      if (previous) drafts.set(previous, JSON.parse(JSON.stringify(ports.storyEntityDraft.value)))
+      ports.storyEntityDraft.value = restoreDraft(path)
+      ports.storyEntities.value = []
+      ports.storyEntityRelations.value = []
+      ports.storyEntitiesLoaded.value = false
+    }, { flush: 'sync' })
+    watch(ports.storyEntityDraft, draft => persistDraft(ports.current.value?.path, draft), { deep: true, flush: 'sync' })
+  }
+  // The controller creates actions before their state refs. Resolve live ports
+  // only once setup has completed; Vue owns disposal of the mounted watchers.
+  if (getCurrentInstance()) onMounted(observeDrafts)
+  else observeDrafts()
   async function loadCharacterAliases() {
     if (!ports.current.value || !ports.desktop?.workspace?.listCharacterAliases) return
     try {
@@ -32,6 +81,7 @@ export function createCharactersEntitiesActions(ports) {
 
   async function loadStoryEntities() {
     if (!ports.current.value || !ports.desktop?.workspace?.listStoryEntities) return
+    const path = ports.current.value.path, generation = ++loadGeneration
     try {
       const [entities, relations, ledger] = await Promise.all([
         ports.desktop.workspace.listStoryEntities(),
@@ -40,6 +90,7 @@ export function createCharactersEntitiesActions(ports) {
           ? ports.desktop.workspace.getResourceLedger()
           : Promise.resolve({ balances: [], entries: [] })
       ])
+      if (generation !== loadGeneration || path !== ports.current.value?.path) return
       ports.storyEntities.value = entities
       ports.storyEntityRelations.value = relations
       ports.resourceLedger.value = ledger
@@ -52,10 +103,8 @@ export function createCharactersEntitiesActions(ports) {
       }
       ports.storyEntitiesLoaded.value = true
     } catch {
-      ports.storyEntities.value = []
-      ports.storyEntityRelations.value = []
-      ports.resourceLedger.value = { balances: [], entries: [] }
-      ports.storyEntitiesLoaded.value = false
+      if (generation !== loadGeneration || path !== ports.current.value?.path) return
+      ports.notice('世界书暂时无法读取，已保留当前草稿；重新进入此页可重试。')
     }
   }
 
@@ -73,13 +122,15 @@ export function createCharactersEntitiesActions(ports) {
 
   async function saveStoryEntity() {
     const draft = ports.storyEntityDraft.value
+    const path = ports.current.value?.path, submitted = JSON.stringify(draft)
     if (!draft.canonicalName.trim()) return ports.notice('请先填写资料对象名称')
     try {
-      JSON.parse(draft.profileJson)
+      readWorldbookProfile(JSON.parse(draft.profileJson))
     } catch {
-      return ports.notice('档案内容需要是有效 JSON')
+      return ports.notice('档案或世界书格式无效，请核对后保存；草稿已保留。')
     }
-    const saved = await ports.guard(
+    let saved
+    try { saved = await ports.guard(
       () =>
         ports.desktop.workspace.saveStoryEntity({
           ...(draft.id ? { id: draft.id } : {}),
@@ -88,8 +139,10 @@ export function createCharactersEntitiesActions(ports) {
           profileJson: draft.profileJson,
           status: draft.status
         }),
-      `“${draft.canonicalName.trim()}”已保存为正式资料`
-    )
+      `“${draft.canonicalName.trim()}”世界书条目已保存`
+    ) } catch { return } // guard already surfaced the write error; retain this draft.
+    if (!saved || path !== ports.current.value?.path) return
+    if (ports.storyEntityDraft.value !== draft || JSON.stringify(draft) !== submitted) { await loadStoryEntities(); return }
     ports.storyEntityDraft.value = {
       id: '',
       entityType: 'character',

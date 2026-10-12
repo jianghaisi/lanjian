@@ -29,7 +29,7 @@ async function fixture(context: TestContext) {
   await documents.updateChapter(1, { title: '第一章', content: '旧句。' })
   let tick = 0
   const databases = new SqliteWorkspaceDatabaseFactory(
-    () => new Date(`2026-09-01T08:00:${String(tick++).padStart(2, '0')}.000Z`),
+    () => new Date(Date.parse('2026-09-01T08:00:00.000Z') + tick++ * 1000),
     () => `00000000-0000-4000-8000-${String(tick).padStart(12, '0')}`
   )
   const source = new CurrentProjectLegacyWorkspaceSource(projects, documents)

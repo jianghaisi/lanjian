@@ -11,7 +11,7 @@ const sliders = [
 </script>
 <template>
   <fieldset class="dialogue-settings" data-testid="companion-dialogue-settings">
-    <legend>人物对话框 <button type="button" @click="reset">恢复默认</button></legend>
+    <legend><span>人物对话框</span><button type="button" @click="reset">恢复默认</button></legend>
     <div class="dialogue-settings-controls">
       <label v-for="item in sliders" :key="item.key"><span>{{ item.label }}</span><input type="range" :min="item.min" :max="item.max" step="1" :value="Math.round(preferences[item.key] * item.factor)" :data-testid="`dialogue-${item.key}`" @input="update({ [item.key]: Number(($event.target as HTMLInputElement).value) / item.factor })"><output>{{ Math.round(preferences[item.key] * item.factor) }}{{ item.unit }}</output></label>
       <label><span>优先位置</span><select :value="preferences.placement" @change="update({ placement: ($event.target as HTMLSelectElement).value as CompanionDialogueAppearance['placement'] })"><option value="auto">自动避让</option><option value="above">人物上方优先</option><option value="right">人物右侧优先</option></select></label>

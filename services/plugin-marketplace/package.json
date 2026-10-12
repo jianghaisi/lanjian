@@ -1,0 +1,29 @@
+{
+  "name": "@lanjian/plugin-marketplace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "tsx --test tests/*.test.ts",
+    "start": "node dist/server.js",
+    "test:oidc": "node scripts/oidc-smoke.mjs",
+    "test:recovery": "node scripts/backup-restore-smoke.mjs"
+  },
+  "dependencies": {
+    "@lanjian/writing-plugin-contracts": "file:../../packages/writing-plugin-contracts",
+    "@lanjian/writing-plugin-package": "file:../../packages/writing-plugin-package",
+    "fastify": "5.12.5",
+    "jose": "6.2.12"
+  },
+  "devDependencies": {
+    "@types/node": "26.3.0",
+    "tsx": "4.23.12",
+    "typescript": "7.0.2",
+    "jszip": "3.10.1"
+  }
+}

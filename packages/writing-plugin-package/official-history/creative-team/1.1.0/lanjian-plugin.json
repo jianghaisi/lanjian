@@ -1,0 +1,37 @@
+{
+  "apiVersion": 1,
+  "id": "lanjian.official.creative-team",
+  "name": "创作团队",
+  "version": "1.1.0",
+  "description": "默认创作团队的成员、职责和工作范围。可派生个人团队；权限、作者确认和正式采用由应用检查。",
+  "runtime": "quickjs-js",
+  "entry": "main.js",
+  "capabilities": [],
+  "tools": [],
+  "categoryIds": [
+    "workflow",
+    "interaction"
+  ],
+  "tags": [
+    "创作团队"
+  ],
+  "assets": [
+    "team.json"
+  ],
+  "contributions": [
+    {
+      "id": "team",
+      "name": "创作团队",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "assistant"
+      ],
+      "kind": "team-preset",
+      "asset": "team.json"
+    }
+  ]
+}

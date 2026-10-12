@@ -1,9 +1,18 @@
+import { decodeChapterStoryConstraints } from '../planning/chapter-story-contract'
+import { decodeLiteraryFindings } from '../review/literary-findings'
+import { decodeChapterUpstreamReview } from '../planning/upstream-review-contracts'
 import { fieldAssistantResultDecoders } from '../assistant/field-assistant-contracts'
 import { assistantConversationResultDecoders } from '../assistant/assistant-conversation-contracts'
+import { assistantRunResultDecoders, decodeAssistantRunView } from '../assistant/assistant-run-contracts'
+import { decodeAuthorAnswerReceipt, interactionArray } from '../assistant/author-interaction-contracts'
+import { writingPluginResultDecoders } from '../writing-plugins/management-contracts'
+import { authoringResultDecoders } from '../writing-plugins/authoring'
+import { marketplaceResultDecoders } from '../writing-plugins/marketplace'
+import { bundledPluginResultDecoders } from '../writing-plugins/bundled'
 export type IpcValueDecoder = (value: unknown, path: string) => unknown
 
 const planningStatusChannels = [
-  'outlines:planning-status', 'outlines:acknowledge-review', 'outlines:confirm-planning',
+  'outlines:decide-upstream-review', 'outlines:planning-status', 'outlines:acknowledge-review', 'outlines:confirm-planning',
   'outlines:assign-event', 'outlines:unassign-event', 'outlines:create-volume', 'outlines:rename-volume',
   'outlines:place-event', 'outlines:place-event-in-chapter', 'outlines:place-chapter', 'outlines:confirm-chapter'
 ]
@@ -18,8 +27,15 @@ const factJobChannels = [
 ]
 
 export const workflowIpcValueDecoders: Readonly<Record<string, IpcValueDecoder>> = {
+  ...writingPluginResultDecoders,
+  ...authoringResultDecoders,
+  ...marketplaceResultDecoders,
+  ...bundledPluginResultDecoders,
   ...fieldAssistantResultDecoders,
   ...assistantConversationResultDecoders,
+  ...assistantRunResultDecoders,
+  'assistant-runs:recent': value => interactionArray(value, 100, decodeAssistantRunView),
+  'author-interactions:answer': decodeAuthorAnswerReceipt,
   'projects:sqlite-shadow-preview': migrationPreview('shadow'),
   'projects:sqlite-shadow-import': migrationCommit('shadow'),
   'projects:sqlite-storage-status': sqliteStorageStatus,
@@ -267,15 +283,24 @@ function chapterPlanningStatus(value: unknown, path: string): void {
   chapterReview(result.review, `${path}.review`)
   if (result.contractVersion !== undefined) {
     const version = object(result.contractVersion, `${path}.contractVersion`)
+    if (version.storyConstraints !== undefined) { try { decodeChapterStoryConstraints(version.storyConstraints) } catch { invalid(`${path}.contractVersion.storyConstraints`) } }
     for (const field of ['fingerprint', 'totalFingerprint', 'outlineHash'] as const) fingerprint(version[field], `${path}.contractVersion.${field}`)
     if (version.volumeFingerprint !== undefined) fingerprint(version.volumeFingerprint, `${path}.contractVersion.volumeFingerprint`)
     stringArray(version.eventIds, `${path}.contractVersion.eventIds`, 256)
+    if (version.eventApprovedRevision !== undefined) fingerprint(version.eventApprovedRevision, `${path}.contractVersion.eventApprovedRevision`)
+    if (version.eventVersions !== undefined) array(version.eventVersions, `${path}.contractVersion.eventVersions`).forEach((item, index) => {
+      const event = object(item, `${path}.contractVersion.eventVersions[${index}]`)
+      identifier(event.eventId, `${path}.contractVersion.eventVersions[${index}].eventId`)
+      identifier(event.versionId, `${path}.contractVersion.eventVersions[${index}].versionId`)
+      oneOf(event.phase, ['planned', 'realized', 'deviated', 'legacy-unknown'], `${path}.contractVersion.eventVersions[${index}].phase`)
+    })
     date(version.confirmedAt, `${path}.contractVersion.confirmedAt`)
   }
 }
 
 function chapterReview(value: unknown, path: string): unknown {
   const result = object(value, path)
+  if (result.upstream !== undefined) decodeChapterUpstreamReview(result.upstream)
   oneOf(result.status, ['missing', 'needs-changes', 'ready', 'confirmed', 'stale'], `${path}.status`)
   bool(result.canConfirm, `${path}.canConfirm`)
   array(result.issues, `${path}.issues`).forEach((item, index) => {
@@ -427,6 +452,10 @@ function chapterProposal(value: unknown, path: string): void {
   const report = object(result.report, `${path}.report`)
   bool(report.passed, `${path}.report.passed`)
   text(report.summary, `${path}.report.summary`, 100_000)
+  if (report.literaryFindings !== undefined) {
+    const findings = decodeLiteraryFindings(report.literaryFindings, `${path}.report.literaryFindings`)
+    if (report.passed && findings.some(finding => finding.severity === 'blocking')) invalid(`${path}.report.passed`)
+  }
 }
 
 function contextPackage(value: unknown, path: string): void {
@@ -525,6 +554,7 @@ function contextFactPack(value: unknown, path: string): unknown {
   if (result.chapterId !== undefined) positive(result.chapterId, `${path}.chapterId`)
   stringArray(result.queryTerms, `${path}.queryTerms`, 10_000)
   const structured = object(result.structured, `${path}.structured`)
+  if (structured.eventApprovedRevision !== undefined) fingerprint(structured.eventApprovedRevision, `${path}.structured.eventApprovedRevision`)
   for (const field of ['canonicalEvents', 'characterSnapshots', 'characterAliases'] as const) array(structured[field], `${path}.structured.${field}`)
   array(structured.approvedFacts, `${path}.structured.approvedFacts`).forEach((item, index) => approvedFact(item, `${path}.structured.approvedFacts[${index}]`))
   if (structured.latestApprovedSummary !== undefined) {

@@ -28,6 +28,20 @@ test('selected continuation is independent of shelf order and invalidates the pr
   await assert.rejects(service.request(10, { ...input, ...session, requestId: 'old' }, () => {}))
 })
 
+test('pet uses confirmed work, survives unrelated library reads, and owner closure keeps shared speech resident', async () => {
+  const { service, calls, input } = fixture()
+  service.configure({ textModel: false, speechModel: false, preload: false, voice: 'ningguang' })
+  service.updateWork({ id: 'work-2', title: '当前作品', chapter: '第二章' })
+  const pet = service.open(20, 'work-current')
+  service.updateLibrary([{ id: 'other', title: '其他作品', chapter: null }], 'other')
+  service.closeOwner(10)
+  const result = await service.request(20, { ...input, ...pet, text: '继续创作是哪部作品？' }, () => {})
+  assert.match(result.text, /当前作品/); assert.doesNotMatch(result.text, /其他作品/)
+  service.updateWork({ id: 'work-3', title: '新作品', chapter: null })
+  await assert.rejects(service.request(20, { ...input, ...pet, requestId: 'stale' }, () => {}))
+  service.closeOwner(20)
+  assert.ok(!calls.includes('stop-speech')); assert.ok(!calls.includes('stop'))
+})
 test('warmup preserves safe actionable failures instead of returning an indistinguishable false', async () => {
   const { service } = fixture({ prepare: async () => { throw new Error('VOICE_PREPARATION_STALLED:runtime') } })
   service.configure({ textModel: false, speechModel: true, preload: true, voice: 'ningguang' })

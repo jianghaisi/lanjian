@@ -1,0 +1,92 @@
+{
+  "realm": "lanjian-plugins-test",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "accessTokenLifespan": 300,
+  "clientScopes": [
+    {
+      "name": "plugins:publish",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "market-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "lanjian-plugin-market",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "lanjian-desktop",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "cn.zuolan.novelwriter:/oauth/callback"
+      ],
+      "webOrigins": [],
+      "protocolMappers": [
+        {
+          "name": "stable-publisher-subject",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "config": { "access.token.claim": "true", "introspection.token.claim": "true" }
+        }
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "defaultClientScopes": [],
+      "optionalClientScopes": [
+        "plugins:publish"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "author-a",
+      "enabled": true,
+      "firstName": "Test",
+      "lastName": "Author a",
+      "email": "author-a@example.invalid",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "author-a-test-only",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "author-b",
+      "enabled": true,
+      "firstName": "Test",
+      "lastName": "Author b",
+      "email": "author-b@example.invalid",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "author-b-test-only",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

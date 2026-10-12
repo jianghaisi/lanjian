@@ -25,7 +25,7 @@ export class LocalVoiceRuntime {
     private readonly profile: 'text' | 'speech' = 'text', private readonly releaseResident: () => void = () => { if (this.profile === 'text') this.stop() },
     private readonly diagnostic?: (chunk: Buffer) => void) {}
 
-  async available(): Promise<boolean> {
+  async available(capability: 'chat' | 'asr' = 'chat'): Promise<boolean> {
     try {
       if (this.profile === 'speech') {
         const assets = JSON.parse(await readFile(join(dirname(this.workerScript), 'gpt-sovits-assets.json'), 'utf8')) as {voices:Array<{key:string}>;models:Array<{key:string;files:Array<[string,number,string,string]>}>}
@@ -33,7 +33,7 @@ export class LocalVoiceRuntime {
           ...assets.models.filter(model => model.key === 'gpt-sovits' || model.key === 'gpt-sovits-g2pw' || assets.voices.some(voice => voice.key === model.key)).flatMap(model => model.files
             .filter(file => model.key !== 'gpt-sovits' || file[0].startsWith('chinese-hubert-base/') || file[0].startsWith('chinese-roberta-wwm-ext-large/'))
             .map(file => `models/${model.key}/${file[0]}`))].map(path => access(join(this.root, path))))
-      } else await Promise.all(['venv/Scripts/python.exe', 'models/llm/Qwen3-1.7B-Q8_0.gguf'].map(path => access(join(this.root, path))))
+      } else await Promise.all(['venv/Scripts/python.exe', ...(capability === 'asr' ? ['models/asr/model.int8.onnx', 'models/asr/tokens.txt'] : ['models/llm/Qwen3-1.7B-Q8_0.gguf'])].map(path => access(join(this.root, path))))
       return true
     } catch { return false }
   }

@@ -1,0 +1,34 @@
+RhineLabUI reference and archive-assembly.glb
+Copyright (c) 2026 LBEILC
+https://github.com/LBEILC/RhineLabUI
+
+The author-supplied local archive-assembly.glb (SHA-256
+44ae25b3a45a4f57063a9763dc04a88e127cfb3463f76f83a326c601c6735b8d)
+is retained as an inactive reference asset; the active opening no longer loads it.
+lanjian-dossier.glb is an original Blender model built by scripts/build-dossier-model.py,
+with editable source at art/lanjian-dossier.blend. It contains no reference meshes. The continuous traveling-wave
+principle in cinematic-timeline.ts is adapted from src/motion.ts.
+The local snapshot is not claimed to be the current upstream commit.
+Upstream license inspected 2026-09-21; recorded main revision:
+3f4b9c9e8fdc9c6aa689e8c0b2faa5c53df93826.
+No reference fonts, audio, fictional archive contents or trademark logo are used.
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

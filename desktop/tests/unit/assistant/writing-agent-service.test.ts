@@ -7,6 +7,9 @@ import { DocumentService } from '../../../src/main/modules/manuscript/applicatio
 import { ProjectService } from '../../../src/main/modules/library/application/project-service'
 import { WorkspaceService } from '../../../src/main/modules/library/application/workspace-service'
 import { parseChapterCardDiscussion, resolveWritingAgentSkill, WritingAgentService } from '../../../src/main/modules/assistant/application/writing-agent-service'
+import { AgentToolRegistry } from '../../../src/main/modules/assistant/application/agent-tool-registry'
+import { WritingAgentPreviewService } from '../../../src/main/modules/assistant/application/writing-agent-preview-service'
+import { compileGeneration } from '../../../src/contracts/models/generation-parameters'
 
 const proposal: ChapterDraftProposal = {
   id: 'proposal-1',
@@ -70,6 +73,8 @@ function service(
   } as unknown as ProjectService
   const documents = { chapter: async () => ({ id: 3 }) } as unknown as DocumentService
   const workspace = {
+    foundationStatus: async () => ({ readyForProse: true, missing: [] }),
+    chapterContractVersion: async () => ({ fingerprint: 'confirmed-fixture' }),
     promptContext: async (_chapter: number, _task: string, options?: { question?: string; mode?: string }) => {
       assert.notEqual(options?.mode, 'fast', 'legacy preferences must not select compressed writing context')
       contextQuestions.push(options?.question)
@@ -93,6 +98,8 @@ function service(
   } } as unknown as ChapterDraftService
   return {
     ai,
+    workspace,
+    chapterDrafts,
     agent: new WritingAgentService(ai, projects, documents, workspace, chapterDrafts),
     aiCalls: () => aiCalls,
     modelOverrides: () => modelOverrides,
@@ -107,6 +114,176 @@ function service(
   }
 }
 
+for (const entry of ['prepare', 'run', 'preview'] as const) {
+  test(`${entry} propagates author cancellation into source compilation before model dispatch`, async () => {
+    const target = service('不应生成', [{
+      id: 'required', sourceType: 'workspace-prompt-context', label: '正式依据',
+      content: '保留原有依据', authority: 'required', truncationPolicy: 'never'
+    }])
+    const read = target.workspace.promptContextCandidates.bind(target.workspace)
+    const controller = new AbortController()
+    let sourceSignal: AbortSignal | undefined
+    let entered!: () => void
+    let release!: () => void
+    const reading = new Promise<void>(resolve => { entered = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    target.workspace.promptContextCandidates = async (...args) => {
+      sourceSignal = args[3]
+      entered()
+      await gate
+      sourceSignal?.throwIfAborted()
+      return read(...args)
+    }
+    const outcome = target.agent[entry]({ chapterId: 3, message: '改写', currentDraft: '旧句。', preferredSkill: 'rewrite' }, controller.signal)
+      .then(() => undefined, (error: Error) => error)
+    try {
+      await reading
+      controller.abort()
+      assert.equal(sourceSignal?.aborted, true)
+      // The caller settles even if an in-flight reader has not cooperated yet.
+      assert.equal((await outcome)?.name, 'AbortError')
+      assert.equal(target.aiCalls(), 0)
+    } finally {
+      release()
+      await outcome
+    }
+  })
+}
+
+for (const entry of ['preview', 'prepare', 'run'] as const) {
+  test(`${entry} rejects worldbook changes during source compilation`, async () => {
+    const target = service()
+    let version = 'a'.repeat(64)
+    target.workspace.currentWorldbookFingerprint = async () => version
+    let changeDuringRead = true
+    target.workspace.promptContextCandidates = async () => {
+      const content = `世界书依据指纹：${version}\n已按本章选择设定。`
+      if (changeDuringRead) version = 'b'.repeat(64)
+      return [{ id: 'worldbook-state', sourceType: 'worldbook-state', sourceId: 'worldbook-state', label: '世界书边界', content, authority: 'required', truncationPolicy: 'never' }]
+    }
+    const input = { chapterId: 3, currentDraft: '', message: '核对设定', preferredSkill: 'query' as const }
+    await assert.rejects(target.agent[entry](input), { code: 'CONFLICT', recoverable: true })
+    assert.equal(target.aiCalls(), 0)
+    changeDuringRead = false
+    const prepared = await target.agent.prepare(input)
+    await target.agent.run(input, undefined, prepared)
+    assert.equal(target.aiCalls(), 1)
+  })
+}
+
+for (const preferredSkill of ['query', 'continue'] as const) {
+  test(`${preferredSkill} rejects worldbook changes after the initial dispatch check`, async () => {
+    const target = service()
+    let version = 'a'.repeat(64)
+    target.workspace.currentWorldbookFingerprint = async () => version
+    target.workspace.promptContextCandidates = async () => [{
+      id: 'worldbook-state', sourceType: 'worldbook-state', sourceId: 'worldbook-state', label: '世界书边界',
+      content: `世界书依据指纹：${version}\n已按本章选择设定。`, authority: 'required', truncationPolicy: 'never'
+    }]
+    const input = { chapterId: 3, currentDraft: '', message: '生成', preferredSkill }
+    const prepared = await target.agent.prepare(input)
+    const readCard = target.workspace.currentChapterCardFingerprint.bind(target.workspace)
+    const readFacts = target.workspace.contextFactPack.bind(target.workspace)
+    if (preferredSkill === 'continue') target.workspace.currentChapterCardFingerprint = async (...args) => {
+      version = 'b'.repeat(64)
+      return readCard(...args)
+    }
+    else target.workspace.contextFactPack = async (...args) => {
+      version = 'b'.repeat(64)
+      return readFacts(...args)
+    }
+    await assert.rejects(target.agent.run(input, undefined, prepared), { code: 'CONFLICT', recoverable: true })
+    assert.equal(target.aiCalls(), 0)
+    assert.deepEqual(target.draftInstructions(), [])
+  })
+}
+
+for (const entry of ['preview', 'prepare', 'run'] as const) {
+  test(`${entry} rejects a chapter card changed during source compilation`, async () => {
+    const target = service()
+    let card = 'card-before'
+    target.workspace.currentChapterCardFingerprint = async () => card
+    let entered!: () => void
+    let release!: () => void
+    const reading = new Promise<void>(resolve => { entered = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    target.workspace.promptContextCandidates = async () => {
+      const content = card
+      entered()
+      await gate
+      return [{ id: 'chapter-card', sourceType: 'workspace', sourceId: 'chapter-card', label: '当前章卡', content, authority: 'required', truncationPolicy: 'never' }]
+    }
+    const request = { chapterId: 3, message: '核对本章', currentDraft: '', preferredSkill: 'query' as const }
+    const result = target.agent[entry](request)
+    const rejected = assert.rejects(result, { code: 'CONFLICT', recoverable: true })
+    await reading
+    card = 'card-after'
+    release()
+    await rejected
+    assert.equal(target.aiCalls(), 0)
+    const prepared = await target.agent.prepare(request)
+    assert.equal(prepared.chapterCardFingerprint, card)
+    assert.ok(prepared.contexts.some(item => item.content === card))
+    await target.agent.run(request, undefined, prepared)
+    assert.equal(target.aiCalls(), 1)
+  })
+}
+
+for (const preferredSkill of ['query', 'continue'] as const) {
+  test(`${preferredSkill} rejects a chapter card changed after preparation before model dispatch`, async () => {
+    const target = service()
+    let card = 'card-before'
+    target.workspace.currentChapterCardFingerprint = async () => card
+    const request = { chapterId: 3, message: '核对本章', currentDraft: '', preferredSkill }
+    const prepared = await target.agent.prepare(request)
+    card = 'card-after'
+    await assert.rejects(target.agent.run(request, undefined, prepared), { code: 'CONFLICT', recoverable: true })
+    assert.equal(target.aiCalls(), 0)
+    assert.deepEqual(target.draftInstructions(), [])
+  })
+}
+
+test('a chapter card changed during final fact reads blocks model dispatch', async () => {
+  const target = service()
+  let card = 'card-before'
+  target.workspace.currentChapterCardFingerprint = async () => card
+  const request = { chapterId: 3, message: '核对本章', currentDraft: '', preferredSkill: 'query' as const }
+  const prepared = await target.agent.prepare(request)
+  const readFacts = target.workspace.contextFactPack.bind(target.workspace)
+  target.workspace.contextFactPack = async (...args) => {
+    card = 'card-after'
+    return readFacts(...args)
+  }
+  await assert.rejects(target.agent.run(request, undefined, prepared), { code: 'CONFLICT', recoverable: true })
+  assert.equal(target.aiCalls(), 0)
+})
+
+test('invalidating an interactive preview leaves the independent formal preparation running', async () => {
+  const target = service()
+  const reads: Array<{ signal?: AbortSignal; release: () => void }> = []
+  target.workspace.promptContextCandidates = async (_chapter, _task, _options, signal) => {
+    await new Promise<void>(resolve => { reads.push({ signal, release: resolve }) })
+    signal?.throwIfAborted()
+    return [{ id: 'required', sourceType: 'workspace', sourceId: 'required', label: '正式依据', content: '全部依据', authority: 'required', truncationPolicy: 'never' }]
+  }
+  const previews = new WritingAgentPreviewService({ runInCurrentBook: async operation => operation() }, target.agent)
+  const input = { chapterId: 3, message: '核对本章', currentDraft: '', preferredSkill: 'query' as const }
+  const background = target.agent.prepare(input, new AbortController().signal)
+  while (reads.length < 1) await new Promise(resolve => setImmediate(resolve))
+  const preview = assert.rejects(previews.preview(input), { code: 'CONFLICT' })
+  while (reads.length < 2) await new Promise(resolve => setImmediate(resolve))
+  try {
+    previews.beginNavigation()
+    await preview
+    assert.equal(reads[0].signal?.aborted, false)
+    assert.equal(reads[1].signal?.aborted, true)
+  } finally {
+    for (const read of reads) read.release()
+  }
+  assert.equal((await background).contextCompilation.status, 'ready')
+  assert.equal(target.aiCalls(), 0)
+})
+
 test('uses the work-item model window and reserves instead of fixed context constants', async () => {
   const target = service('只读回答', [{
     id: 'workspace:chapter-outline', sourceType: 'workspace-prompt-section', sourceId: 'review:chapter-outline',
@@ -119,6 +296,37 @@ test('uses the work-item model window and reserves instead of fixed context cons
   assert.equal(preview.status, 'ready')
   assert.equal(preview.tokenBudget, 38_800)
   assert.equal(preview.remainingTokens, 38_800 - preview.estimatedTokens)
+})
+
+test('rejects a preview bound to another selected book before compiling sources', async () => {
+  const target = service('只读回答')
+  await assert.rejects(
+    target.agent.preview({ chapterId: 3, message: '核对本章', currentDraft: '', expectedWorkItemId: 'book-2' }),
+    (error: { code?: string }) => error.code === 'CONFLICT'
+  )
+  assert.deepEqual(target.contextQuestions(), [])
+  assert.equal(target.aiCalls(), 0)
+})
+
+test('writing preview propagates the source timeout stop signal without invoking a model', async () => {
+  let aborted = false
+  const ai = { modelFor: async () => 'synthetic-model' } as unknown as AiClient
+  const projects = {
+    currentSummary: async () => ({ id: 'book-1', path: 'C:\\books\\book-1' }),
+    currentPath: async () => 'C:\\books\\book-1'
+  } as unknown as ProjectService
+  const workspace = {
+    contextBudgetPreferences: async () => ({ version: 1, inputBudgetTokens: 32_000, modelContextLimit: 64_000, outputReservePercent: 25, systemReserveTokens: 8_000 }),
+    currentChapterCardFingerprint: async () => 'chapter-card:test',
+    promptContextCandidates: async (_chapter: number, _task: string, _options: unknown, signal: AbortSignal) =>
+      new Promise<never>((_resolve, reject) => signal.addEventListener('abort', () => { aborted = true; reject(signal.reason) }, { once: true }))
+  } as unknown as WorkspaceService
+  const agent = new WritingAgentService(ai, projects, { chapter: async () => ({ id: 3 }) } as unknown as DocumentService,
+    workspace, { draft: async () => { throw new Error('must not draft') } } as unknown as ChapterDraftService,
+    new AgentToolRegistry({ compileContextSources: 15 }))
+  await assert.rejects(agent.preview({ chapterId: 3, message: '预览', currentDraft: '', expectedWorkItemId: 'book-1' }),
+    (error: { code?: string }) => error.code === 'FEATURE_UNAVAILABLE')
+  assert.equal(aborted, true)
 })
 
 test('previews source groups and applies removal plus temporary context to the actual model input', async () => {
@@ -319,7 +527,7 @@ test('parses bounded chapter-card alternatives as candidates instead of formal c
     answer: '三个方案分别偏向误会、外部阻力和关系转折。',
     options: [
       { title: '窗口误会', rationale: '让对白承担笑点和推进。', conflict: '表格栏目无法容纳真实关系', beats: ['先误填', '互相甩锅', '找到折中项'], hook: '工作人员拿出另一张更离谱的表。' },
-      { title: '熟人闯入', rationale: '用人物反应改变场面。', characters: ['李远明', '林知夏'], exitChange: '两人被迫统一口径。' }
+      { title: '熟人闯入', rationale: '用人物反应改变场面。', characters: ['周文衡', '陈景安'], exitChange: '两人被迫统一口径。' }
     ]
   }))
   assert.equal(parsed.options.length, 2)
@@ -421,4 +629,76 @@ test('local context uses measured capacity and binds one-off output changes to p
   assert.equal(prepared.contextCompilation.budget.availableInputTokens,5632)
   assert.equal(prepared.contextCompilation.status,'ready')
   await assert.rejects(target.agent.prepare({...input,maxTokensOverride:1024,expectedContextHash:prepared.contextCompilation.contentHash}),/重新核对/)
+})
+
+test('remote context uses captured model capacity and effective output without becoming a local route', async () => {
+  const target = service('unused', [{ id: 'required', sourceType: 'workspace-prompt-section', sourceId: 'outline', label: '必需章纲', content: '档案员雨夜清点信件。', authority: 'required', truncationPolicy: 'never' }])
+  let output = 4096
+  target.ai.generationFor = async task => compileGeneration({ connectionId: 'remote', model: 'alias', parameterPolicy: { version: 1, mode: 'custom', overrides: { maxTokens: output } } }, task,
+    { protocol: 'gemini-native', model: 'alias', metadata: { id: 'alias', inputTokenLimit: 32768, outputTokenLimit: 8192 } })
+  const input = { chapterId: 3, message: '分析事件', currentDraft: '', preferredSkill: 'query' as const }
+  const prepared = await target.agent.prepare(input)
+  assert.equal(prepared.contextCompilation.budget.availableInputTokens, 32768 - 4096 - 10000)
+  assert.equal(prepared.localProfile, undefined)
+  output = 8192
+  await assert.rejects(target.agent.prepare({ ...input, expectedContextHash: prepared.contextCompilation.contentHash }), { code: 'CONFLICT' })
+  assert.equal(target.aiCalls(), 0)
+})
+
+test('local continuation budgets the review candidate before dispatch and binds the reserve to preview', async () => {
+  const target = service('unused', [{ id: 'required', sourceType: 'workspace-prompt-section', sourceId: 'outline', label: '必需章纲', content: '必须保留的设定', authority: 'required', truncationPolicy: 'never' }])
+  target.ai.contextLimits = async () => ({ contextTokens: 10240, systemReserveTokens: 512, maxOutputTokens: 4096, recommendedOutputTokens: 2048, outputTokens: 2048, profile: { connectionId: 'local:llama-cpp', model: 'qwen3-1.7b-q8_0', temperature: .7, topP: .9, maxTokens: 2048 } })
+  const calls: unknown[] = []
+  target.chapterDrafts.reviewInputReserve = async (...args) => { calls.push(args); return 3000 + args[1].length }
+  const input = { chapterId: 3, message: '完成本章', currentDraft: '已有正文', preferredSkill: 'continue' as const }
+  const prepared = await target.agent.prepare(input)
+  assert.deepEqual((calls[0] as unknown[]).slice(0, 3), [3, '已有正文', 2048])
+  assert.equal(prepared.contextCompilation.budget.availableInputTokens, 4676)
+  assert.ok(prepared.contexts.some(item => item.sourceType === 'creative-policy'), 'the method input also consumes the selected model budget')
+  await assert.rejects(target.agent.prepare({ ...input, currentDraft: '已有正文更多内容', expectedContextHash: prepared.contextCompilation.contentHash }), /重新核对/)
+  target.chapterDrafts.reviewInputReserve = async () => 5700
+  const preview = await target.agent.preview(input)
+  assert.equal(preview.status, 'blocked')
+  assert.match(preview.blockedMessage!, /完整审校/)
+  await assert.rejects(target.agent.run(input), { code: 'VALIDATION_ERROR' })
+  assert.equal(target.aiCalls(), 0)
+  assert.equal(target.draftInstructions().length, 0, 'reject before starting expensive prose generation')
+})
+
+test('local prose with a separately routed remote reviewer keeps its prose capacity', async () => {
+  const target = service('unused')
+  target.ai.contextLimits = async (task, model) => {
+    if (task === 'review') { assert.equal(model, undefined); return undefined }
+    return { contextTokens: 8192, systemReserveTokens: 512, maxOutputTokens: 4096, recommendedOutputTokens: 2048, outputTokens: 2048, profile: { connectionId: 'local:llama-cpp', model: 'qwen3-1.7b-q8_0', temperature: .7, topP: .9, maxTokens: 2048 } }
+  }
+  target.chapterDrafts.reviewInputReserve = async () => { assert.fail('remote review must not consume the local window') }
+  const prepared = await target.agent.prepare({ chapterId: 3, message: '完成本章', currentDraft: '', preferredSkill: 'continue' })
+  assert.equal(prepared.contextCompilation.budget.availableInputTokens, 5632)
+})
+
+test('remote prose reserves its captured output for local review and rejects before dispatch', async () => {
+  const target = service('unused', [{ id: 'required', sourceType: 'workspace-prompt-section', sourceId: 'outline', label: '章纲', content: '档案员在钟楼寻找证据。', authority: 'required', truncationPolicy: 'never' }])
+  target.ai.contextLimits = async (task, model) => {
+    if (task !== 'review') return undefined
+    assert.equal(model, undefined, 'do not route the remote prose model into local review')
+    return { contextTokens: 10240, systemReserveTokens: 512, maxOutputTokens: 4096, recommendedOutputTokens: 2048, outputTokens: 1024, profile: { connectionId: 'local:llama-cpp', model: 'qwen3-1.7b-q8_0', temperature: .7, topP: .9, maxTokens: 1024 } }
+  }
+  let proseOutput = 2048
+  target.ai.outputTokensFor = async (task) => { assert.equal(task, 'prose'); return proseOutput }
+  const reservations: unknown[] = []
+  target.chapterDrafts.reviewInputReserve = async (...args) => { reservations.push(args); return 800 + args[1].length + args[2] }
+  const input = { chapterId: 3, message: '完成本章', currentDraft: '已有正文', preferredSkill: 'continue' as const }
+  const prepared = await target.agent.prepare(input)
+  assert.deepEqual((reservations[0] as unknown[]).slice(0, 3), [3, '已有正文', 2048])
+  assert.equal(prepared.localProfile, undefined, 'keep the remote prose route')
+  assert.equal(prepared.contextCompilation.budget.availableInputTokens, 5852)
+  proseOutput = 3072
+  await assert.rejects(target.agent.prepare({ ...input, expectedContextHash: prepared.contextCompilation.contentHash }), { code: 'CONFLICT' })
+  proseOutput = 8192
+  const preview = await target.agent.preview(input)
+  assert.equal(preview.status, 'blocked')
+  assert.match(preview.blockedMessage!, /本机审校模型/)
+  await assert.rejects(target.agent.run(input), { code: 'VALIDATION_ERROR' })
+  assert.equal(target.aiCalls(), 0)
+  assert.equal(target.draftInstructions().length, 0)
 })

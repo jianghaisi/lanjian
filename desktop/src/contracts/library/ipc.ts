@@ -1,6 +1,7 @@
 import { isAbsolute } from 'node:path'
 import type { AutoBackupPreferences, ProjectCreateInput, WorkspaceBootstrapIssue } from '../index'
 import type { ArgsDecoder } from '../core/validation'
+import type { WorkspaceLoadCheckInput, WorkspaceLoadCheckId } from './types'
 import {
   boundedBoolean,
   boundedInteger,
@@ -12,6 +13,18 @@ import {
   uuid
 } from '../core/validation'
 import { bookProfileLimits } from '../worldbuilding/validation'
+
+export const decodeWorkspaceLoadCheckArgs: ArgsDecoder<[WorkspaceLoadCheckInput]> = args => {
+  exactArgs(args, 1)
+  const input = exactRecord(args[0], 'recheck', ['workItem', 'issueIds'])
+  const workItem = exactRecord(input.workItem, 'workItem', ['id', 'path'])
+  const path = boundedString(workItem.path, 'workItem.path', 32_767)
+  if (!isAbsolute(path) || workItem.id !== path) invalid('workItem', '作品身份无效')
+  if (!Array.isArray(input.issueIds) || input.issueIds.length < 1 || input.issueIds.length > 2
+    || new Set(input.issueIds).size !== input.issueIds.length
+    || input.issueIds.some(id => !['unifiedEventsUnreadable', 'modelSettingsUnreadable'].includes(id))) invalid('issueIds', '不是可重新检查的加载项目')
+  return [{ workItem: { id: path, path }, issueIds: input.issueIds as WorkspaceLoadCheckId[] }]
+}
 
 export const decodeProjectPathArgs: ArgsDecoder<[string]> = (args) => {
   exactArgs(args, 1)
@@ -118,6 +131,7 @@ export const decodeWorkspaceBootstrapIssueIdArgs: ArgsDecoder<[WorkspaceBootstra
     'promptProfileUnreadable',
     'researchSourcesUnreadable',
     'researchEventsUnreadable',
+    'unifiedEventsUnreadable',
     'outlinePlanningUnreadable',
     'characterStateUnreadable',
     'chapterOrderUnreadable'

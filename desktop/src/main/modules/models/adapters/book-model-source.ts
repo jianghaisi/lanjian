@@ -25,7 +25,7 @@ export class FileBookModelSource implements BookModelSourceReader {
       const content = authority.formal ? authority.content : file?.content
       const settings = content === undefined ? defaultLegacyBookModelSettings() : parseBookModelSettings(content)
       if (await modelBookIdentity(bookRoot) !== sourceIdentity) throw bookModelRequestConflict()
-      return { bookRoot: root, sourceIdentity, settings, storage: authority.storage, fileHash: file?.fingerprint ?? null,
+      return { bookRoot: root, sourceIdentity, settings, storage: authority.storage, fileHash: file?.fingerprint ?? null, recoveryContent: content,
         documentFingerprint: modelSourceHash(JSON.stringify([sourceIdentity, authority.documentFingerprint, file?.fingerprint ?? null])) }
     } catch (error) {
       if (error instanceof AppError && ['CONFLICT', 'VALIDATION_ERROR', 'FEATURE_UNAVAILABLE'].includes(error.code)) throw error

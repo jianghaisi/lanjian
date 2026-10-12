@@ -16,7 +16,7 @@ import type {
   WorkspaceRestoreOpenResult,
   WorkspaceRestorePreview
 } from './types'
-import type { ManuscriptExportResult } from '../manuscript/types'
+import type { ManuscriptExportResult, ManuscriptExportSelection } from '../manuscript/types'
 import type { RealTrialChapterInput, RealTrialConclusionInput, RealTrialReport } from '../review/types'
 
 export type DesktopProjectsApi = {
@@ -43,7 +43,7 @@ export type DesktopProjectsApi = {
   rebuildReadableMirrors: () => Promise<ReadableMirrorRebuildResult>
   rollbackSqliteStorage: () => Promise<SqliteStorageRollbackResult>
   createWorkspaceBackup: () => Promise<WorkspaceBackupResult | null>
-  exportManuscript: () => Promise<ManuscriptExportResult | null>
+  exportManuscript: (selection?: ManuscriptExportSelection) => Promise<ManuscriptExportResult | null>
   getAutoBackup: () => Promise<AutoBackupStatus>
   chooseAutoBackupDirectory: () => Promise<string | null>
   updateAutoBackup: (input: AutoBackupPreferences) => Promise<AutoBackupStatus>

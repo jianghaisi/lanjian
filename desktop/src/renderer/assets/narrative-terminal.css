@@ -31,7 +31,6 @@
 .narrative-terminal.redesigned-studio .assistant-mode-switch button.active{background:var(--color-ink);color:var(--color-surface)}
 .narrative-terminal.redesigned-studio .workbench{background:var(--color-surface)}
 .narrative-terminal.redesigned-studio .manuscript-title-line{border-color:var(--color-line)}
-.narrative-terminal.redesigned-studio .statusbar{background:var(--color-paper);color:var(--color-muted);border-top:1px solid var(--color-line)}
 .library-stage-stats{display:grid;gap:6px;flex:none;padding:16px 24px 24px;border-top:1px solid var(--color-line);font:13px/1.6 var(--sans)}
 .library-stage-stats span,.library-stage-stats small{color:var(--color-muted);font-size:12px}.library-stage-stats b{overflow-wrap:anywhere;font-weight:500}
 .local-appearance-dialog{max-block-size:none;overflow:auto}

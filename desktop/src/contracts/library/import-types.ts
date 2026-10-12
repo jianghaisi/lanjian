@@ -32,6 +32,7 @@ export type TxtImportPreview = {
 }
 
 export type TxtImportRequest = {
+  expectedWorkItemId?: string
   token: string
   ownership: TxtImportOwnership
   creationMethod?: TxtCreationMethod
@@ -62,6 +63,7 @@ export type DocumentImportManifest = {
 }
 
 export type DocumentImportManifestRequest = {
+  expectedWorkItemId?: string
   id: string
   files: Array<TxtImportRequest | { token: string; ownership: 'skip'; title: string }>
 }

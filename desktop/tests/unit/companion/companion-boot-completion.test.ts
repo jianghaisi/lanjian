@@ -34,7 +34,7 @@ test('runtime waits for confirmed library readiness and exposes a safe preparati
     warmup: async () => { warms++; throw { code: 'FEATURE_UNAVAILABLE', message: '初始化语音环境长时间没有完成。', recoverable: true } },
     suspend: async () => true,
   } } } })
-  useCompanionVoicePreferences().update({ textModel: false, mute: false, preload: true })
+  await useCompanionVoicePreferences().update({ textModel: false, mute: false, preload: true })
   const libraryReady = ref(false), core = ref('ready'), boot = useCompanionBoot(core, ref(''), ref(false))
   const app = renderer.createApp({ setup() { useCompanionRuntime(libraryReady); return () => null } })
   try {
@@ -54,7 +54,7 @@ test('opening waits for its single library preparation owner, reports failure, r
     configure: async () => { configures++; return true }, warmup: async () => ++warms === 1 ? pending.promise : true,
     suspend: async () => { suspends++; return true },
   } } } })
-  const prefs = useCompanionVoicePreferences(); prefs.update({ textModel: false, mute: false, preload: true })
+  const prefs = useCompanionVoicePreferences(); await prefs.update({ textModel: false, mute: false, preload: true })
   const core = ref('projects'), coreError = ref(''), preview = ref(false)
   const boot = useCompanionBoot(core, coreError, preview)
   const app = renderer.createApp({ setup() { useCompanionRuntime(); return () => null } })
@@ -73,18 +73,18 @@ test('opening waits for its single library preparation owner, reports failure, r
   } finally { app.unmount(); assert.equal(suspends, 1); restore() }
 })
 
-test('no-models and preload-off bypass model readiness, preview does not load, skip never rewrites preferences or masks core errors', () => {
-  const restore = globals({ localStorage: storage })
+test('no-models and preload-off bypass model readiness, preview does not load, skip never rewrites preferences or masks core errors', async () => {
+  const restore = globals({ localStorage: storage, window: {} })
   const prefs = useCompanionVoicePreferences()
   const core = ref('ready'), coreError = ref(''), preview = ref(false)
   companionPreparationPhase.value = 'loading'
   try {
     const boot = useCompanionBoot(core, coreError, preview)
-    prefs.update({ textModel: false, mute: true, preload: true })
+    await prefs.update({ textModel: false, mute: true, preload: true })
     assert.equal(boot.phase.value, 'ready'); assert.equal(boot.required.value, false)
-    prefs.update({ textModel: true, mute: false, preload: false })
+    await prefs.update({ textModel: true, mute: false, preload: false })
     assert.equal(boot.phase.value, 'ready'); assert.match(boot.detail.value, /未开启预加载/)
-    prefs.update({ preload: true }); assert.equal(boot.phase.value, 'models')
+    await prefs.update({ preload: true }); assert.equal(boot.phase.value, 'models')
     preview.value = true; assert.equal(boot.phase.value, 'ready'); assert.equal(boot.canSkip.value, false)
     preview.value = false
     const saved = JSON.stringify(prefs.preferences.value)
@@ -136,7 +136,7 @@ test('tap keeps synthesis alive across a long audio gap and dismisses only after
       onEvent: (value: (event: CompanionVoiceEvent) => void) => { listener = value; return () => {} },
     } } },
   })
-  const prefs = useCompanionVoicePreferences(); prefs.update({ mute: false, textModel: false, proactive: false, subtitles: true })
+  const prefs = useCompanionVoicePreferences(); await prefs.update({ mute: false, textModel: false, proactive: false, subtitles: true })
   let presence!: ReturnType<typeof useCompanionPresence>
   const app = renderer.createApp({ setup() { presence = useCompanionPresence(ref(null), ref(false), ref(false)); return () => null } })
   try {

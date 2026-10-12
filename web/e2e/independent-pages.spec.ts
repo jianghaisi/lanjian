@@ -1,0 +1,62 @@
+import { test, expect, type Page } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
+async function authenticate(page: Page, subject: string) {
+  const started = await page.request.get('/api/auth/linuxdo/start', { maxRedirects: 0 })
+  const url = new URL(started.headers().location!); url.searchParams.set('code', subject)
+  await page.request.get(url.href)
+}
+test('independent admin uses a real table and preserves audited idempotent grants', async ({ page, browser }) => {
+  await authenticate(page, '852')
+  await page.goto('/admin'); await expect(page.getByText('此页面需要管理员权限。')).toBeVisible()
+  expect((await page.request.get('/api/admin/users')).status()).toBe(403)
+  const context = await browser.newContext(), admin = await context.newPage()
+  const errors: string[] = []; admin.on('pageerror', e => errors.push(e.message))
+  await authenticate(admin, '42'); await admin.goto('/admin')
+  await expect(admin.getByRole('heading', { name: '用户与积分', exact: true })).toBeVisible()
+  await expect(admin.locator('.n-data-table')).toBeVisible()
+  await admin.getByRole('textbox', { name: '搜索用户' }).fill('852')
+  const row = admin.locator('.n-data-table-tbody tr').filter({ hasText: '852' })
+  await expect(row).toHaveCount(1)
+  await row.getByRole('button', { name: '积分明细 / 发放' }).click()
+  await admin.getByLabel('发放备注').fill('独立后台表格验收')
+  await admin.getByRole('button', { name: '确认发放积分' }).click()
+  await expect(admin.getByRole('status').filter({ hasText: '积分已发放' })).toBeVisible()
+  await admin.getByRole('button', { name: '确认发放积分' }).click()
+  await expect(admin.locator('.admin-ledger li').filter({ hasText: '独立后台表格验收' })).toHaveCount(1)
+  await expect(admin.getByRole('button', { name: '确认发放积分' })).toBeEnabled()
+  await admin.keyboard.press('Escape')
+  await expect(admin.locator('.n-drawer')).not.toBeVisible()
+  await expect(row).toContainText('20')
+  await admin.screenshot({ path: 'test-results/independent-admin-desktop.png', fullPage: true, animations: 'disabled' })
+  await admin.getByRole('textbox', { name: '搜索用户' }).fill('no-such-user')
+  await expect(admin.getByText('无数据', { exact: true })).toBeVisible()
+  await admin.getByRole('textbox', { name: '搜索用户' }).fill('')
+  await admin.setViewportSize({ width: 390, height: 844 })
+  expect(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
+  await admin.screenshot({ path: 'test-results/independent-admin-mobile.png', fullPage: true, animations: 'disabled' })
+  expect(errors).toEqual([]); await context.close()
+})
+test('unauthenticated app and admin go to the independent login page', async ({ page }) => {
+  await page.goto('/app'); await expect(page).toHaveURL(/\/login\?next=/)
+  await page.goto('/admin'); await expect(page).toHaveURL(/\/login\?next=%2Fadmin/)
+  await expect(page.locator('.site-header,iframe')).toHaveCount(0)
+  await page.goto('/app/reference'); await expect(page.getByText('五章 · 已完结')).toBeVisible()
+})
+test('public pages and admin pass WCAG AA automated checks with reduced motion', async ({ page }) => {
+  const problems: unknown[] = []
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  for (const route of ['/', '/login']) {
+    await page.goto(route)
+    if (route === '/') { await page.getByRole('tab', { name: '03 完整参考书' }).click(); await expect(page.locator('.workspace-frame img')).toBeVisible() }
+    else await expect(page.getByRole('button', { name: '使用 Linux DO 登录' })).toBeVisible()
+    const result = await new AxeBuilder({ page }).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()
+    problems.push(...result.violations.map(v => ({ route, id:v.id, nodes:v.nodes.map(n => ({ target:n.target, summary:n.failureSummary })) })))
+  }
+  await authenticate(page, '42'); await page.goto('/admin')
+  await expect(page.locator('.n-data-table')).toBeVisible()
+  await expect(page.getByRole('button', { name: '刷新列表' })).toBeEnabled()
+  const result = await new AxeBuilder({ page }).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()
+  problems.push(...result.violations.map(v => ({ route: '/admin', id:v.id, nodes:v.nodes.map(n => ({ target:n.target, summary:n.failureSummary })) })))
+  await test.info().attach('accessibility-audit', { body: JSON.stringify(problems, null, 2), contentType: 'application/json' })
+  expect(problems).toEqual([])
+})

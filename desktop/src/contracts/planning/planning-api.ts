@@ -1,4 +1,10 @@
 import type {
+  ChapterEventDraft,
+  ChapterEventAdoptionPreview,
+  ChapterEventAdoptionResult,
+  ChapterEventPreview,
+  FormalSkeletonPreview,
+  FormalSkeletonView,
   PlanningChapterDetailAdoptionPreview,
   PlanningChapterDetailAdoptionResult,
   PlanningChapterDetailJob,
@@ -25,6 +31,15 @@ import type {
 } from './types'
 
 export type DesktopPlanningApi = {
+  generateChapterStory: (chapterId: number) => Promise<{ content: string }>
+  prepareChapterStoryContract: (chapterId: number) => Promise<import('./chapter-story-contract').ChapterStoryContractPreview>
+  adoptChapterStoryContract: (token: string) => Promise<import('./types').OutlinePlanningStatus>
+  previewChapterEventAdoption: (proposalId: string, chapterId: number, event: ChapterEventDraft | ChapterEventDraft[]) => Promise<ChapterEventAdoptionPreview>
+  adoptChapterEvent: (token: string) => Promise<ChapterEventAdoptionResult>
+  recoverChapterEvent: (operationId: string) => Promise<ChapterEventAdoptionResult>
+  previewChapterEvents: (proposalId: string, chapterId: number) => Promise<ChapterEventPreview>
+  previewFormalSkeleton: (proposalId: string, volume: number) => Promise<FormalSkeletonPreview>
+  adoptFormalSkeleton: (token: string) => Promise<FormalSkeletonView>
   start: () => Promise<PlanningJob>
   job: (jobId: string) => Promise<PlanningJob>
   cancel: (jobId: string) => Promise<PlanningJob>

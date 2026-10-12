@@ -1,0 +1,80 @@
+import { test, expect, type Page } from '@playwright/test'
+
+async function login(page: Page, id: string) {
+  const response = await page.request.get('/api/auth/linuxdo/start', { maxRedirects: 0 })
+  const url = new URL(response.headers().location!); url.searchParams.set('code', id)
+  await page.goto(url.href)
+  await expect(page.getByRole('heading', { name: '我的作品' })).toBeVisible()
+}
+async function create(page: Page, name: string) {
+  await page.getByLabel('新作品名称').fill(name)
+  await page.getByRole('button', { name: '＋ 新建作品', exact: true }).click()
+  await page.getByRole('button', { name: '＋ 新章', exact: true }).click()
+  await expect(page.getByLabel('章节标题')).toBeVisible()
+}
+
+test('late saves, composition, session expiration and another identity preserve private drafts', async ({ page, context }) => {
+  await login(page, '555')
+  await create(page, '隔离样书 A')
+  const editor = page.getByRole('textbox', { name: '正文内容', exact: true })
+  await editor.fill('甲书的中文正文。')
+  await editor.dispatchEvent('compositionstart', { data: '输入' })
+  await expect(page.getByRole('button', { name: '← 我的作品' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '保存正文', exact: true })).toBeDisabled()
+  await editor.dispatchEvent('compositionend', { data: '输入' })
+  await expect(page.getByRole('button', { name: '保存正文', exact: true })).toBeEnabled()
+  let release!: () => void
+  const delayed = new Promise<void>(resolve => { release = resolve })
+  let finished!: () => void
+  const fulfilled = new Promise<void>(resolve => { finished = resolve })
+  let sent!: () => void
+  const received = new Promise<void>(resolve => { sent = resolve })
+  await page.route('**/api/books/*/chapters/1', async route => {
+    if (route.request().method() !== 'PUT') return route.continue()
+    const response = await route.fetch(); sent(); await delayed; await route.fulfill({ response }); finished()
+  })
+  await page.getByRole('button', { name: '保存正文', exact: true }).click(); await received
+  await page.getByRole('button', { name: '← 我的作品' }).click()
+  await create(page, '隔离样书 B'); await editor.fill('乙书的私有草稿。')
+  release(); await fulfilled; await page.unroute('**/api/books/*/chapters/1')
+  await expect(editor).toContainText('乙书的私有草稿'); await expect(editor).not.toContainText('甲书')
+  await context.clearCookies()
+  await page.getByRole('button', { name: '保存正文', exact: true }).click()
+  await expect(page.getByRole('link', { name: '使用 Linux DO 登录' })).toBeVisible()
+  await expect(page.getByRole('alert')).toContainText('登录已过期')
+  await login(page, '666')
+  await expect(page.getByRole('button').filter({ hasText: '隔离样书' })).toHaveCount(0)
+  await create(page, '另一个作者'); await expect(page.getByText('发现未保存的草稿')).toHaveCount(0)
+  await context.clearCookies(); await login(page, '555')
+  await page.getByRole('button').filter({ hasText: '隔离样书 B' }).click()
+  await page.getByRole('button', { name: '恢复到编辑器' }).click()
+  await expect(editor).toContainText('乙书的私有草稿')
+  await page.getByRole('button', { name: '保存正文', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('正文已保存')
+  await page.getByLabel('界面主题').selectOption('moye'); await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.getByLabel('查看积分明细').click()
+  const dialog = page.getByRole('dialog', { name: '积分明细' }); await expect(dialog).toBeVisible()
+  await page.keyboard.press('Shift+Tab'); expect(await dialog.evaluate(node => node.contains(document.activeElement))).toBe(true)
+  await page.keyboard.press('Escape'); await expect(dialog).toHaveCount(0)
+  await expect(page.getByLabel('查看积分明细')).toBeFocused()
+  await page.setViewportSize({ width: 390, height: 844 }); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
+  await page.screenshot({ path: 'test-results/experience-dark-mobile.png', fullPage: true })
+})
+
+test('worldbook recovery, formal adoption and source cards use saved server state', async ({ page }) => {
+  await login(page, String(777 + test.info().repeatEachIndex)); await create(page, '世界书验收')
+  const world = () => page.getByRole('navigation', { name: '作品模块' }).getByRole('button', { name: /设定/ })
+  await world().click(); await page.getByLabel('条目名称').fill('林舟')
+  await page.getByLabel('公开设定').fill('旧城的送信人。'); await page.getByLabel('作者备注').fill('只在作者档案中保留的伏笔。')
+  await page.getByRole('button', { name: '← 我的作品' }).click(); await page.getByRole('button').filter({ hasText: '世界书验收' }).click()
+  await world().click(); await page.getByRole('button', { name: '恢复条目表单' }).click()
+  await expect(page.getByLabel('公开设定')).toHaveValue('旧城的送信人。')
+  await page.getByLabel('正式状态').selectOption('approved'); await page.getByRole('button', { name: '保存世界书条目' }).click()
+  await expect(page.getByRole('status').filter({ hasText: '已保存为正式设定' })).toBeVisible()
+  await page.getByLabel('公开设定').fill('旧城的送信人，识字。'); await page.getByRole('button', { name: '保存世界书条目' }).click()
+  await expect(page.getByRole('status').filter({ hasText: '已保存为正式设定' })).toBeVisible()
+  await page.getByText('创作资料（0）', { exact: true }).click()
+  await page.getByLabel('资料标题').fill('旧城札记'); await page.getByLabel('资料摘录').fill('信件按坊分送。')
+  await page.getByRole('button', { name: '保存资料卡' }).click()
+  await expect(page.getByRole('heading', { name: '旧城札记' })).toBeVisible()
+})

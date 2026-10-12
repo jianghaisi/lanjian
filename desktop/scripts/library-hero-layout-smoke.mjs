@@ -13,7 +13,7 @@ const root = await mkdtemp(join(tmpdir(), 'lanjian-hero-layout-'))
 const profile = join(root, 'profile'), output = resolve(`artifacts/ui/library-hero-layout/${probe ? 'before' : 'after'}`)
 await mkdir(output, { recursive: true })
 const service = new ProjectService(new SettingsStore(profile, { available: () => false, encrypt: () => '', decrypt: () => '' }))
-const titles = ['星城少年们的日常录', '3000个宗师，他们都叫我主公', '超长书名回归：在遥远的群星之间寻找最后一座城市与那些尚未写完的故事']
+const titles = ['星城少年们的日常录', '三千盏星灯，他们都叫我主公', '超长书名回归：在遥远的群星之间寻找最后一座城市与那些尚未写完的故事']
 const books = [], files = []
 for (const title of titles.slice(0, probe ? 2 : 3)) {
   const project = (await service.create({ parentPath: root, title })).project

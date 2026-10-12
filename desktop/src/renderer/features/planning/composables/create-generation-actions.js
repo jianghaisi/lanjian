@@ -1,18 +1,26 @@
 // Explicit live ports preserve the existing book/request scope and draft ownership.
 export function createPlanningGenerationActions(ports) {
+  function captureBook() {
+    const path = ports.current.value?.path, generation = ports.workspaceRefreshGeneration
+    return () => ports.current.value?.path === path && ports.workspaceRefreshGeneration === generation
+  }
   function clearPlanningPoll() {
     if (ports.planningPollTimer) window.clearTimeout(ports.planningPollTimer)
     ports.planningPollTimer = null
   }
 
   async function startAutomaticPlanning() {
+    const isCurrent = captureBook()
     if (!ports.planningMaterialsReady.value)
       return ports.notice('请先在“素材”中批准一条灵感，或保存全书备注、资料卡或正式设定')
     if (!(ports.ai.value.modelConfigured ?? ports.ai.value.apiKeyConfigured))
       return ports.notice('请先在模型设置中保存并测试模型连接')
     try {
       await ports.desktop.workspace.saveBookProfile(ports.plainDto(ports.bookProfile.value))
-      ports.planningJob.value = await ports.guard(() => ports.desktop.planning.start(), '自动谋篇已经开始')
+      if (!isCurrent()) return
+      const result1 = await ports.guard(() => ports.desktop.planning.start(), '自动谋篇已经开始')
+      if (!isCurrent()) return
+      ports.planningJob.value = result1
       pollAutomaticPlanning()
     } catch {
       /* guard 已经给出可恢复提示 */
@@ -32,11 +40,17 @@ export function createPlanningGenerationActions(ports) {
   function pollAutomaticPlanning() {
     clearPlanningPoll()
     if (!ports.planningJob.value || ports.planningJob.value.status !== 'running') return
+    const isCurrent = captureBook()
     ports.planningPollTimer = window.setTimeout(async () => {
+      if (!isCurrent()) return
       try {
-        ports.planningJob.value = await ports.desktop.planning.job(ports.planningJob.value.id)
+        const result1 = await ports.desktop.planning.job(ports.planningJob.value.id)
+        if (!isCurrent()) return
+        ports.planningJob.value = result1
         if (ports.planningJob.value.status === 'completed') {
-          ports.planningDraft.value = await ports.desktop.planning.draft()
+          const result2 = await ports.desktop.planning.draft()
+          if (!isCurrent()) return
+          ports.planningDraft.value = result2
           ports.planningDraftSaveState.value = 'saved'
           ports.notice('蓝图、总纲和卷纲候选已经完成，请审阅')
         }
@@ -44,6 +58,7 @@ export function createPlanningGenerationActions(ports) {
           ports.notice(ports.planningJob.value.error?.message || '自动谋篇未完成')
         if (ports.planningJob.value.status === 'running') pollAutomaticPlanning()
       } catch (error) {
+        if (!isCurrent()) return
         clearPlanningPoll()
         ports.planningJob.value = null
         ports.notice(error?.message || '自动谋篇任务已经结束')
@@ -52,12 +67,16 @@ export function createPlanningGenerationActions(ports) {
   }
 
   async function cancelAutomaticPlanning(announce = true) {
+    const isCurrent = captureBook()
     clearPlanningPoll()
     if (!ports.planningJob.value || ports.planningJob.value.status !== 'running') return
     try {
-      ports.planningJob.value = await ports.desktop.planning.cancel(ports.planningJob.value.id)
+      const result1 = await ports.desktop.planning.cancel(ports.planningJob.value.id)
+      if (!isCurrent()) return
+      ports.planningJob.value = result1
       if (announce) ports.notice('自动谋篇已停止，正式设定与大纲没有改变')
     } catch (error) {
+      if (!isCurrent()) return
       if (announce) ports.notice(error?.message || '停止自动谋篇失败')
     }
   }
@@ -241,13 +260,18 @@ export function createPlanningGenerationActions(ports) {
   }
 
   async function startPlanningChapterSkeleton() {
+    const isCurrent = captureBook()
     if (!ports.planningDraft.value || ports.planningSkeletonRunning.value) return
     try {
       await flushPlanningDraftSave()
-      ports.planningSkeletonJob.value = await ports.desktop.planning.startChapterSkeleton(ports.planningDraft.value.id)
+      if (!isCurrent()) return
+      const result1 = await ports.desktop.planning.startChapterSkeleton(ports.planningDraft.value.id)
+      if (!isCurrent()) return
+      ports.planningSkeletonJob.value = result1
       ports.notice('全书章节安排开始按卷生成，可随时停止')
       pollPlanningChapterSkeleton()
     } catch (error) {
+      if (!isCurrent()) return
       ports.notice(error?.message || '章节安排任务未能开始')
     }
   }
@@ -255,23 +279,30 @@ export function createPlanningGenerationActions(ports) {
   function pollPlanningChapterSkeleton() {
     clearPlanningSkeletonPoll()
     if (!ports.planningSkeletonJob.value || ports.planningSkeletonJob.value.status !== 'running') return
+    const isCurrent = captureBook()
     ports.planningSkeletonPollTimer = window.setTimeout(async () => {
+      if (!isCurrent()) return
       try {
-        ports.planningSkeletonJob.value = await ports.desktop.planning.chapterSkeletonJob(
+        const result1 = await ports.desktop.planning.chapterSkeletonJob(
           ports.planningSkeletonJob.value.id
         )
+        if (!isCurrent()) return
+        ports.planningSkeletonJob.value = result1
         if (ports.planningSkeletonJob.value.status === 'completed') {
           ports.suppressNextPlanningDraftSave = true
           ports.planningDraft.value = ports.planningSkeletonJob.value.proposal
           ports.planningDraftSaveState.value = 'saved'
-          ports.planningSkeletonStatus.value = await ports.desktop.planning.chapterSkeletonStatus(
+          const result2 = await ports.desktop.planning.chapterSkeletonStatus(
             ports.planningDraft.value.id
           )
+          if (!isCurrent()) return
+          ports.planningSkeletonStatus.value = result2
           ports.notice(`全书 ${ports.planningSkeletonStatus.value.chapterCount} 章章节安排已经生成，请审阅修改`)
         } else if (ports.planningSkeletonJob.value.status === 'failed')
           ports.notice(ports.planningSkeletonJob.value.error?.message || '章节安排未完成')
         else pollPlanningChapterSkeleton()
       } catch (error) {
+        if (!isCurrent()) return
         clearPlanningSkeletonPoll()
         ports.planningSkeletonJob.value = null
         ports.notice(error?.message || '章节安排任务已经结束')
@@ -280,14 +311,18 @@ export function createPlanningGenerationActions(ports) {
   }
 
   async function cancelPlanningChapterSkeleton(announce = true) {
+    const isCurrent = captureBook()
     clearPlanningSkeletonPoll()
     if (!ports.planningSkeletonJob.value || ports.planningSkeletonJob.value.status !== 'running') return
     try {
-      ports.planningSkeletonJob.value = await ports.desktop.planning.cancelChapterSkeleton(
+      const result1 = await ports.desktop.planning.cancelChapterSkeleton(
         ports.planningSkeletonJob.value.id
       )
+      if (!isCurrent()) return
+      ports.planningSkeletonJob.value = result1
       if (announce) ports.notice('章节安排生成已停止，没有保留半套结果')
     } catch (error) {
+      if (!isCurrent()) return
       if (announce) ports.notice(error?.message || '停止章节安排失败')
     }
   }
@@ -298,16 +333,21 @@ export function createPlanningGenerationActions(ports) {
   }
 
   async function startPlanningChapterDetail(volume) {
+    const isCurrent = captureBook()
     if (!ports.planningDraft.value || ports.planningDetailRunning.value) return
     try {
       await flushPlanningDraftSave()
-      ports.planningDetailJob.value = await ports.desktop.planning.startChapterDetail(
+      if (!isCurrent()) return
+      const result1 = await ports.desktop.planning.startChapterDetail(
         ports.planningDraft.value.id,
         volume
       )
+      if (!isCurrent()) return
+      ports.planningDetailJob.value = result1
       ports.notice(`第 ${volume} 卷详细章纲开始分批生成`)
       pollPlanningChapterDetail()
     } catch (error) {
+      if (!isCurrent()) return
       ports.notice(error?.message || '详细章纲任务未能开始')
     }
   }
@@ -315,21 +355,28 @@ export function createPlanningGenerationActions(ports) {
   function pollPlanningChapterDetail() {
     clearPlanningDetailPoll()
     if (!ports.planningDetailJob.value || ports.planningDetailJob.value.status !== 'running') return
+    const isCurrent = captureBook()
     ports.planningDetailPollTimer = window.setTimeout(async () => {
+      if (!isCurrent()) return
       try {
-        ports.planningDetailJob.value = await ports.desktop.planning.chapterDetailJob(ports.planningDetailJob.value.id)
+        const result1 = await ports.desktop.planning.chapterDetailJob(ports.planningDetailJob.value.id)
+        if (!isCurrent()) return
+        ports.planningDetailJob.value = result1
         if (ports.planningDetailJob.value.status === 'completed') {
           ports.suppressNextPlanningDraftSave = true
           ports.planningDraft.value = ports.planningDetailJob.value.proposal
           ports.planningDraftSaveState.value = 'saved'
-          ports.planningDetailStatuses.value = await ports.desktop.planning.chapterDetailStatuses(
+          const result2 = await ports.desktop.planning.chapterDetailStatuses(
             ports.planningDraft.value.id
           )
+          if (!isCurrent()) return
+          ports.planningDetailStatuses.value = result2
           ports.notice(`第 ${ports.planningDetailJob.value.volume} 卷详细章纲候选已完成，请审阅修改`)
         } else if (ports.planningDetailJob.value.status === 'failed')
           ports.notice(ports.planningDetailJob.value.error?.message || '详细章纲未完成')
         else pollPlanningChapterDetail()
       } catch (error) {
+        if (!isCurrent()) return
         clearPlanningDetailPoll()
         ports.planningDetailJob.value = null
         ports.notice(error?.message || '详细章纲任务已经结束')
@@ -338,12 +385,16 @@ export function createPlanningGenerationActions(ports) {
   }
 
   async function cancelPlanningChapterDetail(announce = true) {
+    const isCurrent = captureBook()
     clearPlanningDetailPoll()
     if (!ports.planningDetailJob.value || ports.planningDetailJob.value.status !== 'running') return
     try {
-      ports.planningDetailJob.value = await ports.desktop.planning.cancelChapterDetail(ports.planningDetailJob.value.id)
+      const result1 = await ports.desktop.planning.cancelChapterDetail(ports.planningDetailJob.value.id)
+      if (!isCurrent()) return
+      ports.planningDetailJob.value = result1
       if (announce) ports.notice('详细章纲生成已停止，旧候选保持不变')
     } catch (error) {
+      if (!isCurrent()) return
       if (announce) ports.notice(error?.message || '停止详细章纲失败')
     }
   }
@@ -362,6 +413,29 @@ export function createPlanningGenerationActions(ports) {
     } finally {
       ports.planningAdoptionBusy.value = false
     }
+  }
+
+  async function refreshJointChapterAdoption({ proposalId, chapterId, mirrorsPending, candidateReceiptPending }) {
+    const isCurrent = captureBook(), draft = JSON.stringify(ports.planningDraft.value)
+    const outline = ports.chapterOutline.value, selected = ports.selectedId.value
+    try {
+      const [proposal, status, saved] = await Promise.all([
+        ports.desktop.planning.draft(), ports.desktop.outlines.planningStatus(selected || undefined),
+        selected === chapterId ? ports.desktop.chapterOutlines.get(chapterId) : Promise.resolve(null)
+      ])
+      if (!isCurrent() || ports.planningDraft.value?.id !== proposalId) return
+      if (JSON.stringify(ports.planningDraft.value) === draft && proposal?.id === proposalId) {
+        ports.suppressNextPlanningDraftSave = true
+        ports.planningDraft.value = proposal
+      }
+      if (ports.selectedId.value === selected) ports.outlinePlanning.value = status
+      if (saved && ports.selectedId.value === selected && ports.chapterOutline.value === outline
+        && ports.chapterOutline.value === ports.lastSavedChapterOutline.value) {
+        ports.chapterOutline.value = saved.content
+        ports.lastSavedChapterOutline.value = saved.content
+      }
+      ports.notice(`第 ${chapterId} 章与细节计划事件已联合写入，章纲仍需复核确认${mirrorsPending ? '；可读副本待同步，请在纪事中重试' : ''}${candidateReceiptPending ? '；候选标记待刷新' : ''}`)
+    } catch (error) { if (isCurrent()) ports.notice(error?.message || '正式数据已保存，界面暂未刷新，请重新打开谋篇核对') }
   }
 
   async function confirmPlanningChapterDetailAdoption() {
@@ -450,6 +524,7 @@ export function createPlanningGenerationActions(ports) {
     cancelPlanningChapterDetail,
     openPlanningChapterDetailAdoption,
     confirmPlanningChapterDetailAdoption,
+    refreshJointChapterAdoption,
     markPlanningCharacterSeedsEdited,
     markPlanningWorldSeedEdited,
     markPlanningPowerSystemEdited,

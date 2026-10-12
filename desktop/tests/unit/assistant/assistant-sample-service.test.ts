@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { draftAssistantSample } from '../../../src/main/modules/assistant/application/assistant-sample-service'
+import { draftAssistantSample as draftSample } from '../../../src/main/modules/assistant/application/assistant-sample-service'
+import { creativePolicyRun } from '../../../src/main/modules/writing-plugins/domain/creative-policy'
 import type { AssistantConversationRequest } from '../../../src/contracts/assistant/assistant-conversation-contracts'
 const input:AssistantConversationRequest={operationId:'sample',workItemId:'book',page:'world',message:'写1000字测试小说',targets:[],chapterId:null,selectedCharacters:0,history:[]}
+// Retained static protocol fixtures; no author book or confirmation is used.
+const draftAssistantSample=(...args:Parameters<typeof draftSample>)=>{const [input,instruction,model,context,signal,progress]=args;return draftSample(input,instruction,model,context,signal,progress,{policy:creativePolicyRun(),assertAuthorized:async()=>{}})}
 
 test('short samples are continued with the existing prose and author constraints',async()=>{
   let calls=0
   const result=await draftAssistantSample(input,'写一个悬疑故事',{async complete(prompt,draft,context){calls++;assert.match(context,/动态境界/);if(calls===1){assert.match(prompt,/1000/);return {content:'雨'.repeat(600)}}assert.equal(draft.length,600);assert.match(prompt,/需要 400/);return {content:'灯'.repeat(400)}}},'动态境界：凡人',new AbortController().signal)
   assert.equal(calls,2);assert.equal((result.match(/雨|灯/g)||[]).length,1000)
 })
-test('continue retains previous dialogue as data, without a formal document dependency',async()=>{
+test('the bounded helper retains previous dialogue as data under the explicit fixture guard',async()=>{
   await draftAssistantSample({...input,message:'继续',history:[{role:'user',content:'写测试故事'},{role:'assistant',content:'阿宁发现旧钥匙。'}]},'续写',{async complete(prompt){assert.match(prompt,/阿宁发现旧钥匙/);return {content:'风'.repeat(500)}}},'',new AbortController().signal)
 })
 test('output failures and aborts cannot become successful samples',async()=>{

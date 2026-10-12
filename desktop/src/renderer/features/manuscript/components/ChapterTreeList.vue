@@ -69,7 +69,7 @@ async function revealCurrentChapter() {
   <section ref="list" class="chapter-tree-list" data-testid="chapter-tree-window" :data-rendered-count="projected.items.length" :data-total-count="projected.total">
     <label v-if="!externalSearch" class="chapter-tree-search">
       <span>查找章节</span>
-      <input v-assist-field="{ id: 'ChapterTreeList.query', read: () => query, write: value => { query = String(value) } }" v-model="query" type="search" data-testid="chapter-tree-search" placeholder="章名或第 X 章" autocomplete="off" />
+      <input v-assist-field="{ id: 'ChapterTreeList.query', read: () => query, write: (value: unknown) => { query = String(value) } }" v-model="query" type="search" data-testid="chapter-tree-search" placeholder="章名或第 X 章" autocomplete="off" />
       <small v-if="query.trim()">{{ projected.total }} 项</small>
     </label>
     <article v-for="group in groups" :key="group.key" class="chapter-volume-group" :data-volume="group.volume ?? 'unassigned'">
@@ -78,7 +78,8 @@ async function revealCurrentChapter() {
         <b :title="volumeLabel(group)">{{ volumeLabel(group) }}</b>
         <small>{{ group.chapters.length }} 章</small>
       </button>
-      <div v-show="groupIsOpen(group)" class="chapter-volume-children">
+      <div class="chapter-volume-fold" :class="{ 'is-open': groupIsOpen(group) }" :aria-hidden="!groupIsOpen(group)" :inert="!groupIsOpen(group) || undefined">
+      <div class="chapter-volume-children">
         <div v-for="chapter in group.chapters" :key="chapter.id" class="chapter-tree-row-shell" :class="{ selected: selectedId === chapter.id }">
           <button class="tree-item chapter-tree-row" :class="{ selected: selectedId === chapter.id }" type="button" :title="`第 ${chapter.position} 章 · ${selectedId === chapter.id ? selectedTitle : chapter.title} · ${chapter.word_count.toLocaleString()} 字`" :aria-label="`第 ${chapter.position} 章，${selectedId === chapter.id ? selectedTitle : chapter.title}，${chapter.word_count.toLocaleString()} 字${selectedId === chapter.id ? '，当前编辑' : ''}`" :aria-current="selectedId === chapter.id ? 'page' : undefined" @click="chooseChapter(chapter)">
             <span class="chapter-no">第{{ chapter.position }}章</span>
@@ -88,7 +89,16 @@ async function revealCurrentChapter() {
           <button v-if="deletable" class="chapter-row-delete" type="button" :title="`删除第 ${chapter.position} 章《${selectedId === chapter.id ? selectedTitle : chapter.title}》`" :aria-label="`删除第 ${chapter.position} 章《${selectedId === chapter.id ? selectedTitle : chapter.title}》`" @click="emit('delete', chapter)"><StudioIcon name="trash" :size="15" /></button>
         </div>
       </div>
+      </div>
     </article>
     <div v-if="!projected.items.length" class="tree-empty">{{ chapters.length ? '没有匹配的章节' : '还没有章节' }}</div>
   </section>
 </template>
+
+<style scoped>
+.chapter-volume-fold{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows 220ms cubic-bezier(.2,.8,.2,1),opacity 160ms ease}
+.chapter-volume-fold.is-open{grid-template-rows:1fr;opacity:1}
+.chapter-volume-fold>.chapter-volume-children{min-height:0;overflow:hidden}
+.chapter-volume-fold:not(.is-open){pointer-events:none}
+@media(prefers-reduced-motion:reduce){.chapter-volume-fold{transition:none}}
+</style>

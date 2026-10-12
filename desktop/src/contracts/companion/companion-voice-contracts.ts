@@ -2,7 +2,7 @@
 import type { CompanionNoticeReason } from './companion-presence'
 export type CompanionVoiceId = 'ningguang' | 'ganyu' | 'keqing'
 export const companionVoices = [{ id: 'ningguang', label: '凝光' }, { id: 'ganyu', label: '甘雨' }, { id: 'keqing', label: '刻晴' }] as const
-export type CompanionVoiceOpen = { continueWorkId: 'library-current' | null }
+export type CompanionVoiceOpen = { continueWorkId: 'library-current' | 'work-current' | null }
 export type CompanionRuntimeOptions = { textModel: boolean; speechModel: boolean; preload: boolean; voice: CompanionVoiceId }
 export type CompanionVoiceRequest = { sessionId: string; requestId: string; action: 'chat' | 'preview' | 'replay' | 'notice' | 'tap'; text: string; voice: CompanionVoiceId; mute: boolean; notice?: CompanionNoticeReason }
 export type CompanionVoiceEvent = { sessionId: string; requestId: string; sequence: number } & (
@@ -20,6 +20,7 @@ export type CompanionVoiceApi = {
   cancel(sessionId: string): Promise<boolean>
   close(sessionId: string): Promise<boolean>
   onEvent(listener: (event: CompanionVoiceEvent) => void): () => void
+  onReset?(listener: (sessionId: string) => void): () => void
 }
 function invalid(): never { throw new Error('COMPANION_VOICE_CONTRACT') }
 function record(value: unknown, keys: string[]): Record<string, unknown> {
@@ -36,7 +37,7 @@ export function decodeCompanionRuntimeOptions(value: unknown): CompanionRuntimeO
 export function companionSessionId(value: unknown): string { const id = text(value, 80); if (!/^[\w-]{1,80}$/.test(id)) invalid(); return id }
 export function decodeCompanionOpen(value: unknown): CompanionVoiceOpen {
   const item = record(value, ['continueWorkId'])
-  if (item.continueWorkId !== null && item.continueWorkId !== 'library-current') invalid()
+  if (item.continueWorkId !== null && item.continueWorkId !== 'library-current' && item.continueWorkId !== 'work-current') invalid()
   return { continueWorkId: item.continueWorkId }
 }
 export function decodeCompanionRequest(value: unknown): CompanionVoiceRequest {

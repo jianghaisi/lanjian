@@ -46,7 +46,7 @@ export function sourceCardResult(value: unknown, path: string): unknown {
   return value
 }
 
-export function canonicalEventResult(value: unknown, path: string): unknown {
+export function canonicalEventResult(value: unknown, path: string, allowApprovedWithoutEvidence = false): unknown {
   const result = object(value, path)
   identifier(result.id, `${path}.id`, 512)
   identifier(result.time, `${path}.time`, 500)
@@ -57,7 +57,9 @@ export function canonicalEventResult(value: unknown, path: string): unknown {
   identifier(result.event, `${path}.event`, 20_000)
   if (result.result !== undefined) text(result.result, `${path}.result`, 20_000)
   const evidence = array(result.evidenceRefs, `${path}.evidenceRefs`)
-  if (evidence.length === 0 || evidence.length > 100) invalid(`${path}.evidenceRefs`)
+  if (evidence.length > 100 || (evidence.length === 0 && (!allowApprovedWithoutEvidence || result.status !== 'approved'))) {
+    invalid(`${path}.evidenceRefs`)
+  }
   evidence.forEach((item, index) => {
     const ref = object(item, `${path}.evidenceRefs[${index}]`)
     identifier(ref.sourceId, `${path}.evidenceRefs[${index}].sourceId`, 512)
@@ -112,7 +114,10 @@ function eventList(value: unknown, path: string): unknown {
   const result = object(value, path)
   const events = array(result.events, `${path}.events`)
   if (events.length > 100_000) invalid(`${path}.events`)
-  events.forEach((item, index) => canonicalEventResult(item, `${path}.events[${index}]`))
+  // Unified author-created events have author provenance rather than material
+  // evidence. They remain readable through this compatibility list after the
+  // event module switches, while research candidates still require evidence.
+  events.forEach((item, index) => canonicalEventResult(item, `${path}.events[${index}]`, true))
   return value
 }
 

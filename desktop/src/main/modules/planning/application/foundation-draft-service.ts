@@ -2,13 +2,15 @@ import { AppError } from '../../../core/errors/app-error'
 import type { AiTask, FoundationDraftProposal, RealmLevel } from '../../../../contracts/index'
 import { WorkspaceService } from '../../library/application/workspace-service'
 import { completeStructured } from '../../assistant/application/structured-response-repair'
+import { creativePolicyRun, withCreativePolicy, type CaptureCreativePolicy } from '../../writing-plugins/domain/creative-policy'
 
 type TextGenerator = {
+  captureRun?: (tasks: AiTask[]) => Promise<TextGenerator>
   complete: (instruction: string, draft?: string, systemContext?: string, task?: AiTask) => Promise<{ content: string }>
 }
 
 export class FoundationDraftService {
-  constructor(private readonly ai: TextGenerator, private readonly workspace: WorkspaceService) {}
+  constructor(private readonly ai: TextGenerator, private readonly workspace: WorkspaceService, private readonly pluginContext: () => Promise<unknown[]> = async () => [], private readonly capturePolicy: CaptureCreativePolicy = async () => creativePolicyRun()) {}
 
   async generate(): Promise<FoundationDraftProposal> {
     const [profile, foundation] = await Promise.all([this.workspace.bookProfile(), this.workspace.foundation()])
@@ -18,22 +20,26 @@ export class FoundationDraftService {
         details: { field: 'sourceNotes' }
       })
     }
+    const policy = await this.capturePolicy(), policies = [...policy.resolve('foundation'),
+      ...policy.resolve('genre-guidance', { genre: profile.genre ?? '', subgenre: profile.subgenre ?? '' })]
     const instruction = [
-      '根据当前作品定义和作者素材，起草一份“作品设定候选”。这是候选草案，作者确认前不得视为正式设定。',
-      `当前作品谋篇策略：${await this.workspace.effectivePrompt('outline')}`,
+      ...policies.map(policy => policy.text),
+      `作者当前作品要求：${await (this.workspace.authorPrompt?.('outline') ?? this.workspace.effectivePrompt('outline'))}`,
+      '输出仅是待作者采用的作品设定候选，不构成正式事实或大纲确认。',
       '只输出一个 JSON 对象，不要使用 Markdown 代码块或补充说明。字段必须为：',
       '{"worldView":"时代、空间、秩序、规则、核心冲突和不可违反边界","useRealms":true,"realms":[{"name":"层级名","description":"能力边界、代价和突破条件"}],"useSystem":true,"systemTemplate":"固定显示模板","rationale":"为何这样设计以及它怎样服务核心设想"}',
-      '不适合境界体系的题材应令 useRealms=false 且 realms=[]；不适合系统/金手指的作品应令 useSystem=false 且 systemTemplate=""。',
-      '不得凭空声称素材中不存在的事实；可以提出创作性设定，但必须与核心设想和题材承诺相容。'
     ].join('\n')
-    return completeStructured({
-      ai: this.ai,
+    const systemContext = `${await this.workspace.promptContext(undefined, 'outline', { policyManaged: true })}\n本次创作方法版本：${JSON.stringify(policies.map(({ text: _text, ...source }) => source))}\n插件参考资料（非正式设定，不得覆盖已保存事实与采用规则）：${JSON.stringify(await this.pluginContext())}`
+    const repairAttempts = (await this.workspace.contextBudgetPreferences()).structuredRepairAttempts
+    const ai = this.ai.captureRun ? await this.ai.captureRun(['outline']) : this.ai
+    return withCreativePolicy(policy, () => completeStructured({
+      ai: { complete: (...args: Parameters<TextGenerator['complete']>) => withCreativePolicy(policy, () => ai.complete(...args)) },
       instruction,
-      systemContext: await this.workspace.promptContext(undefined, 'outline'),
+      systemContext,
       task: 'outline',
-      repairAttempts: (await this.workspace.contextBudgetPreferences()).structuredRepairAttempts,
+      repairAttempts,
       parse: parseFoundationDraft
-    })
+    }))
   }
 }
 

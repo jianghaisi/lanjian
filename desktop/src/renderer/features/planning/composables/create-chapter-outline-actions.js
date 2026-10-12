@@ -1,5 +1,28 @@
 // Explicit live ports preserve the existing book/request scope and draft ownership.
 export function createPlanningChapterOutlineActions(ports) {
+  let savedInfoSequence = 0
+  async function refreshPlannedChapterSavedInfo() {
+    const saved = ports.plannedChapter.value
+    if (!saved || !ports.current.value) return false
+    const sequence = ++savedInfoSequence, generation = ports.plannedChapterGeneration
+    const request = ports.workspaceRequests.capture(ports.current.value)
+    try {
+      const loaded = await ports.desktop.outlines.getPlannedChapter(saved.chapterId)
+      if (sequence !== savedInfoSequence || generation !== ports.plannedChapterGeneration ||
+        !ports.workspaceRequests.isCurrent(request, ports.current.value) ||
+        ports.plannedChapter.value?.chapterId !== saved.chapterId || ports.plannedChapter.value.revision !== saved.revision ||
+        loaded.chapterId !== saved.chapterId || loaded.revision !== saved.revision || loaded.title !== saved.title || loaded.content !== saved.content) return false
+      // Only enrich the acknowledged baseline; author input is independent.
+      ports.plannedChapter.value = loaded
+      ports.standaloneOutlineEntries.value = ports.standaloneOutlineEntries.value.map(entry =>
+        entry.chapterId === loaded.chapterId ? { ...entry, volume: loaded.volume, stage: loaded.stage, hasManuscript: loaded.hasManuscript, mirrorStatus: loaded.mirrorStatus } : entry)
+      return true
+    } catch {
+      // An unknown file status stays visible with a read-only retry. It does
+      // not turn the confirmed content save into another write attempt.
+      return false
+    }
+  }
   function resetPlannedChapter() {
     ports.outlineRecoveryDrafts.value = []
     ports.outlineRecoveryShelfError.value = ''
@@ -67,6 +90,7 @@ export function createPlanningChapterOutlineActions(ports) {
     if (!ports.current.value) return false
     const request = ports.workspaceRequests.capture(ports.current.value)
     const generation = ports.plannedChapterGeneration
+    const previousDocument = ports.plannedChapter.value
     const input = {
       chapterId: ports.plannedChapter.value.chapterId,
       title: ports.plannedChapterTitle.value,
@@ -82,7 +106,9 @@ export function createPlanningChapterOutlineActions(ports) {
       ports.plannedOutlineRecoveryError.value = error.message
     }
     try {
-      const saved = await ports.desktop.outlines.updatePlannedChapter(input)
+      const reviewed = await ports.outlineEditor?.value?.saveReviewedDraft?.(input)
+      const saved = reviewed ? { ...previousDocument, title: reviewed.snapshot.title, content: reviewed.snapshot.content,
+        revision: reviewed.snapshot.revision, mirrorStatus: undefined } : await ports.desktop.outlines.updatePlannedChapter(input)
       if (
         generation !== ports.plannedChapterGeneration ||
         !ports.workspaceRequests.isCurrent(request, ports.current.value)
@@ -103,6 +129,7 @@ export function createPlanningChapterOutlineActions(ports) {
           ? { ...entry, title: saved.title, revision: saved.revision, mirrorStatus: saved.mirrorStatus }
           : entry
       )
+      if (reviewed) void refreshPlannedChapterSavedInfo()
       if (ports.plannedChapterDirty.value) {
         ports.notice('章纲还有新修改，请再次保存后继续。')
         return false
@@ -116,7 +143,7 @@ export function createPlanningChapterOutlineActions(ports) {
         ports.plannedChapterError.value = error?.message || '保存失败，修改仍保留在编辑器中。'
       return false
     } finally {
-      if (generation === ports.plannedChapterGeneration) ports.plannedChapterBusy.value = false
+      if (generation === ports.plannedChapterGeneration && ports.workspaceRequests.isCurrent(request, ports.current.value)) ports.plannedChapterBusy.value = false
     }
   }
 
@@ -192,7 +219,8 @@ export function createPlanningChapterOutlineActions(ports) {
     }
   }
 
-  async function reloadPlannedChapter() {
+  async function reloadPlannedChapter(checkSavedOnly = false) {
+    if (checkSavedOnly === true) return refreshPlannedChapterSavedInfo()
     if (
       !ports.plannedChapter.value ||
       ports.plannedChapterBusy.value ||

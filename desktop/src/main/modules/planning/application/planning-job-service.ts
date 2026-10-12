@@ -1,3 +1,4 @@
+import { StructuredResponseFailure } from '../../assistant/application/structured-response-repair'
 import { randomUUID } from 'node:crypto'
 import { AppError } from '../../../core/errors/app-error'
 import type { PlanningJob, PlanningPackageProposal, PlanningStage } from '../../../../contracts/index'
@@ -77,13 +78,14 @@ export class PlanningJobService {
         completedAt: this.now().toISOString(),
         proposal
       }
-    } catch {
+    } catch (error) {
       if (job.state.status !== 'running' || job.controller.signal.aborted) return
       job.state = {
         ...job.state,
         status: 'failed',
+        ...(error instanceof StructuredResponseFailure ? { rawResult: JSON.stringify({ original: error.originalContent, last: error.lastContent }) } : {}),
         completedAt: this.now().toISOString(),
-        error: { code: 'GENERATION_FAILED', message: '自动谋篇未完成，请检查作品资料与模型连接后重试。', stage: failedStage },
+        error: { code: 'GENERATION_FAILED', message: error instanceof StructuredResponseFailure ? error.message.slice(0, 1000) : '自动谋篇未完成，请检查作品资料与模型连接后重试。', stage: failedStage },
         progress: { ...job.state.progress, message: '自动谋篇未完成' }
       }
     }

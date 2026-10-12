@@ -10,7 +10,7 @@ import { createOutlineStorageFeedback } from '../../../src/renderer/features/pla
 
 type Kind = 'total' | 'volume' | 'stage'
 type Saves = { saveOutline: () => Promise<void>; saveVolumeOutline: () => Promise<void>; saveStageOutline: () => Promise<void> }
-const functionNames = ['saveOutline', 'saveVolumeOutline', 'saveStageOutline', 'guard'] as const
+const functionNames = ['saveDocument', 'saveOutline', 'saveVolumeOutline', 'saveStageOutline', 'guard'] as const
 const scriptSource = Promise.all([
   '../../../src/renderer/features/planning/composables/create-outlines-actions.js',
   '../../../src/renderer/app/composables/create-feedback-actions.js'
@@ -57,7 +57,7 @@ async function harness() {
       updateStage: (stage: number, title: string, content: string) => { calls.push({ operation: 'updateStage', args: [stage, title, content] }); return main.promise },
     } },
     notice: (message: string) => notices.push(message),
-    outlineStorageFeedback: { record: (key: string, receipt: Pick<OutlineUpdateResult, 'storageMode' | 'mirrorStatus'>) => { receipts.push({ key, receipt: { ...receipt } }); storage.record(key, receipt) } },
+    outlineStorageFeedback: { ...storage, record: (key: string, receipt: Pick<OutlineUpdateResult, 'storageMode' | 'mirrorStatus'>) => { receipts.push({ key, receipt: { ...receipt } }); storage.record(key, receipt) } },
     refreshWorkflow: async () => { effects.workflow += 1 },
     refreshStageOutlines: async () => { effects.stageRefresh += 1; throw new Error('A completed stage save must not reread and reopen the editor') },
     openStageOutline: () => { effects.stageOpen += 1; throw new Error('A completed stage save must not replace current stage input') },
@@ -81,8 +81,11 @@ for (const kind of ['total', 'volume', 'stage'] as const) {
     assert.equal(state.busy.value, true)
     assert.equal(ctx.calls.length, 1)
     const failure = new Error('隔离测试：正式写入失败')
+    const key = kind === 'total' ? 'total' : kind === 'volume' ? 'volume:2' : 'stage:7'
+    assert.equal(ctx.storage.saveStatus(key).pending, true)
     ctx.main.reject(failure)
     await assert.rejects(operation, error => error === failure)
+    assert.deepEqual(ctx.storage.saveStatus(key), { pending: false, error: failure.message, revision: 0 })
     assert.equal(state.busy.value, false)
     assert.equal(JSON.stringify({ total: state.lastSavedTotalOutline.value, volume: state.lastSavedVolumeOutline.value, stage: state.lastSavedStageOutline.value, title: state.lastSavedStageTitle.value, stages: state.stageOutlines.value }), before)
     assert.equal(state.totalOutline.value, '总纲提交草稿')
@@ -104,6 +107,8 @@ for (const kind of ['total', 'volume', 'stage'] as const) {
     state.stageOutline.value = '等待保存期间追加的阶段正文'
     state.stageTitle.value = '等待保存期间修改的阶段名称'
     ctx.main.resolve(receipt(kind)); await operation
+    const key = kind === 'total' ? 'total' : kind === 'volume' ? 'volume:2' : 'stage:7'
+    assert.deepEqual(ctx.storage.saveStatus(key), { pending: false, error: '', revision: 1 })
     assert.equal(state.totalOutline.value, '等待保存期间追加的总纲')
     assert.equal(state.volumeOutline.value, '等待保存期间追加的卷纲')
     assert.equal(state.stageOutline.value, '等待保存期间追加的阶段正文')

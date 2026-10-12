@@ -33,6 +33,8 @@ lanjian/
 
 ## 业务模块
 
+2026-10-05 获批的在线模式增加 `packages/hosted-contracts/`（纯 HTTP 契约）、`services/hosted-app/`（身份、私有书库、账本与创作用例）、`web/`（官网/体验/后台）和 `deploy/hosted/`（预构建部署包）。目录按子任务逐步建立；不复用 Electron 启动器或把本地模型 worker 部署到服务器。桌面目录与作者本地数据保持原职责。
+
 | 目录名 | 职责 |
 | --- | --- |
 | library | 书库、作品创建/打开/导入、工作区加载与备份 |

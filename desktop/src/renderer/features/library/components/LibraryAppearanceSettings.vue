@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import CompanionDialogueSettings from '../../companion/components/CompanionDialogueSettings.vue'
-import CompanionVoiceSettings from '../../companion/components/CompanionVoiceSettings.vue'
 import { defaultLibraryCharacterPlacement, libraryBackgroundChoices, librarySceneChoices, type LibraryBackgroundId, type LibraryCharacterPlacement, type LibrarySceneId } from '../composables/library-appearance'
 
 defineProps<{ background: LibraryBackgroundId; scene: LibrarySceneId; character: LibraryCharacterPlacement; error?: string }>()
@@ -37,8 +35,6 @@ const emit = defineEmits<{ background: [value: LibraryBackgroundId]; scene: [val
         </label>
       </div>
     </fieldset>
-    <CompanionVoiceSettings />
-    <CompanionDialogueSettings />
     <p v-if="error" role="alert">{{ error }}</p>
   </section>
 </template>

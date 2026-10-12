@@ -1,6 +1,6 @@
 import { AppError } from '../../../core/errors/app-error'
 import {
-  connectionRevision, decodeConnectionCreate, decodeConnectionUpdate, globalConnectionId,
+  connectionRevision, decodeConnectionCreate, decodeConnectionUpdate, decodeConnectionRemove, globalConnectionId,
   nextConnectionRevision, MAX_GLOBAL_CONNECTIONS, effectiveRemoteModelProtocol,
   type GlobalConnectionRepository, type GlobalConnectionsView, type GlobalConnectionDocument,
   type ModelConnectionSecrets, type StoredGlobalConnection, type GlobalConnectionCommitGuard
@@ -64,6 +64,22 @@ export class ModelConnectionsService {
     const committed = await this.repository.commit(snapshot, {
       ...snapshot.document, revision: nextConnectionRevision(snapshot.document.revision),
       connections: snapshot.document.connections.map(c => c.id === next.id ? next : c)
+    }, guard)
+    return this.view(committed.document)
+  }
+
+  async remove(value: unknown, guard?: GlobalConnectionCommitGuard): Promise<GlobalConnectionsView> {
+    const input = decodeConnectionRemove(value)
+    guard?.assertActive()
+    const snapshot = await this.repository.read()
+    guard?.assertActive()
+    this.checkRevision(snapshot.document.revision, input.expectedRevision)
+    const current = snapshot.document.connections.find(c => c.id === input.id)
+    if (!current) throw missing()
+    this.checkRevision(current.revision, input.connectionRevision)
+    const committed = await this.repository.commit(snapshot, {
+      ...snapshot.document, revision: nextConnectionRevision(snapshot.document.revision),
+      connections: snapshot.document.connections.filter(c => c.id !== input.id)
     }, guard)
     return this.view(committed.document)
   }

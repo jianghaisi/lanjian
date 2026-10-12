@@ -58,17 +58,20 @@ test('direct fast saves are rejected before project access', async () => {
   await assert.rejects(workspace.saveBookProfile({ chapterGenerationMode: 'fast' } as BookProfile), { code: 'VALIDATION_ERROR' })
 })
 
-const prose = '沈砚在城门外发现脚印，沿着雨水留下的痕迹走到酒馆门前。'.repeat(25)
+const prose = Array.from({ length: 25 }, () => '沈砚在城门外发现脚印，沿着雨水留下的痕迹走到酒馆门前。').join('\n\n')
 const validReview = JSON.stringify({
   summary: '按序完成本章节点', passed: true,
   beats: [{ id: 'B1', status: 'covered', evidence: '城门外发现脚印' }, { id: 'B2', status: 'covered', evidence: '走到酒馆门前' }],
   boundary: { entryRespected: true, exitReached: true, evidence: '沈砚在城门外发现脚印，沿着雨水留下的痕迹走到酒馆门前。' },
-  violations: [], introducedFacts: [], characterChanges: [], characterConflicts: []
+  violations: [], introducedFacts: [], characterChanges: [], characterConflicts: [], literaryFindings: []
 })
 
 function draftFixture(mode: 'fast' | 'reviewed' | undefined, options: {
   review?: () => Promise<{ content: string }>; ready?: boolean; prose?: string
   onRoute?: (task: string, model?: string, connection?: string) => void
+  contractFingerprints?: string[]
+  events?: Array<{ id: string; time: string; characters: string[]; location: string; event: string; versionId?: string; phase?: 'planned' | 'realized' }>
+  eventVersions?: Array<{ eventId: string; versionId: string; phase: 'planned' | 'realized' }>
 } = {}) {
   const calls: string[] = []
   const contexts: string[] = []
@@ -86,13 +89,19 @@ function draftFixture(mode: 'fast' | 'reviewed' | undefined, options: {
       return { content: prose }
     }
   }
+  let contractReads = 0
   const workspace = {
     foundationStatus: async () => ({ readyForProse: options.ready ?? true, missing: ['已确认章纲'] }),
-    chapterEvents: async () => [],
-    chapterContractVersion: async () => ({ fingerprint: 'contract', totalFingerprint: 'total', outlineHash: 'outline', eventIds: [], confirmedAt: '2026-09-12T00:00:00.000Z' }),
+    chapterEvents: async () => options.events ?? [],
+    chapterContractVersion: async () => ({
+      fingerprint: options.contractFingerprints?.[Math.min(contractReads++, options.contractFingerprints.length - 1)] ?? 'contract',
+      totalFingerprint: 'total', outlineHash: 'outline', eventIds: (options.events ?? []).map((event) => event.id),
+      ...(options.eventVersions ? { eventVersions: options.eventVersions } : {}),
+      confirmedAt: '2026-09-12T00:00:00.000Z'
+    }),
     bookProfile: async () => ({ chapterGenerationMode: mode, targetWordsPerChapter: 300, proseExpansionMode: 'web-serial', reviewStrictness: 'balanced' }),
     promptContext: async (_id: number, task: string, options?: unknown) => {
-      assert.equal(options, undefined, 'legacy fast must not select compressed context')
+      assert.deepEqual(options, { policyManaged: true }, 'full context retains author/formal facts without reinjecting the replaced default method')
       contexts.push(task)
       return `${task}-完整上下文`
     },
@@ -116,6 +125,17 @@ test('a frozen prose model does not leak to the separate configured review conne
       { task: 'review', model: connection ? 'gemini-prose-model' : undefined, provider: connection }
     ])
   }
+})
+
+test('event versions and contract fingerprints are rechecked before model execution', async () => {
+  const event = { id: 'event-1', time: '第一幕', characters: ['沈砚'], location: '旧塔', event: '取得密信', versionId: 'version-2', phase: 'planned' as const }
+  const mismatched = draftFixture('reviewed', { events: [event], eventVersions: [{ eventId: 'event-1', versionId: 'version-1', phase: 'planned' }] })
+  await assert.rejects(mismatched.draft.draft(1, '继续写'), { code: 'CONFLICT' })
+  assert.deepEqual(mismatched.calls, [])
+
+  const changed = draftFixture('reviewed', { events: [event], eventVersions: [{ eventId: 'event-1', versionId: 'version-2', phase: 'planned' }], contractFingerprints: ['contract', 'changed'] })
+  await assert.rejects(changed.draft.draft(1, '继续写'), { code: 'CONFLICT' })
+  assert.deepEqual(changed.calls, [])
 })
 
 for (const mode of ['fast', 'reviewed', undefined] as const) {

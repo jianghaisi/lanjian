@@ -52,6 +52,16 @@ export function buildWritingAgentApplication(task: WritingAgentTask, input: Writ
   return { artifactId, artifactType, mode, content: formatted }
 }
 
+/** Inline review retains whitespace. Formatting remains an explicit editor command. */
+export function buildWritingAgentReviewCandidate(task: WritingAgentTask, allowFailedReview = false): string {
+  if (task.status !== 'succeeded' || task.artifact?.status !== 'complete' || !task.turn?.candidate) throw damagedCandidate()
+  if (task.turn.proposal && !task.turn.proposal.report.passed && !allowFailedReview) {
+    throw new AppError('VALIDATION_ERROR', '这份候选尚未通过全部章纲检查，请先核对检查结果。', { recoverable: true })
+  }
+  const candidate = task.turn.candidate
+  return applyCandidate(task.baseDraft, candidate, new Set(candidate.diff?.filter(block => block.kind === 'change').map(block => block.id) ?? []))
+}
+
 function applyCandidate(baseDraft: string, candidate: WritingAgentCandidate, accepted: ReadonlySet<string>): string {
   if (candidate.mode === 'replaceSelection') {
     if (!candidate.selection || !candidate.diff) throw damagedCandidate()

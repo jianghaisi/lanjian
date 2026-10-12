@@ -1,15 +1,23 @@
 <script setup lang="ts">
+import EditorToolbar from '../../../ui/EditorToolbar.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ChapterLifecycleState, WritingAgentInsertionAnchor, WritingAgentSkillId } from '../../../../contracts/index'
 import { measureManuscript } from '../../../../contracts/manuscript/manuscript-metrics'
 import { formatManuscriptParagraphs } from '../services/manuscript-formatting'
+import { formatOutlineWhitespace } from '../../planning/services/outline-formatting'
+import type { DocumentKind } from '../../../../contracts/document-review/types'
+import type { FieldBinding } from '../../assistant/services/assistant-field-registry'
 import { ManuscriptEditHistory, type ManuscriptEditSnapshot } from '../services/manuscript-edit-history'
 import { useEditorPreferences, type EditorGuideStyle } from '../composables/editor-preferences'
 import StudioIcon from '../../../ui/StudioIcon.vue'
 import WorkspaceStorageStatus from '../../../app/components/workspace/WorkspaceStorageStatus.vue'
 import PlainTextEditor from '../../../ui/PlainTextEditor.vue'
+import { useDocumentReview } from '../../document-review/use-document-review'
+import ReviewStatus from '../../document-review/ReviewStatus.vue'
+import AnnotationPanel from '../../document-review/AnnotationPanel.vue'
 
 const props = defineProps<{
+  workItemId: string
   chapterId: number
   title: string
   content: string
@@ -17,6 +25,19 @@ const props = defineProps<{
   projectWordCount: number
   saveState: 'saved' | 'dirty' | 'saving' | 'checkpoint' | 'local' | 'error'
   saveErrorMessage?: string
+  documentKind?: DocumentKind
+  documentLabel?: string
+  titlePrefix?: string
+  titleReadOnly?: boolean
+  titleAriaLabel?: string
+  contentAriaLabel?: string
+  placeholder?: string
+  savedLabel?: string
+  savedWarning?: boolean
+  saveRevision?: number
+  saveButtonId?: string
+  saveDisabled?: boolean
+  assistantField?: FieldBinding
   conflict?: {
     reason?: string
     baseTitle: string
@@ -51,16 +72,29 @@ const emit = defineEmits<{
   'selection-ai-menu': []
   'recover-conflict': []
   'recover-mirror': []
+  'check-saved-info': []
   'selection-change': [selection: { start: number; end: number; text: string } | null]
   'anchor-change': [anchor: WritingAgentInsertionAnchor]
   'manual-edit': []
   'history-restore': [direction: 'undo' | 'redo']
+  'composition-start': []
+  'composition-end': [value: string]
 }>()
 
+const readOnly = computed(() => Boolean(props.readOnly || window.novelDesktop?.app.hosted?.readOnly))
+const isOutline = computed(() => Boolean(props.documentKind && props.documentKind !== 'body'))
+const savedInfoUnknown = computed(() => !isOutline.value && props.storageMode === 'sqlite' && props.mirrorStatus === undefined)
+const toolPrefix = computed(() => isOutline.value ? 'outline' : 'manuscript')
+const documentLabel = computed(() => props.documentLabel || (isOutline.value ? '大纲' : '正文'))
+const documentIdentity = computed(() => JSON.stringify([props.workItemId, props.documentKind || 'body', props.chapterId]))
 const titleDraft = ref(props.title)
 const contentDraft = ref(props.content)
+const titleFieldId = computed(() => props.documentKind === 'stage' ? 'AppShell.stageTitle'
+  : props.documentKind === 'chapter-outline' ? 'PlannedChapterEditor.title' : 'ManuscriptEditor.titleDraft')
 const editor = ref<InstanceType<typeof PlainTextEditor> | null>(null)
 const selectionText = ref('')
+const annotationSelection = ref<{ start: number; end: number; text: string } | null>(null)
+const annotationPanel = ref<InstanceType<typeof AnnotationPanel> | null>(null)
 const findInput = ref<HTMLInputElement | null>(null)
 const manuscriptHead = ref<HTMLElement | null>(null)
 const layoutTrigger = ref<HTMLButtonElement | null>(null)
@@ -72,6 +106,16 @@ const findQuery = ref('')
 const replaceText = ref('')
 const currentMatch = ref(0)
 const composing = ref(false)
+const review = useDocumentReview({
+  api: window.novelDesktop!.documentReview,
+  target: () => ({ workItemId: props.workItemId, kind: props.documentKind || 'body', ...(props.chapterId ? { legacyId: props.chapterId } : {}) }),
+  current: () => ({ title: reviewTitle(), content: contentDraft.value }),
+  readOnly: () => Boolean(readOnly.value),
+  composing: () => composing.value,
+  apply: (expected, start, end, replacement) => editor.value?.applyReview(expected, start, end, replacement) || false,
+  restore: (title, content) => { recordCommand('restore-review'); if (!props.titleReadOnly) titleDraft.value = title; contentDraft.value = content; scheduleSync(0) }
+})
+function reviewTitle(): string { return props.titleReadOnly ? review.snapshot.value?.title || props.title : titleDraft.value }
 const focusMode = ref(false)
 const syncPending = ref(false)
 const typewriterMode = ref(localStorage.getItem('lanjian-editor-typewriter') === 'true')
@@ -124,14 +168,23 @@ const wordCount = computed(() => manuscriptMetrics.value.wordCount)
 const selectedWordCount = computed(() => measureManuscript(selectionText.value).wordCount)
 const paragraphCount = computed(() => manuscriptMetrics.value.paragraphCount)
 const localDirty = computed(() => titleDraft.value !== props.title || contentDraft.value !== props.content)
-const visibleSaveState = computed(() => props.saveState === 'error' ? 'error' : localDirty.value ? 'dirty' : props.saveState)
+const visibleSaveState = computed(() => {
+  if (props.saveState === 'error') return 'error'
+  if (localDirty.value) return 'dirty'
+  if (props.saveState !== 'saved') return props.saveState
+  if (isOutline.value && !review.snapshot.value && !props.saveRevision) return review.availability.value === 'absent' ? 'new' : 'unknown'
+  return 'saved'
+})
+watch(() => props.saveRevision, (value, previous) => { if (value && value !== previous && isOutline.value) void review.retry() })
 const saveLabel = computed(() => ({
-  saved: `${props.textAuthority === 'files-v1' ? '正文文件已保存' : props.storageMode === 'sqlite' ? '已存入数据库' : '已存于本地'}${props.lastSavedAt ? ` · ${formatTime(props.lastSavedAt)}` : ''}`,
-  dirty: '有改动，稍后自动保存',
+  saved: isOutline.value ? '已保存' : props.savedLabel || `${props.textAuthority === 'files-v1' ? '正文文件已保存' : props.storageMode === 'sqlite' ? '已存入数据库' : '已存于本地'}${savedInfoUnknown.value ? ' · 文件状态待核对' : ''}${props.lastSavedAt ? ` · ${formatTime(props.lastSavedAt)}` : ''}`,
+  new: '尚未保存',
+  unknown: review.availability.value === 'loading' ? '正在核对文档…' : '保存状态待核对',
+  dirty: isOutline.value ? '有改动待保存' : '有改动，稍后自动保存',
   saving: '正在保存…',
   checkpoint: props.textAuthority === 'files-v1' ? '正文文件已保存 · 正在整理历史' : '已形成恢复草稿 · 正在合并版本',
   local: '仅本机恢复草稿 · 尚未正式保存',
-  error: props.saveErrorMessage || '保存失败，正文仍在当前窗口'
+  error: props.saveErrorMessage || '保存失败，编辑稿仍在当前窗口'
 }[visibleSaveState.value]))
 const confirmationLabel = computed(() => props.chapterConfirming ? '确认中…'
   : props.lifecycleStatus === 'CONFIRMED' && !props.hasUnconfirmedChanges ? '已确认本章'
@@ -151,8 +204,9 @@ const matches = computed(() => {
   return result
 })
 
-watch(() => props.chapterId, () => {
+watch(documentIdentity, () => {
   clearSyncTimer()
+  syncPending.value = false
   editHistory.reset()
   historyRevision.value += 1
   titleDraft.value = props.title
@@ -163,12 +217,15 @@ watch(() => props.chapterId, () => {
   replaceText.value = ''
   currentMatch.value = 0
   selectionText.value = ''
+  annotationSelection.value = null
 })
 
 watch(() => [props.title, props.content] as const, ([title, content]) => {
   if (syncPending.value || composing.value || (title === titleDraft.value && content === contentDraft.value)) return
-  editHistory.record(currentEditSnapshot(), { group: 'external', coalesceMs: 50 })
-  historyRevision.value += 1
+  if (content !== contentDraft.value || (!props.titleReadOnly && title !== titleDraft.value)) {
+    editHistory.record(currentEditSnapshot(), { group: 'external', coalesceMs: 50 })
+    historyRevision.value += 1
+  }
   titleDraft.value = title
   contentDraft.value = content
 })
@@ -190,15 +247,18 @@ function clearSyncTimer() {
 }
 
 function scheduleSync(delay = 220) {
-  if (props.readOnly) return
+  if (readOnly.value) return
   syncPending.value = true
   clearSyncTimer()
   if (composing.value) return
+  // Outline navigation/save guards must see each edit immediately; publishing
+  // a draft is separate from its explicit formal save.
+  if (isOutline.value) { syncNow(); return }
   syncTimer = window.setTimeout(syncNow, delay)
 }
 
 function syncNow() {
-  if (props.readOnly) return
+  if (readOnly.value) return
   clearSyncTimer()
   if (composing.value) {
     syncPending.value = true
@@ -210,6 +270,7 @@ function syncNow() {
 }
 
 async function flush() {
+  await review.settled()
   if (composing.value) await new Promise<void>((resolve) => compositionFlushWaiters.add(resolve))
   syncNow()
   await nextTick()
@@ -219,6 +280,7 @@ function beginComposition() {
   composing.value = true
   syncPending.value = true
   clearSyncTimer()
+  emit('composition-start')
 }
 
 function endComposition() {
@@ -227,6 +289,7 @@ function endComposition() {
   requestCursorCenter()
   for (const resolve of compositionFlushWaiters) resolve()
   compositionFlushWaiters.clear()
+  emit('composition-end', contentDraft.value)
 }
 
 function endContentComposition(text: string) {
@@ -244,9 +307,13 @@ function onTitleInput() {
   emit('manual-edit')
   scheduleSync()
 }
+function writeTitleFromAssistant(value: string) {
+  if (readOnly.value || props.titleReadOnly || review.busy.value || composing.value) return
+  recordCommand('assistant-title'); titleDraft.value = value; onTitleInput()
+}
 
 function onTitleKeydown(event: KeyboardEvent) {
-  if (props.readOnly) return
+  if (readOnly.value || review.busy.value || composing.value || event.isComposing) return
   const modifier = event.ctrlKey || event.metaKey
   if (modifier && event.key.toLocaleLowerCase() === 'z') {
     event.preventDefault()
@@ -273,7 +340,7 @@ function onTitleKeydown(event: KeyboardEvent) {
 
 function onContentInput() {
   const target = editor.value
-  if (!composing.value && firstLineIndent.value && target && contentDraft.value && !contentDraft.value.startsWith('　　')) {
+  if (!isOutline.value && !review.busy.value && !composing.value && firstLineIndent.value && target && contentDraft.value && !contentDraft.value.startsWith('　　')) {
     const cursor = target.selectionStart
     contentDraft.value = `　　${contentDraft.value}`
     void nextTick(() => target.setSelectionRange(cursor + 2, cursor + 2))
@@ -284,9 +351,10 @@ function onContentInput() {
 }
 
 function onEditorKeydown(event: KeyboardEvent) {
+  if (review.busy.value) { event.preventDefault(); return }
   if (event.isComposing || composing.value) return
   const modifier = event.ctrlKey || event.metaKey
-  if (props.readOnly && !(modifier && event.key.toLocaleLowerCase() === 'f')) return
+  if (readOnly.value && !(modifier && event.key.toLocaleLowerCase() === 'f')) return
   if (modifier && event.key.toLocaleLowerCase() === 'z') {
     event.preventDefault()
     if (event.shiftKey) redoEdit()
@@ -309,7 +377,7 @@ function onEditorKeydown(event: KeyboardEvent) {
     openFind()
     return
   }
-  if (modifier && event.shiftKey && event.key.toLocaleLowerCase() === 'a') {
+  if (!isOutline.value && modifier && event.shiftKey && event.key.toLocaleLowerCase() === 'a') {
     event.preventDefault()
     reportSelection()
     emit('selection-ai', selectionSnapshot() ? 'custom' : 'continue')
@@ -317,10 +385,10 @@ function onEditorKeydown(event: KeyboardEvent) {
   }
   if (event.key === 'Tab' && !modifier && !event.altKey) {
     event.preventDefault()
-    insertText('　　')
+    insertText(isOutline.value ? '\t' : '　　')
     return
   }
-  if (event.key === 'Enter' && !modifier && !event.altKey && !event.shiftKey && !event.isComposing) {
+  if (!isOutline.value && event.key === 'Enter' && !modifier && !event.altKey && !event.shiftKey && !event.isComposing) {
     event.preventDefault()
     insertText(`${paragraphSpacing.value ? '\n\n' : '\n'}${firstLineIndent.value ? '　　' : ''}`)
     return
@@ -333,12 +401,13 @@ function onEditorKeydown(event: KeyboardEvent) {
 }
 
 function formatParagraphs() {
-  if (props.readOnly || !contentDraft.value.trim()) return
-  recordCommand('format')
-  contentDraft.value = formatManuscriptParagraphs(contentDraft.value, {
-    firstLineIndent: firstLineIndent.value,
-    paragraphSpacing: paragraphSpacing.value
+  if (readOnly.value || composing.value || review.busy.value || !contentDraft.value.trim()) return
+  const formatted = isOutline.value ? formatOutlineWhitespace(contentDraft.value) : formatManuscriptParagraphs(contentDraft.value, {
+    firstLineIndent: firstLineIndent.value, paragraphSpacing: paragraphSpacing.value
   })
+  if (formatted === contentDraft.value) return
+  recordCommand('format')
+  contentDraft.value = formatted
   scheduleSync(0)
   void nextTick(() => {
     editor.value?.focus()
@@ -348,7 +417,7 @@ function formatParagraphs() {
 
 function insertText(value: string) {
   const target = editor.value
-  if (!target) return
+  if (!target || readOnly.value || composing.value || review.busy.value) return false
   const start = target.selectionStart
   const end = target.selectionEnd
   recordCommand('insert')
@@ -359,11 +428,14 @@ function insertText(value: string) {
     target.focus()
     requestCursorCenter()
   })
+  return true
 }
 
 function openFind() {
+  const identity = documentIdentity.value
   findOpen.value = true
   void nextTick(() => {
+    if (!findOpen.value || identity !== documentIdentity.value) return
     findInput.value?.focus()
     findInput.value?.select()
   })
@@ -404,7 +476,7 @@ async function locateText(value: string): Promise<boolean> {
 }
 
 function replaceCurrent() {
-  if (props.readOnly) return
+  if (readOnly.value || composing.value || review.busy.value) return
   if (!matches.value.length) return
   const start = matches.value[currentMatch.value] ?? matches.value[0]
   recordCommand('replace')
@@ -414,7 +486,7 @@ function replaceCurrent() {
 }
 
 function replaceAll() {
-  if (props.readOnly) return
+  if (readOnly.value || composing.value || review.busy.value) return
   if (!matches.value.length) return
   const pattern = new RegExp(escapeRegExp(findQuery.value), 'giu')
   recordCommand('replace-all')
@@ -442,7 +514,7 @@ function inputHistoryGroup(event: InputEvent, field: 'title' | 'content'): strin
 }
 
 function recordBeforeInput(event: InputEvent, field: 'title' | 'content') {
-  if (props.readOnly) return
+  if (readOnly.value) return
   if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
     event.preventDefault()
     if (event.inputType === 'historyUndo') undoEdit()
@@ -454,9 +526,9 @@ function recordBeforeInput(event: InputEvent, field: 'title' | 'content') {
 }
 
 function recordContentChange(change: { content: string; start: number; end: number; group: string }) {
-  if (props.readOnly) return
+  if (readOnly.value) return
   editHistory.record({ title: titleDraft.value, content: change.content, selectionStart: change.start, selectionEnd: change.end },
-    { group: `content:${change.group}`, coalesceMs: 900 })
+    { group: `content:${change.group}`, coalesceMs: change.group === 'review' ? 0 : 900 })
   historyRevision.value += 1
 }
 
@@ -472,8 +544,9 @@ function recordCommand(group: string) {
 
 function applyHistorySnapshot(snapshot: ManuscriptEditSnapshot, direction: 'undo' | 'redo') {
   clearSyncTimer()
-  titleDraft.value = snapshot.title
+  titleDraft.value = props.titleReadOnly ? props.title : snapshot.title
   contentDraft.value = snapshot.content
+  review.history(direction, reviewTitle(), snapshot.content)
   historyRevision.value += 1
   emit('manual-edit')
   emit('history-restore', direction)
@@ -491,13 +564,13 @@ function applyHistorySnapshot(snapshot: ManuscriptEditSnapshot, direction: 'undo
 }
 
 function undoEdit() {
-  if (props.readOnly) return
+  if (readOnly.value || review.busy.value || composing.value) return
   const snapshot = editHistory.undo(currentEditSnapshot())
   if (snapshot) applyHistorySnapshot(snapshot, 'undo')
 }
 
 function redoEdit() {
-  if (props.readOnly) return
+  if (readOnly.value || review.busy.value || composing.value) return
   const snapshot = editHistory.redo(currentEditSnapshot())
   if (snapshot) applyHistorySnapshot(snapshot, 'redo')
 }
@@ -511,7 +584,27 @@ function toggleTypewriter() {
 
 function closeLayoutPanel(returnFocus = false) {
   layoutOpen.value = false
-  if (returnFocus) void nextTick(() => layoutTrigger.value?.focus())
+  if (returnFocus) layoutTrigger.value?.focus({ preventScroll: true })
+}
+
+function enterEditorTool(element: Element) {
+  if (!(element instanceof HTMLElement)) return
+  element.inert = false
+  element.removeAttribute('aria-hidden')
+}
+
+function leaveEditorTool(element: Element) {
+  if (!(element instanceof HTMLElement)) return
+  element.inert = true
+  element.setAttribute('aria-hidden', 'true')
+}
+
+function onToolKeydown(event: KeyboardEvent, tool: 'find' | 'layout') {
+  if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (tool === 'find') closeFind()
+  else closeLayoutPanel(true)
 }
 
 function positionLayoutPanel() {
@@ -528,11 +621,13 @@ function positionLayoutPanel() {
   layoutPanelStyle.value = {
     insetBlockStart: `${Math.max(0, triggerRect.bottom - headRect.top + 8)}px`,
     insetInlineStart: `${left}px`,
-    insetInlineEnd: 'auto'
+    insetInlineEnd: 'auto',
+    '--layout-origin': `${Math.max(0, Math.min(panelWidth, preferredLeft + triggerRect.width / 2 - left))}px 0`
   }
 }
 
 async function toggleLayoutPanel() {
+  const identity = documentIdentity.value
   layoutOpen.value = !layoutOpen.value
   if (!layoutOpen.value) return
   await nextTick()
@@ -598,9 +693,17 @@ function requestCursorCenter(force = false) {
 }
 
 async function saveManuscript() {
-  if (props.readOnly) return
+  if (readOnly.value || props.saveDisabled) return
   await flush()
   emit('save')
+}
+
+async function selectAnnotation(id: string) {
+  const identity = documentIdentity.value
+  review.annotationOpen.value = true
+  await nextTick()
+  if (!review.annotationOpen.value || identity !== documentIdentity.value) return
+  if (identity === documentIdentity.value) await annotationPanel.value?.focusAnnotation(id)
 }
 
 function selectionSnapshot() {
@@ -626,6 +729,7 @@ function insertionAnchorSnapshot(): WritingAgentInsertionAnchor | null {
 
 function reportSelection() {
   const selection = selectionSnapshot()
+  annotationSelection.value = selection
   selectionText.value = selection?.text || ''
   emit('selection-change', selection)
   const anchor = insertionAnchorSnapshot()
@@ -634,12 +738,27 @@ function reportSelection() {
 
 function openSelectionAiMenu(event: MouseEvent) {
   reportSelection()
-  if (!selectionSnapshot() || props.readOnly) return
+  if (isOutline.value || !selectionSnapshot() || readOnly.value) return
   event.preventDefault()
   emit('selection-ai-menu')
 }
 
-defineExpose({ flush, focus: () => editor.value?.focus(), locateText, selectionSnapshot, insertionAnchorSnapshot })
+async function saveReviewedDraft(value: { title?: string; content: string }) {
+  const identity = documentIdentity.value
+  const pendingDecision = review.busy.value
+  await flush()
+  if (identity !== documentIdentity.value) throw new Error('文档已切换，请在原文档保存。')
+  return review.save({ title: props.titleReadOnly ? reviewTitle() : value.title ?? titleDraft.value, content: pendingDecision ? contentDraft.value : value.content })
+}
+function restoreContent(content: string) {
+  if (readOnly.value || composing.value || review.busy.value) return false
+  recordCommand('restore-version'); contentDraft.value = content; scheduleSync(0)
+  return true
+}
+defineExpose({ flush, insertText, restoreContent, hasReview: (taskId: string) => review.reviews.value.some(item => item.source.taskId === taskId), openReview: review.open, saveReviewedDraft, focus: () => editor.value?.focus(), locateText, selectionSnapshot, insertionAnchorSnapshot,
+  viewSnapshot: () => editor.value?.viewSnapshot(),
+  restoreView: (snapshot: Parameters<NonNullable<typeof editor.value>['restoreView']>[0]) => editor.value?.restoreView(snapshot)
+})
 
 onMounted(() => {
   if (typeof ResizeObserver === 'undefined' || !manuscriptHead.value) return
@@ -657,59 +776,65 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <article class="manuscript-editor" :class="{ 'is-focus-mode': focusMode, 'is-typewriter-mode': typewriterMode, 'is-read-only': readOnly, 'has-conflict': Boolean(conflict), 'editor-guides-hidden': guideStyle === 'off' }" :data-guide-style="guideStyle" data-testid="manuscript-editor">
+  <article class="manuscript-editor" :class="{ 'is-focus-mode': focusMode, 'is-typewriter-mode': typewriterMode, 'is-read-only': readOnly, 'has-conflict': Boolean(conflict), 'editor-guides-hidden': guideStyle === 'off' }" :data-guide-style="guideStyle" :data-testid="toolPrefix + '-editor'" :data-document-kind="documentKind || 'body'">
     <header ref="manuscriptHead" class="manuscript-head">
-      <nav class="writing-toolbar" aria-label="正文编辑工具">
+      <nav class="writing-toolbar" :aria-label="documentLabel + '编辑工具'">
         <div class="writing-tool-group">
-          <span class="history-tool-group" role="group" aria-label="编辑与查找">
-            <button type="button" class="editor-icon-tool" data-testid="manuscript-undo" title="撤销（Ctrl+Z）" aria-label="撤销" :disabled="readOnly || !canUndo" @mousedown.prevent @click="undoEdit"><StudioIcon name="undo" :size="18"/></button>
-            <button type="button" class="editor-icon-tool" data-testid="manuscript-redo" title="重做（Ctrl+Y 或 Ctrl+Shift+Z）" aria-label="重做" :disabled="readOnly || !canRedo" @mousedown.prevent @click="redoEdit"><StudioIcon name="redo" :size="18"/></button>
-            <button type="button" class="editor-icon-tool" data-testid="manuscript-find" title="查找与替换（Ctrl+F）" aria-label="查找与替换" :aria-pressed="findOpen" @mousedown.prevent @click="findOpen ? closeFind() : openFind()"><StudioIcon name="search" :size="18"/></button>
-          </span>
-          <button type="button" class="direct-format-action" data-testid="manuscript-format" title="一键排版：按当前版式统一段落缩进和段间空行" aria-label="一键排版" :disabled="readOnly || !contentDraft.trim()" @click="formatParagraphs"><StudioIcon name="outline" :size="17"/><span class="tool-label">一键排版</span></button>
-          <button ref="layoutTrigger" type="button" class="direct-layout-action" data-testid="manuscript-layout" title="调整字体、行距、行宽和纸张" aria-label="正文版式" :class="{ active: layoutOpen }" :aria-expanded="layoutOpen" aria-controls="manuscript-layout-panel" @click="toggleLayoutPanel"><StudioIcon name="panel" :size="16"/><span>版式</span><i aria-hidden="true"></i></button>
-          <button type="button" data-testid="manuscript-typewriter" title="让当前输入行保持在视野中央" aria-label="跟随输入" :class="{ active: typewriterMode }" :aria-pressed="typewriterMode" @click="toggleTypewriterFromMenu"><StudioIcon name="events" :size="17"/><span class="tool-label">跟随输入</span></button>
-          <button type="button" data-testid="manuscript-focus" title="专注模式（Esc 退出）" aria-label="专注模式" :class="{ active: focusMode }" :aria-pressed="focusMode" @click="toggleFocusFromMenu"><StudioIcon name="panel" :size="17"/><span class="tool-label">{{ focusMode ? '退出专注' : '专注模式' }}</span></button>
+          <EditorToolbar :prefix="toolPrefix" :read-only="readOnly || review.busy.value" :composing="composing" :can-undo="canUndo" :can-redo="canRedo" :empty="!contentDraft.trim()" :find-open="findOpen" :format-title="isOutline ? '一键排版：整理多余空白，保留大纲结构' : '一键排版：按当前版式统一段落缩进和段间空行'" @undo="undoEdit" @redo="redoEdit" @find="findOpen ? closeFind() : openFind()" @format="formatParagraphs" />
+          <button ref="layoutTrigger" type="button" class="direct-layout-action" :data-testid="toolPrefix + '-layout'" title="调整字体、行距、行宽和纸张" :aria-label="documentLabel + '版式'" :class="{ active: layoutOpen }" :aria-expanded="layoutOpen" :aria-controls="toolPrefix + '-layout-panel'" @click="toggleLayoutPanel"><StudioIcon name="panel" :size="16"/><span>版式</span><i aria-hidden="true"></i></button>
+          <button type="button" :data-testid="toolPrefix + '-annotations'" :aria-expanded="review.annotationOpen.value" :disabled="composing" title="批注（Ctrl+Shift+M）" @click="review.annotationOpen.value = !review.annotationOpen.value">批注</button>
+          <button type="button" :data-testid="toolPrefix + '-typewriter'" title="让当前输入行保持在视野中央" aria-label="跟随输入" :class="{ active: typewriterMode }" :aria-pressed="typewriterMode" @click="toggleTypewriterFromMenu"><StudioIcon name="events" :size="17"/><span class="tool-label">跟随输入</span></button>
+          <button type="button" :data-testid="toolPrefix + '-focus'" title="专注模式（Esc 退出）" aria-label="专注模式" :class="{ active: focusMode }" :aria-pressed="focusMode" @click="toggleFocusFromMenu"><StudioIcon name="panel" :size="17"/><span class="tool-label">{{ focusMode ? '退出专注' : '专注模式' }}</span></button>
         </div>
         <button v-if="focusMode" type="button" data-testid="manuscript-focus-assistant" class="focus-assistant-toggle" :aria-pressed="assistantOpen" @click="toggleAssistantFromMenu">{{ assistantOpen ? '收起智能助笔' : '打开智能助笔' }}</button>
           <button v-if="focusMode" type="button" data-testid="focus-workspace-guidance" aria-label="写作指引" aria-haspopup="dialog" aria-controls="workspace-guidance-panel" aria-expanded="false" @click="emit('guidance', $event)"><StudioIcon name="outline" :size="16"/>写作指引</button>
       </nav>
-      <section v-if="layoutOpen" id="manuscript-layout-panel" ref="layoutPanel" class="writing-layout-popover" role="dialog" aria-label="正文版式" :style="layoutPanelStyle" @change="saveLayoutPreferences" @keydown.esc.stop.prevent="closeLayoutPanel(true)">
-        <header><div><b>正文版式</b><span>只改变阅读与输入方式；“一键排版”才会整理正文字符。</span></div><button type="button" aria-label="关闭版式" @click="closeLayoutPanel(true)">关闭</button></header>
+      <Transition name="editor-layout" @before-enter="enterEditorTool" @before-leave="leaveEditorTool">
+      <section v-if="layoutOpen" :id="toolPrefix + '-layout-panel'" ref="layoutPanel" class="writing-layout-popover" role="dialog" :aria-label="documentLabel + '版式'" :style="layoutPanelStyle" @change="saveLayoutPreferences" @keydown="onToolKeydown($event, 'layout')">
+        <header><div><b>{{ documentLabel }}版式</b><span>只改变阅读与输入方式；“一键排版”才会整理文字。</span></div><button type="button" aria-label="关闭版式" @click="closeLayoutPanel(true)">关闭</button></header>
         <div class="layout-control-grid">
           <label class="layout-font"><span>字体</span><select v-assist-field="{ id: 'ManuscriptEditor.fontFamily', read: () => fontFamily, write: value => { fontFamily = String(value) } }" v-model="fontFamily"><option value="serif">岚笺宋体</option><option value="song">系统宋体</option><option value="kai">系统楷体</option><option value="sans">系统黑体</option></select></label>
           <label><span>字号 <em>{{ Math.round(fontScale * 16) }} px</em></span><input v-assist-field="{ id: 'ManuscriptEditor.fontScale', read: () => fontScale, write: value => { fontScale = Number(value); saveLayoutPreferences() } }" v-model.number="fontScale" type="range" min="0.85" max="1.25" step="0.05" @input="saveLayoutPreferences"></label>
           <label><span>行距 <em>{{ editorLeading.toFixed(2) }}</em></span><input v-assist-field="{ id: 'ManuscriptEditor.editorLeading', read: () => editorLeading, write: value => { editorLeading = Number(value); saveLayoutPreferences() } }" v-model.number="editorLeading" type="range" min="1.6" max="2.5" step="0.05" @input="saveLayoutPreferences"></label>
           <label><span>行宽 <em>{{ pageWidth }} px</em></span><input v-assist-field="{ id: 'ManuscriptEditor.pageWidth', read: () => pageWidth, write: value => { pageWidth = Number(value); saveLayoutPreferences() } }" v-model.number="pageWidth" type="range" min="620" max="980" step="20" @input="saveLayoutPreferences"></label>
         </div>
-        <div class="layout-switches">
+        <div v-if="!isOutline" class="layout-switches">
           <label><input v-assist-field="{ id: 'ManuscriptEditor.paragraphSpacing', read: () => paragraphSpacing, write: value => { paragraphSpacing = Boolean(value) } }" v-model="paragraphSpacing" type="checkbox"><span>段间空行</span></label>
           <label><input v-assist-field="{ id: 'ManuscriptEditor.firstLineIndent', read: () => firstLineIndent, write: value => { firstLineIndent = Boolean(value) } }" v-model="firstLineIndent" type="checkbox"><span>首行缩进</span></label>
         </div>
         <div class="layout-choice-row"><span>横线</span><div class="line-choice" role="group" aria-label="横线辅助样式"><button v-for="item in guideStyleOptions" :key="item.id" type="button" :class="{ selected: guideStyle === item.id }" :aria-pressed="guideStyle === item.id" @click="setGuideStyle(item.id)"><i :class="item.id"></i>{{ item.label }}</button></div></div>
 
         <div class="layout-choice-row"><span>背景</span><div class="paper-choice" role="group" aria-label="编辑背景"><button v-for="item in [{ id: 'theme', label: '跟随主题' }, { id: 'rice', label: '米纸' }, { id: 'green', label: '护眼' }, { id: 'gray', label: '雾灰' }, { id: 'night', label: '夜墨' }]" :key="item.id" type="button" :class="[item.id, { selected: paperTheme === item.id }]" :aria-pressed="paperTheme === item.id" @click="paperTheme = item.id; saveLayoutPreferences()"><i></i>{{ item.label }}</button></div></div>
-        <footer><span>回车会按当前“段间空行 / 首行缩进”继续下一段。</span><button type="button" @click="resetLayoutPreferences">恢复默认</button></footer>
+        <footer><span>{{ isOutline ? '排版保留标题、列表和缩进；回车使用普通换行。' : '回车会按当前“段间空行 / 首行缩进”继续下一段。' }}</span><button type="button" @click="resetLayoutPreferences">恢复默认</button></footer>
       </section>
-      <form v-if="findOpen" class="manuscript-find" @submit.prevent="selectMatch(currentMatch + 1)" @keydown.esc.prevent.stop="closeFind">
-        <label><span>查找</span><input v-assist-field="{ id: 'ManuscriptEditor.findQuery', read: () => findQuery, write: value => { findQuery = String(value) } }" ref="findInput" v-model="findQuery" aria-label="查找正文" autocomplete="off"></label>
+      </Transition>
+      <Transition name="editor-find" @before-enter="enterEditorTool" @before-leave="leaveEditorTool">
+      <div v-if="findOpen" class="editor-find-fold"><div class="editor-find-clip">
+      <form class="manuscript-find" @submit.prevent="selectMatch(currentMatch + 1)" @keydown="onToolKeydown($event, 'find')">
+        <label><span>查找</span><input v-assist-field="{ id: 'ManuscriptEditor.findQuery', read: () => findQuery, write: value => { findQuery = String(value) } }" ref="findInput" v-model="findQuery" :aria-label="'查找' + documentLabel" autocomplete="off"></label>
         <span class="match-count" aria-live="polite">{{ matches.length ? `${currentMatch + 1} / ${matches.length}` : '没有匹配' }}</span>
         <button type="button" aria-label="上一个匹配" :disabled="!matches.length" @click="selectMatch(currentMatch - 1)">上一处</button>
         <button type="submit" :disabled="!matches.length">下一处</button>
         <label><span>替换</span><input v-assist-field="{ id: 'ManuscriptEditor.replaceText', read: () => replaceText, write: value => { replaceText = String(value) } }" v-model="replaceText" aria-label="替换为" autocomplete="off" :disabled="readOnly"></label>
-        <button type="button" :disabled="readOnly || !matches.length" @click="replaceCurrent">替换</button>
-        <button type="button" :disabled="readOnly || !matches.length" @click="replaceAll">全部替换</button>
+        <button type="button" :disabled="readOnly || composing || review.busy.value || !matches.length" @click="replaceCurrent">替换</button>
+        <button type="button" :disabled="readOnly || composing || review.busy.value || !matches.length" @click="replaceAll">全部替换</button>
         <button class="find-close" type="button" aria-label="关闭查找" @click="closeFind">关闭</button>
       </form>
+      </div></div>
+      </Transition>
     </header>
 
+    <ReviewStatus :context="review" :pending="review.pending.value" :staged="review.staged.value" :busy="review.busy.value" :error="review.error.value" :recovery="review.recovery.value" @retry="review.retry" @restore="review.restore" />
     <div class="manuscript-page" :class="[`paper-${paperTheme}`]" :style="manuscriptPageStyle">
-      <div v-if="readOnly" class="manuscript-read-only" data-testid="manuscript-order-read-only">章序账本待核对：当前仅按稳定文件编号列出正文，叙事顺序未知，所有改写动作已暂停。</div>
+      <div v-if="props.readOnly" class="manuscript-read-only" data-testid="manuscript-order-read-only">{{ isOutline ? '当前文档暂不可编辑，请先处理上方提示。' : '章序账本待核对：当前仅按稳定文件编号列出正文，叙事顺序未知，所有改写动作已暂停。' }}</div>
       <label class="manuscript-title-row">
-        <span class="manuscript-chapter-label">第 {{ position }} 章</span>
-        <input v-assist-field="{ id: 'ManuscriptEditor.titleDraft', read: () => titleDraft, write: value => { recordCommand('assistant-title'); titleDraft = String(value); onTitleInput() }, identity: () => chapterId }" v-model="titleDraft" data-testid="manuscript-title-input" aria-label="章节标题" title="修改章节标题" maxlength="120" autocomplete="off" placeholder="填写章节标题" :readonly="readOnly" @beforeinput="recordBeforeInput($event, 'title')" @input="onTitleInput" @keydown="onTitleKeydown" @compositionstart="beginComposition" @compositionend="endTitleComposition">
+        <span :key="documentIdentity" class="manuscript-chapter-label">{{ titlePrefix || (isOutline ? documentLabel : '第 ' + position + ' 章') }}</span>
+        <input v-assist-field="{ id: titleFieldId, read: () => titleDraft, write: value => writeTitleFromAssistant(String(value)), identity: () => documentIdentity }" v-model="titleDraft" :data-testid="toolPrefix + '-title-input'" :aria-label="titleAriaLabel || '章节标题'" :title="titleReadOnly ? titleDraft : '修改标题'" :maxlength="documentKind === 'chapter-outline' ? 200 : 120" autocomplete="off" placeholder="填写章节标题" :readonly="readOnly || titleReadOnly || review.busy.value" @beforeinput="recordBeforeInput($event, 'title')" @input="onTitleInput" @keydown="onTitleKeydown" @compositionstart="beginComposition" @compositionend="endTitleComposition">
       </label>
-      <PlainTextEditor ref="editor" v-model="contentDraft" :document-key="String(chapterId)" class="manuscript" :style="manuscriptPageStyle" test-id="manuscript-input" aria-label="章节正文" title="选中文字后按 Ctrl+Shift+A，或右键交给智能助笔" placeholder="从这里开始写……" :read-only="readOnly" :native-search="false" comfortable-caret external-history @beforeinput="interceptContentHistory" @before-change="recordContentChange" @update:model-value="onContentInput" @keydown="onEditorKeydown" @selection="reportSelection(); requestCursorCenter()" @contextmenu="openSelectionAiMenu" @composition-start="beginComposition" @composition-end="endContentComposition" />
+      <div class="manuscript-annotated-row">
+      <PlainTextEditor ref="editor" v-model="contentDraft" annotation-tools :annotations="review.annotationMarks.value" :annotation-open="review.annotationOpen.value" @annotation-toggle="review.annotationOpen.value = !review.annotationOpen.value" @annotation-select="selectAnnotation" :reviews="review.items.value" :interaction-locked="review.busy.value" @review-action="review.decide" @document-change="review.changed" :document-key="documentIdentity" :assistant-field="assistantField" class="manuscript" :style="manuscriptPageStyle" :test-id="toolPrefix + '-input'" :aria-label="contentAriaLabel || '章节正文'" :title="isOutline ? '选中文字可添加批注，或交给智能助笔' : '选中文字后按 Ctrl+Shift+A，或右键交给智能助笔'" :placeholder="placeholder || '从这里开始写……'" :read-only="readOnly" :native-search="false" comfortable-caret external-history @beforeinput="interceptContentHistory" @before-change="recordContentChange" @update:model-value="onContentInput" @keydown="onEditorKeydown" @selection="reportSelection(); requestCursorCenter()" @contextmenu="openSelectionAiMenu" @composition-start="beginComposition" @composition-end="endContentComposition" />
+      <AnnotationPanel ref="annotationPanel" :review="review" :selection="annotationSelection" :read-only="readOnly || composing || review.busy.value" @locate="(start, end) => { editor?.setSelectionRange(start, end); editor?.focus(); editor?.centerSelection() }" />
+      </div>
     </div>
 
     <section v-if="conflict" class="manuscript-conflict" role="alert" data-testid="manuscript-conflict" :data-expected-revision="conflict.expectedRevision" :data-external-revision="conflict.externalChapter?.revision">
@@ -728,18 +853,27 @@ onBeforeUnmount(() => {
 
     <footer class="editor-foot">
       <WorkspaceStorageStatus :label="saveLabel" :state="visibleSaveState" />
-      <div class="manuscript-metrics" aria-label="正文统计"><span>第 {{ position }} 章</span><i></i><span>本章 {{ wordCount.toLocaleString() }} 字</span><template v-if="selectedWordCount"><i></i><span class="selection-count" data-testid="manuscript-selection-word-count">选区 {{ selectedWordCount.toLocaleString() }} 字</span></template><i></i><span class="project-count" data-testid="manuscript-project-word-count">全书 {{ projectWordCount.toLocaleString() }} 字</span><i></i><span>{{ paragraphCount }} 段</span><em v-if="focusMode">按 Esc 退出专注</em></div>
+      <span v-if="isOutline && savedWarning" class="outline-storage-warning" role="status">{{ savedLabel }}</span>
+      <div class="manuscript-metrics" :aria-label="documentLabel + '统计'"><span>{{ isOutline ? documentLabel : '第 ' + position + ' 章' }}</span><i></i><span>{{ isOutline ? '本篇' : '本章' }} {{ wordCount.toLocaleString() }} 字</span><template v-if="selectedWordCount"><i></i><span class="selection-count" data-testid="manuscript-selection-word-count">选区 {{ selectedWordCount.toLocaleString() }} 字</span></template><template v-if="!isOutline"><i></i><span class="project-count" data-testid="manuscript-project-word-count">全书 {{ projectWordCount.toLocaleString() }} 字</span></template><i></i><span>{{ paragraphCount }} 段</span><em v-if="focusMode">按 Esc 退出专注</em></div>
       <div class="manuscript-actions">
-        <span class="editor-save-state sr-only" :class="visibleSaveState" data-testid="manuscript-save-state">{{ saveLabel }}</span>
-        <details class="manuscript-more-actions"><summary aria-label="更多正文操作" title="章节确认与删除">…</summary><div><button class="danger-link" type="button" :disabled="readOnly" @click="emit('delete')">移至回收站</button><button v-if="lifecycleStatus" class="history-action chapter-confirm-action" type="button" data-testid="confirm-current-chapter" :class="{ confirmed: lifecycleStatus === 'CONFIRMED' && !hasUnconfirmedChanges }" :disabled="readOnly || chapterConfirming || !contentDraft.trim() || (lifecycleStatus === 'CONFIRMED' && !hasUnconfirmedChanges)" @click="emit('confirm')">{{ confirmationLabel }}</button></div></details>
-        <button class="history-action archive-history-action" type="button" data-testid="open-manuscript-history" aria-label="历史版本" title="历史版本" @click="openHistoryFromMenu"><StudioIcon name="history" :size="17"/><span>历史版本</span></button>
-        <button class="control-button primary editor-save-button save-action" data-testid="save-manuscript" :data-save-action="visibleSaveState === 'error' ? 'retry' : 'save'" type="button" :disabled="readOnly || visibleSaveState === 'saving'" @click="saveManuscript"><StudioIcon name="save" :size="17"/>{{ visibleSaveState === 'saving' ? '正在保存…' : visibleSaveState === 'error' ? '重试保存' : '立即保存' }}</button>
+        <details v-if="isOutline && savedLabel" class="manuscript-more-actions outline-storage-details"><summary>存储详情</summary><div><p>{{ savedLabel }}</p></div></details>
+        <button v-if="savedInfoUnknown" class="history-action" type="button" data-testid="check-manuscript-save" :disabled="visibleSaveState === 'saving'" @click="emit('check-saved-info')">核对文件状态</button>
+        <span class="editor-save-state sr-only" :class="visibleSaveState" :data-testid="toolPrefix + '-save-state'">{{ saveLabel }}</span>
+        <details v-if="!isOutline" class="manuscript-more-actions"><summary aria-label="更多正文操作" title="章节确认与删除">…</summary><div><button class="danger-link" type="button" :disabled="readOnly" @click="emit('delete')">移至回收站</button><button v-if="lifecycleStatus" class="history-action chapter-confirm-action" type="button" data-testid="confirm-current-chapter" :class="{ confirmed: lifecycleStatus === 'CONFIRMED' && !hasUnconfirmedChanges }" :disabled="readOnly || chapterConfirming || !contentDraft.trim() || (lifecycleStatus === 'CONFIRMED' && !hasUnconfirmedChanges)" @click="emit('confirm')">{{ confirmationLabel }}</button></div></details>
+        <button class="history-action archive-history-action" type="button" :data-testid="'open-' + toolPrefix + '-history'" aria-label="历史版本" title="历史版本" @click="openHistoryFromMenu"><StudioIcon name="history" :size="17"/><span>历史版本</span></button>
+        <button class="control-button primary editor-save-button save-action" :data-testid="saveButtonId || 'save-manuscript'" :data-save-action="visibleSaveState === 'error' ? 'retry' : 'save'" type="button" :disabled="readOnly || saveDisabled || composing || review.busy.value || visibleSaveState === 'saving'" @click="saveManuscript"><StudioIcon name="save" :size="17"/>{{ visibleSaveState === 'saving' ? '正在保存…' : visibleSaveState === 'error' ? '重试保存' : '立即保存' }}</button>
       </div>
     </footer>
   </article>
 </template>
 
 <style scoped>
+.outline-storage-warning { color:var(--color-danger); font:400 var(--type-meta)/1.5 var(--sans); overflow-wrap:anywhere; }
+.manuscript-editor { display:flex; flex-direction:column; height:100%; }
+.manuscript-head, .editor-foot { flex:none; }
+.manuscript-page { flex:1; height:auto; }
+.manuscript-annotated-row { display:flex; min-height:0; min-width:0; overflow:hidden; }
+.manuscript-annotated-row > .plain-text-editor { flex:1; min-width:0; min-height:0; }
 .manuscript-editor .direct-layout-action { display: inline-flex; align-items: center; }
 .direct-layout-action > i { inline-size: .4em; block-size: .4em; border-inline-end: 1px solid currentColor; border-block-end: 1px solid currentColor; transform: translateY(-.15em) rotate(45deg); margin-inline-start: .25em; }
 .direct-layout-action[aria-expanded="true"] > i { transform: translateY(.1em) rotate(225deg); }
@@ -761,4 +895,22 @@ onBeforeUnmount(() => {
 .paper-choice button { block-size: auto; min-block-size: 3rem; padding: .375rem; font-size: .75rem; }
 .writing-layout-popover > footer { gap: 1rem; margin-block-start: 1rem; padding-block: .5rem; }
 .focus-assistant-toggle { margin-block-start: .75rem; padding: .5rem .75rem; border: 1px solid var(--line); color: var(--ink); background: var(--surface); font: .8125rem var(--sans); }
+.direct-layout-action > i { transition:transform 180ms var(--interaction-ease); }
+.writing-layout-popover { transform-origin:var(--layout-origin, center top); }
+.editor-layout-enter-active { transition:opacity 200ms ease,transform 200ms var(--interaction-ease); }
+.editor-layout-leave-active { transition:opacity 120ms ease,transform 120ms ease; pointer-events:none; }
+.editor-layout-enter-from,.editor-layout-leave-to { opacity:0;transform:translateY(-5px) scale(.985); }
+.editor-find-fold { display:grid;grid-template-rows:1fr; }
+.editor-find-clip { min-height:0;overflow:hidden; }
+.manuscript-editor .manuscript-find button { color:var(--ink);background:var(--surface);border-color:var(--line); }
+.manuscript-editor .manuscript-find button:hover:not(:disabled) { background:var(--surface-muted); }
+.manuscript-editor .manuscript-find .find-close { background:transparent;border-color:transparent; }
+.editor-find-enter-active { transition:grid-template-rows 220ms var(--interaction-ease),opacity 180ms ease; }
+.editor-find-leave-active { transition:grid-template-rows 160ms ease,opacity 120ms ease;pointer-events:none; }
+.editor-find-enter-from,.editor-find-leave-to { grid-template-rows:0fr;opacity:0; }
+@media(prefers-reduced-motion:reduce) {
+  .direct-layout-action > i,.editor-layout-enter-active,.editor-layout-leave-active,
+  .editor-find-enter-active,.editor-find-leave-active { transition:none; }
+  .editor-layout-enter-from,.editor-layout-leave-to { transform:none; }
+}
 </style>

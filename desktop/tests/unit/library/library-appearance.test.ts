@@ -79,8 +79,10 @@ test('library theme, card contrast, dialogue and assistant boundaries are explic
   assert.doesNotMatch(library, /library-dialogue-lane|dialogueReserved/)
   assert.doesNotMatch(library, /library-(?:open-)?assistant|智能助笔|v-assist-field/)
   assert.doesNotMatch(settings, /v-assist-field/)
-  assert.match(shell, /<GlobalAssistantHost v-if="desktop && current"/)
-  assert.match(shell, /v-if="current && assistantAvailable && assistantOpen" class="assistant-resizer"/)
+  assert.match(shell, /<GlobalAssistantHost[^>]*v-if="desktop && current"/)
+  assert.match(shell, /<GlobalAssistantHost[^>]*:visible="!groupChatOpen && !inspirationOpen"/)
+  assert.match(shell, /const assistantPresented = assistantOpen/)
+  assert.match(shell, /v-if="current && assistantAvailable && assistantPresented"[^>]*v-show="!groupChatOpen && !inspirationOpen"[^>]*class="assistant-resizer"/)
 })
 
 test('compiled dark theme rules target library artwork, never the document root', async () => {

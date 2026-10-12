@@ -10,6 +10,7 @@ import type {
 import type { Chapter } from '../manuscript/types'
 import type { OutlineList, PlanningPackageProposal } from '../planning/types'
 import type { CanonicalEvent, TimelineEvent } from '../timeline/types'
+import type { EventProjectionDto } from '../timeline/event-contracts'
 import type { AiSettings } from '../models/types'
 import type { PromptProfileView } from '../assistant/types'
 import type { DocumentImportRecovery } from './import-types'
@@ -235,6 +236,8 @@ export type WorkspaceBootstrapProjection = {
   migration: ProjectMigrationPreview
   sources: { sources: SourceCard[] }
   events: { events: CanonicalEvent[] }
+  /** Present only after this book has completed the reviewed unified-event migration. */
+  eventProjection: EventProjectionDto | null
   planningDraft: PlanningPackageProposal | null
   promptProfile: PromptProfileView
   importRecoveries: DocumentImportRecovery[]
@@ -245,6 +248,18 @@ export type WorkspaceBootstrapProjection = {
 export type WorkspaceBootstrapIssueBase = {
   title: string
   message: string
+  /** Fixed safe classification, not an internal exception or filesystem path. */
+  reason?: 'busy' | 'recovery-required' | 'invalid-data' | 'unavailable'
+}
+
+export type WorkspaceLoadCheckId = 'unifiedEventsUnreadable' | 'modelSettingsUnreadable'
+export type WorkspaceLoadCheckInput = { workItem: { id: string; path: string }; issueIds: WorkspaceLoadCheckId[] }
+export type WorkspaceLoadCheckResult = {
+  workItem: { id: string; path: string }
+  checkedIds: WorkspaceLoadCheckId[]
+  eventProjection?: EventProjectionDto | null
+  aiSettings?: AiSettings | null
+  issues: WorkspaceBootstrapIssue[]
 }
 
 export type WorkspaceBootstrapIssue = WorkspaceBootstrapIssueBase &
@@ -253,6 +268,7 @@ export type WorkspaceBootstrapIssue = WorkspaceBootstrapIssueBase &
     | { id: 'promptProfileUnreadable'; area: 'promptProfile'; recovery: 'quarantinePromptProfile' }
     | { id: 'researchSourcesUnreadable'; area: 'researchSources'; recovery: 'manualReview' }
     | { id: 'researchEventsUnreadable'; area: 'researchEvents'; recovery: 'manualReview' }
+    | { id: 'unifiedEventsUnreadable'; area: 'unifiedEvents'; recovery: 'manualReview' }
     | { id: 'outlinePlanningUnreadable'; area: 'outlinePlanning'; recovery: 'manualReview' }
     | { id: 'characterStateUnreadable'; area: 'characterState'; recovery: 'manualReview' }
     | { id: 'chapterOrderUnreadable'; area: 'chapterOrder'; recovery: 'manualReview' }

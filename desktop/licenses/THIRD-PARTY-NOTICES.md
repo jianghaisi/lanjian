@@ -24,12 +24,33 @@ requirements depend on the applicable terms and the distributor's circumstances.
 The bundled `lanjian-rig` model is project artwork, not a Live2D sample character.
 No model weights or external voice datasets are included in the source snapshot.
 
-## Package dependencies
+## VPet care rules
+
+Selected level and bounded-stat rules are adapted from VPet under Apache-2.0.
+See [source and modification notice](VPet-NOTICE.md) and the retained
+[license](VPet-Apache-2.0.txt). Upstream character assets and application engine
+are not bundled.
+
+## Package dependency licenses
+
+The desktop pet imports the unmodified Motion 13.4.0 JavaScript spring runtime
+(including framer-motion 13.4.0, motion-dom and motion-utils 13.3.0).
+Retained terms: [Motion MIT](Motion-MIT.txt),
+[Framer Motion MIT](Framer-Motion-MIT.txt), and [tslib 0BSD](Tslib-0BSD.txt).
+PixiJS 6.5.10 supplies the existing mesh renderer and ticker. Local pose weights
+and application integration are project code; this is not a VPet animation port.
 
 Electron, Vue, CodeMirror, PixiJS, pixi-live2d-display, Lucide, Mammoth and other
 dependencies retain their individual licenses. `package-lock.json` records the
 resolved dependencies and available license metadata; installed packages contain
 their own notices. The source snapshot does not vendor `node_modules`.
+
+## Private inspiration library
+
+See [inspiration references and optional runtime notices](inspiration-NOTICES.txt)
+for the BiliNote subtitle adaptation, LightRAG design reference, and fixed
+yt-dlp/faster-whisper runtime. Optional runtime/model downloads require explicit
+preparation and retain their own licenses; hosted builds exclude native ASR.
 
 ## Visual assets
 

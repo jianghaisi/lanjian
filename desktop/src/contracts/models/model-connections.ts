@@ -9,10 +9,10 @@ export const MAX_MODEL_CONNECTION_BYTES = 4 * 1024 * 1024
 export const MAX_CONNECTION_REUSE_SELECTION = 20
 export const MAX_CONNECTION_REUSE_RECEIPTS = 100
 
-export type RemoteModelProtocol = 'openai-compatible' | 'gemini-native'
+export type RemoteModelProtocol = 'openai-compatible' | 'gemini-native' | 'anthropic-native' | 'openai-responses'
 
 export function remoteModelProtocol(value: unknown): RemoteModelProtocol {
-  if (value !== 'openai-compatible' && value !== 'gemini-native') invalid()
+  if (value !== 'openai-compatible' && value !== 'gemini-native' && value !== 'anthropic-native' && value !== 'openai-responses') invalid()
   return value
 }
 
@@ -59,6 +59,7 @@ export type GlobalConnectionView = {
 
 export type GlobalConnectionsView = { revision: number; connections: GlobalConnectionView[] }
 export type ConnectionCreate = { expectedRevision: number; name: string; baseUrl: string; protocol: RemoteModelProtocol; apiKey?: string }
+export type ConnectionRemove = { expectedRevision: number; id: string; connectionRevision: number }
 export type ConnectionUpdate = {
   expectedRevision: number
   id: string
@@ -99,6 +100,12 @@ export function decodeConnectionCreate(value: unknown): ConnectionCreate {
     baseUrl: modelConnectionEndpoint(r.baseUrl), protocol: remoteModelProtocol(r.protocol),
     ...(Object.hasOwn(r, 'apiKey') ? { apiKey: modelConnectionKey(r.apiKey) } : {})
   }
+}
+
+export function decodeConnectionRemove(value: unknown): ConnectionRemove {
+  const r = connectionRecord(value, ['expectedRevision', 'id', 'connectionRevision'])
+  return { expectedRevision: connectionRevision(r.expectedRevision), id: globalConnectionId(r.id),
+    connectionRevision: connectionRevision(r.connectionRevision, 1) }
 }
 
 export function decodeConnectionUpdate(value: unknown): ConnectionUpdate {
@@ -153,7 +160,7 @@ export function decodeGlobalConnectionDocument(value: unknown): GlobalConnection
       if (operations.has(receipt.operationId)) invalid()
       operations.add(receipt.operationId)
       for (const id of receipt.connectionIds) {
-        if (!ids.has(id) || claimedIds.has(id)) invalid()
+        if (claimedIds.has(id)) invalid() // Historical receipts survive explicit connection removal.
         claimedIds.add(id)
       }
       return receipt
@@ -181,9 +188,15 @@ export function decodeConnectionReuseReceipt(value: unknown): ConnectionReuseRec
     sourceFingerprint: connectionFingerprint(r.sourceFingerprint), connectionIds }
 }
 
-/** Enforces additive identities and immutable endpoints at the persistence boundary too. */
+/** Enforces immutable identities and isolated single-connection removal at persistence. */
 export function assertGlobalConnectionTransition(before: GlobalConnectionDocument, after: GlobalConnectionDocument): void {
   if (after.revision !== nextConnectionRevision(before.revision)) invalid()
+  const removed = before.connections.filter(c => !after.connections.some(next => next.id === c.id))
+  if (removed.length) {
+    const expected = { ...before, revision: after.revision, connections: before.connections.filter(c => c.id !== removed[0].id) }
+    if (removed.length !== 1 || JSON.stringify(after) !== JSON.stringify(expected)) invalid()
+    return
+  }
   assertModelDefaultsTransition(before.newBookDefaults, after.newBookDefaults)
   for (const previous of before.connections) {
     const next = after.connections.find(c => c.id === previous.id)
@@ -192,7 +205,8 @@ export function assertGlobalConnectionTransition(before: GlobalConnectionDocumen
     if (next.revision !== (changed ? nextConnectionRevision(previous.revision) : previous.revision)) invalid()
   }
   for (const next of after.connections) {
-    if (!before.connections.some(c => c.id === next.id) && next.revision !== 1) invalid()
+    if (!before.connections.some(c => c.id === next.id)
+      && (next.revision !== 1 || before.reuseReceipts?.some(r => r.connectionIds.includes(next.id)))) invalid()
   }
   const beforeReceipts = before.reuseReceipts ?? [], afterReceipts = after.reuseReceipts ?? []
   for (const previous of beforeReceipts) {
@@ -201,6 +215,6 @@ export function assertGlobalConnectionTransition(before: GlobalConnectionDocumen
   }
   for (const receipt of afterReceipts) {
     if (!beforeReceipts.some(r => r.operationId === receipt.operationId)
-      && receipt.connectionIds.some(id => before.connections.some(c => c.id === id))) invalid()
+      && receipt.connectionIds.some(id => !after.connections.some(c => c.id === id) || before.connections.some(c => c.id === id))) invalid()
   }
 }

@@ -65,7 +65,7 @@ try {
   await page.locator('.modal-backdrop [aria-label="关闭"]').first().click()
   const seeded = await page.evaluate(async parentPath => {
     const api = window.novelDesktop
-    for (const [name, genre] of [['长夜归舟', '奇幻'], ['杀死那个寄生虫', '科幻']]) {
+    for (const [name, genre] of [['长夜归舟', '奇幻'], ['旧钟楼的秘密', '科幻']]) {
       const { project } = await api.projects.create({ parentPath, name, genre })
       await api.projects.switch(project.path)
       const chapter = await api.chapters.create()

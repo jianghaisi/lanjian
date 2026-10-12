@@ -114,7 +114,8 @@ export class FactExtractionJobService {
     }
     if (active.state.status === 'running') {
       active.controller.abort()
-      active.state = await this.persist({ workItemId: active.state.workItemId, id: active.state.id, status: 'cancelled' })
+      try { active.state = await this.persist({ workItemId: active.state.workItemId, id: active.state.id, status: 'cancelled' }) }
+      catch (error) { this.interruptUnsaved(active); throw error }
     }
     return structuredClone(active.state)
   }
@@ -129,16 +130,26 @@ export class FactExtractionJobService {
       active.state = { ...completed, ...(batch ? { batch } : {}) }
     } catch (error) {
       if (active.controller.signal.aborted || active.state.status !== 'running') return
-      active.state = await this.persist({
+      const failure = {
         workItemId: active.state.workItemId,
         id: active.state.id,
-        status: 'failed',
+        status: 'failed' as const,
         error: {
           code: error instanceof AppError ? error.code : 'EXTRACTION_FAILED',
           message: safePersistedErrorMessage(error, '变化提炼未完成，请检查模型连接后重试。')
         }
-      })
+      }
+      try { active.state = await this.persist(failure) }
+      catch {
+        // A replaced/unavailable original database must stay untouched. Surface
+        // an interrupted in-memory job without claiming its terminal state saved.
+        this.interruptUnsaved(active)
+      }
     }
+  }
+  private interruptUnsaved(active: Active): void {
+    active.state = { ...active.state, status: 'interrupted', completedAt: this.now().toISOString(),
+      error: { code: 'STATUS_PERSISTENCE_FAILED', message: '原作品暂不可写，任务已中断，终态未保存。请重新打开原作品核对历史。' } }
   }
   private prune(): void {
     const terminal = [...this.jobs.values()].filter((job) => job.state.status !== 'running')

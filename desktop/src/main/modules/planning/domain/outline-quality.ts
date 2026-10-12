@@ -40,7 +40,7 @@ export function auditPlanningOutline(input: PlanningOutlineAuditInput): {
       code: 'OUTLINE_EMPTY',
       level: 'warning',
       message: input.scope === 'total' ? '总纲尚未写下故事主线。' : '本卷还没有阶段大纲。',
-      suggestion: input.scope === 'total' ? '先写核心冲突、关键转折与结局方向。' : '先写本卷目标、主要阻力与卷末落点。'
+      suggestion: input.scope === 'total' ? '从开始到结束讲清故事及事件怎样互相引出。' : '展开本卷事件的行动、回应、过程与阶段结果。'
     })
   } else if (characterCount < (input.scope === 'total' ? 80 : 50)) {
     issues.push({
@@ -48,15 +48,6 @@ export function auditPlanningOutline(input: PlanningOutlineAuditInput): {
       level: 'warning',
       message: input.scope === 'total' ? '总纲信息较少，后续分卷可能缺少稳定边界。' : '卷纲信息较少，章纲可能难以判断本卷推进范围。',
       suggestion: input.scope === 'total' ? '可补充开局、至少一次转折和最终落点。' : '可补充阶段起点、转折、代价与卷末状态。'
-    })
-  }
-
-  if (content && causalCueCount === 0) {
-    issues.push({
-      code: 'CAUSE_CHAIN_UNCLEAR',
-      level: 'info',
-      message: '暂未识别到明确的因果连接。',
-      suggestion: '可用“因为、导致、因此、迫使”等词写清事件为什么推动下一步；若原文已经清楚，可以忽略。'
     })
   }
 

@@ -1,0 +1,53 @@
+services:
+  app:
+    image: ${LANJIAN_IMAGE:?Run lanjian.sh}
+    platform: linux/amd64
+    user: "10001:10001"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: ${LANJIAN_MEMORY_LIMIT:-768m}
+    stop_grace_period: 60s
+    environment:
+      LANJIAN_PUBLIC_ORIGIN: ${LANJIAN_PUBLIC_ORIGIN:?Configure origin}
+      LANJIAN_ADMIN_LINUXDO_IDS: ${LANJIAN_ADMIN_LINUXDO_IDS:-}
+      LINUXDO_CLIENT_ID: ${LINUXDO_CLIENT_ID:-}
+      LINUXDO_CLIENT_SECRET_FILE: /secrets/linuxdo-client
+      LANJIAN_MASTER_KEY_FILE: /secrets/master-key
+    volumes:
+      - ${LANJIAN_RUNTIME_DIR:?Run lanjian.sh}/data:/data
+      - ${LANJIAN_RUNTIME_DIR:?Run lanjian.sh}/secrets:/secrets:ro
+    tmpfs: ["/tmp:size=64m,mode=1777"]
+    ports: ["127.0.0.1:${LANJIAN_BIND_PORT:-43130}:43130"]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+  proxy:
+    image: ${LANJIAN_PROXY_IMAGE:?Run lanjian.sh}
+    profiles: [proxy]
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 128m
+    tmpfs: ["/tmp:size=32m,mode=1777"]
+    restart: unless-stopped
+    environment:
+      LANJIAN_PUBLIC_ORIGIN: ${LANJIAN_PUBLIC_ORIGIN}
+    ports:
+      - "${LANJIAN_HTTP_PORT:-80}:80"
+      - "${LANJIAN_HTTPS_PORT:-443}:443"
+    volumes:
+      - ${LANJIAN_BUNDLE_DIR}/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${LANJIAN_RUNTIME_DIR}/proxy-data:/data
+      - ${LANJIAN_RUNTIME_DIR}/proxy-config:/config
+    depends_on:
+      app: {condition: service_healthy}
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}

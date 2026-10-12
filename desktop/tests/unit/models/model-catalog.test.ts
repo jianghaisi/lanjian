@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildModelCatalog, classifyModelFamily, modelRouteKey } from '../../../src/renderer/features/models/services/model-catalog'
+import { buildModelCatalog, classifyModelFamily, manualModelDisabledReason, modelRouteKey } from '../../../src/renderer/features/models/services/model-catalog'
+import { catalogTextSupport } from '../../../src/contracts/models/model-catalog-metadata'
 
 test('classifies common writing models into author-facing families', () => {
   assert.equal(classifyModelFamily('gpt-4.1').id, 'gpt')
@@ -53,4 +54,25 @@ test('unknown provider models remain selectable with distinct API identities', (
   assert.deepEqual(catalog.filter(choice => choice.model === 'private-writing-model').map(choice => choice.key).sort(),
     [modelRouteKey('a', 'private-writing-model'), modelRouteKey('b', 'private-writing-model')])
   assert.ok(catalog.filter(choice => choice.model === 'private-writing-model').every(choice => choice.duplicateModel))
+})
+
+test('known non-text IDs stay visibly disabled even when assigned or typed manually, without affecting another API', () => {
+  const connections = [{ id: 'a', name: '甲' }, { id: 'b', name: '乙' }]
+  const metadata = { a: [{ id: 'same-name', supportedGenerationMethods: ['embedContent'] }, { id: 'writer', supportedGenerationMethods: ['generateContent'] }] }
+  const catalog = buildModelCatalog(connections, { a: ['writer'], b: ['same-name'] }, [{ connectionId: 'a', model: 'same-name' }], [], metadata)
+  assert.equal(catalog.length, 3)
+  assert.match(catalog.find(c => c.connectionId === 'a' && c.model === 'same-name')!.disabledReason!, /不支持文本生成/)
+  assert.match(manualModelDisabledReason(connections, catalog, 'a', ' same-name ')!, /不支持文本生成/)
+  assert.equal(manualModelDisabledReason(connections, catalog, 'b', 'same-name'), undefined)
+  assert.equal(manualModelDisabledReason(connections, catalog, 'a', 'manual-unlisted'), undefined)
+  assert.equal(manualModelDisabledReason([{ id: 'a', name: '甲', enabled: false }], catalog, 'a', 'manual-unlisted'), '接口已停用')
+  assert.equal(manualModelDisabledReason(connections, catalog, 'missing', 'writer'), '请选择可用的在线接口')
+})
+
+test('text eligibility distinguishes known methods from missing metadata and never guesses from the name', () => {
+  assert.equal(catalogTextSupport(), 'unknown')
+  assert.equal(catalogTextSupport({ id: 'text-embedding' }), 'unknown')
+  assert.equal(catalogTextSupport({ id: 'writer', supportedGenerationMethods: [] }), 'unsupported')
+  assert.equal(catalogTextSupport({ id: 'writer', supportedGenerationMethods: ['countTokens'] }), 'unsupported')
+  assert.equal(catalogTextSupport({ id: 'unknown-brand', supportedGenerationMethods: ['countTokens', 'generateContent'] }), 'supported')
 })

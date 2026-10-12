@@ -1,4 +1,5 @@
 import { preferredChapterForOpen } from '../../../../contracts/manuscript/chapter-tree-window'
+import { activeEventRows, archivedEventRows, candidateEventRows } from '../../timeline/event-projection-view'
 
 // Explicit live ports preserve the existing book/request scope and draft ownership.
 export function createLibraryWorkspaceLoadingActions(ports) {
@@ -81,6 +82,15 @@ export function createLibraryWorkspaceLoadingActions(ports) {
     ports.chapterCardAdoption.value = null
     ports.foundationDraft.value = null
     ports.timelineMode.value = 'events'
+    ports.timeline.value = []
+    ports.canonicalEvents.value = []
+    ports.eventProjection.value = null
+    ports.unifiedEvents.value = []
+    ports.archivedUnifiedEvents.value = []
+    ports.unifiedEventCandidates.value = []
+    ports.eventMigrationState.value = null
+    ports.eventMigrationBusy.value = false
+    ports.eventMigrationError.value = ''
     ports.worldMapWorkspace.reset()
     ports.expandedTimelineEntry.value = ''
     ports.timelineAiCandidates.value = []
@@ -125,6 +135,11 @@ export function createLibraryWorkspaceLoadingActions(ports) {
     ports.workflowStatus.value = null
     ports.consistencyOverview.value = null
     ports.chapterDerivatives.value = null
+    ports.findingHistory.value = null
+    ports.outlinePlanning.value = {
+      totalRevision: 0, totalOutlineExists: false, externalChangeDetected: false,
+      assignedEventIds: [], unplacedEventIds: [], volumes: [], chapterPlacements: [], eventChapterPlacements: []
+    }
     ports.contextFactPack.value = null
     ports.factBatches.value = []
     ports.factExtractionRetryId.value = ''
@@ -153,7 +168,8 @@ export function createLibraryWorkspaceLoadingActions(ports) {
 
   async function loadWorkspace(
     existingRequest = null,
-    preferredChapterId = ports.selectedId.value || ports.current.value?.manuscript?.lastEditedChapter?.id || null
+    preferredChapterId = ports.selectedId.value || ports.current.value?.manuscript?.lastEditedChapter?.id || null,
+    { deferWorkflow = false } = {}
   ) {
     if (!ports.current.value) return false
     const request = existingRequest || ports.workspaceRequests.begin(ports.current.value)
@@ -184,7 +200,11 @@ export function createLibraryWorkspaceLoadingActions(ports) {
     ports.stageOutline.value = ''
     ports.lastSavedStageTitle.value = ''
     ports.lastSavedStageOutline.value = ''
-    ports.timeline.value = bootstrap.timeline.events
+    ports.eventProjection.value = bootstrap.eventProjection
+    ports.unifiedEvents.value = activeEventRows(bootstrap.eventProjection)
+    ports.archivedUnifiedEvents.value = archivedEventRows(bootstrap.eventProjection)
+    ports.unifiedEventCandidates.value = candidateEventRows(bootstrap.eventProjection)
+    ports.timeline.value = bootstrap.eventProjection ? [] : bootstrap.timeline.events
     ports.realms.value = bootstrap.realms.levels
     ports.powerSystem.value = bootstrap.powerSystem
     ports.cheatSystem.value = bootstrap.cheatSystem
@@ -242,6 +262,7 @@ export function createLibraryWorkspaceLoadingActions(ports) {
     ports.canonicalEvents.value = bootstrap.events.events
     ports.planningDraft.value = bootstrap.planningDraft
     ports.workspaceBootstrapIssues.value = bootstrap.issues
+    if (bootstrap.eventProjection) await ports.recoverEventOperation(request)
     ports.planningDraftSaveState.value = 'saved'
     ports.promptProfile.value = bootstrap.promptProfile
     ports.importRecoveries.value = bootstrap.importRecoveries
@@ -257,8 +278,10 @@ export function createLibraryWorkspaceLoadingActions(ports) {
     const autoBackupLoad = ports.refreshAutoBackup()
     ports.setWorkspaceOpeningPhase('chapter')
     const preferredChapter = preferredChapterForOpen(ports.chapters.value, preferredChapterId)
-    if (preferredChapter) await ports.selectChapter(preferredChapter, request)
-    else await ports.refreshWorkflow(request)
+    if (preferredChapter) {
+      if (await ports.selectChapter(preferredChapter, request, null, { deferWorkflow }) !== true) return false
+    }
+    else if (!deferWorkflow) await ports.refreshWorkflow(request)
     const loadedIdeas = await ideasLoad
     if (!ports.workspaceRequests.isCurrent(request, ports.current.value)) return false
     ports.ideas.value = loadedIdeas
@@ -266,7 +289,10 @@ export function createLibraryWorkspaceLoadingActions(ports) {
     await ports.refreshManuscriptRecoveries()
     await autoBackupLoad
     void ports.runAutomaticBackup(false)
-    if (ports.workspaceRequests.isCurrent(request, ports.current.value)) void ports.outlineStorageFeedback.refresh()
+    if (ports.workspaceRequests.isCurrent(request, ports.current.value)
+      && !ports.outlineStorageFeedback.initializeFileAuthority(ports.sqliteStorageStatus.value, request)) {
+      void ports.outlineStorageFeedback.refresh()
+    }
     ports.setWorkspaceOpeningPhase('ready')
     return ports.workspaceRequests.isCurrent(request, ports.current.value)
   }

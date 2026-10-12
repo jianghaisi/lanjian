@@ -1,11 +1,16 @@
 <script setup>
+import ArchivePageHeader from '../../ui/ArchivePageHeader.vue'
+import WorldbookEntryEditor from '../../features/characters/components/WorldbookEntryEditor.vue'
+import WritingPluginSettings from '../../features/writing-plugins/components/WritingPluginSettings.vue'
 import LocalModelStore from '../../features/models/components/LocalModelStore.vue'
 import ModelConnectionsSettings from '../../features/models/components/ModelConnectionsSettings.vue'
 import StudioIcon from '../../ui/StudioIcon.vue'
+import ArchiveAction from '../../ui/ArchiveAction.vue'
 import CompanionSettings from '../../features/companion/components/CompanionSettings.vue'
 import ThemeSelector from './ThemeSelector.vue'
+import SoundPreferences from './SoundPreferences.vue'
 import { settingsCategories } from '../services/settings-navigation'
-import { toRefs } from 'vue'
+import { toRefs, ref, computed, nextTick, onBeforeUnmount } from 'vue'
 
 const props = defineProps({ scope: { type: Object, required: true } })
 const {
@@ -45,6 +50,8 @@ const {
   migrationPreview,
   modelChoices,
   modelSettingsDirty,
+  modelReturnLabel,
+  returnFromModelSettings,
   openSqliteActivation,
   openSqliteShadowMigration,
   openWorkspaceRestore,
@@ -108,10 +115,36 @@ const {
   useLocalModel,
   workspaceBackupResult
 } = toRefs(props.scope)
+const settingsRoot = ref(null)
+const dataPage = ref('backup')
+const dataPages = [
+  { id: 'backup', label: '备份与恢复', note: '作品副本 · 自动护稿 · 导出' },
+  { id: 'storage', label: '存储与迁移', note: '数据版本 · 保存方式 · 镜像' },
+  { id: 'diagnostics', label: '诊断检查', note: '一致性能力 · 校验记录' }
+]
+const dataScroll = new Map()
+let dataNavigation = 0
+async function selectDataPage(id) {
+  if (id === dataPage.value) return
+  const root = settingsRoot.value
+  let scroll = root
+  while (scroll && !/(auto|scroll)/.test(getComputedStyle(scroll).overflowY)) scroll = scroll.parentElement
+  dataScroll.set(dataPage.value, scroll?.scrollTop || 0)
+  const ticket = ++dataNavigation
+  dataPage.value = id
+  await nextTick()
+  if (ticket !== dataNavigation || !root?.isConnected) return
+  if (scroll) scroll.scrollTop = dataScroll.get(id) || 0
+}
+onBeforeUnmount(() => { dataNavigation++ })
+const worldbookSearch = ref('')
+const worldbookType = ref('')
+const visibleWorldbookEntities = computed(() => storyEntities.value.filter(item => (!worldbookType.value || item.entityType === worldbookType.value) && item.canonicalName.toLocaleLowerCase().includes(worldbookSearch.value.toLocaleLowerCase())))
+
 </script>
 
 <template>
-  <div class="settings-editor settings-page" :class="{ 'story-content-page': settingsSection === 'story' }">
+  <div ref="settingsRoot" class="settings-editor settings-page" :class="{ 'story-content-page': settingsSection === 'story', 'model-settings-page': settingsSection === 'connection' || settingsSection === 'routing' }">
     <nav v-if="settingsSection !== 'story'" class="settings-category-navigation" aria-label="设置分类">
       <button
         v-for="category in settingsCategories"
@@ -126,21 +159,13 @@ const {
         ><span>{{ category.label }}</span>
       </button>
     </nav>
-    <header v-if="settingsSection !== 'story' && settingsSection !== 'local-models'" class="settings-page-header">
-      <div>
-        <p class="eyebrow">设置 · {{ activeSettingsCategory.label }}</p>
-        <h2>{{ currentSettingsSection.label }}</h2>
-        <p>{{ currentSettingsSection.description }}</p>
-      </div>
-      <span aria-hidden="true">{{ activeSettingsCategory.mark }}</span>
+    <header v-if="settingsSection === 'connection' || settingsSection === 'routing'" class="model-workflow-heading">
+      <div class="model-heading-title"><p class="eyebrow">{{ settingsSection === 'connection' ? 'CONNECTION ARCHIVE / 接口档案' : 'WRITING MODELS / 创作配置' }}</p><h2>{{ currentSettingsSection.label }}</h2></div>
+      <div class="model-heading-context"><span>{{ settingsSection === 'connection' ? '所有作品共用' : current?.title }}</span><ArchiveAction data-testid="model-return-to-writing" @click="returnFromModelSettings"><span aria-hidden="true">↗</span> {{ modelReturnLabel }}</ArchiveAction></div>
     </header>
-    <header v-else-if="settingsSection === 'story'" class="story-content-header">
-      <div>
-        <p class="eyebrow">设定 · 人物与关系</p>
-        <h2>维护故事里的正式对象与关系</h2>
-        <p>人物、地点、物品、组织和世界规则属于当前作品，不属于全局设置。</p>
-      </div>
-    </header>
+    <ArchivePageHeader v-else-if="settingsSection !== 'story' && settingsSection !== 'local-models'" :eyebrow="`WORKSPACE / 设置 · ${activeSettingsCategory.label}`" :title="currentSettingsSection.label" :description="currentSettingsSection.description" />
+    <ArchivePageHeader v-else-if="settingsSection === 'story'" class="story-content-header" eyebrow="03 / WORLDBOOK · 本书设定" title="人物与世界书" description="管理人物与世界；分别填写公开设定、作者备注和秘密。" />
+    <WritingPluginSettings v-if="settingsSection === 'plugins'" :key="JSON.stringify([current?.id, current?.path])" :api="desktop.writingPlugins" :book-scope-key="current ? JSON.stringify([current.id, current.path]) : null" />
     <LocalModelStore
       v-if="settingsSection === 'local-models'"
       :api="desktop.localModels"
@@ -149,14 +174,18 @@ const {
       @use="useLocalModel"
       @changed="refreshLocalModels"
     />
-    <ModelConnectionsSettings
+    <ModelConnectionsSettings :local-api="desktop.localModels"
       v-if="settingsSection === 'connection' || settingsSection === 'routing'"
       :key="current?.id + ':' + settingsSection"
       :api="desktop.modelConnections"
       :book-available="Boolean(current)"
       :page="settingsSection"
+      :embedded="true"
+      :return-label="modelReturnLabel"
       @dirty="modelSettingsDirty = $event"
       @changed="refreshModelAssignments"
+      @navigate="selectSettingsSection"
+      @return="returnFromModelSettings"
     />
     <section
       v-if="settingsSection === 'context'"
@@ -518,16 +547,14 @@ const {
       class="settings-section settings-page-section story-entity-section"
       data-testid="settings-page-story-entities"
     >
-      <header>
-        <div>
-          <b>正式资料与关系</b
-          ><small>人物、地点、物品、组织和世界规则在这里统一维护；SQLite 是正式数据，可读 JSON 会自动同步。</small>
-        </div>
-      </header>
+
       <div class="story-entity-grid">
         <div class="story-entity-list">
+          <header class="story-catalog-heading"><b>档案目录</b><span class="story-catalog-count">{{ storyEntities.length }} 项</span></header>
+          <label>搜索世界书<input v-model="worldbookSearch" type="search" placeholder="条目名称" /></label>
+          <label>类型<select v-model="worldbookType"><option value="">全部</option><option value="character">人物</option><option value="location">地点</option><option value="item">物品</option><option value="organization">组织</option><option value="world_rule">世界规则</option></select></label>
           <button
-            v-for="item in storyEntities"
+            v-for="item in visibleWorldbookEntities"
             :key="item.id"
             type="button"
             :class="{ selected: storyEntityDraft.id === item.id }"
@@ -541,7 +568,7 @@ const {
               item.status === 'approved' ? '已确认' : item.status === 'candidate' ? '候选' : '已归档'
             }}</small>
           </button>
-          <p v-if="!storyEntities.length">尚未建立正式资料。</p>
+          <p v-if="!visibleWorldbookEntities.length">{{ storyEntities.length ? "没有匹配的条目。" : "尚未建立世界书条目。" }}</p>
         </div>
         <div class="story-entity-form">
           <label
@@ -584,27 +611,10 @@ const {
               <option value="archived">归档</option>
             </select></label
           >
-          <label class="wide-field"
-            >档案（JSON）<textarea
-              v-assist-field="{
-                id: 'AppShell.storyEntityDraft.profileJson',
-                read: () => storyEntityDraft.profileJson,
-                write: (value) => {
-                  storyEntityDraft.profileJson = String(value)
-                },
-                identity: () => storyEntityDraft
-              }"
-              v-model="storyEntityDraft.profileJson"
-              spellcheck="false"
-              placeholder='例如：{ "外观": "淡青色" }'
-            ></textarea
-            ><small v-if="storyEntityDraft.entityType === 'item'"
-              >物品数量不要写在档案里；请在下方资源账本中增加或消耗。</small
-            ></label
-          >
+          <WorldbookEntryEditor v-model="storyEntityDraft.profileJson" :chapters="chapters" :entities="storyEntities" />
           <div class="section-action">
             <button class="control-button primary" type="button" :disabled="busy" @click="saveStoryEntity">
-              <StudioIcon name="save" :size="16" />保存资料</button
+              <StudioIcon name="save" :size="16" />保存世界书条目</button
             ><button
               class="control-button secondary"
               type="button"
@@ -632,7 +642,7 @@ const {
               ><b>资源账本</b><small>金钱、道具与次数只在这里记变化；余额由历史自动累加，不能直接修改。</small></span
             >
           </div>
-          <em>SQLite 正式数据</em>
+          <em>资源记录</em>
         </header>
         <div v-if="approvedResourceEntities.length" class="resource-ledger-grid">
           <div class="resource-balance-column">
@@ -785,8 +795,9 @@ const {
     >
       <span>设</span>
       <div>
-        <b>请先启用 SQLite 正式数据</b>
-        <p>现有 Markdown 与 JSON 原稿不会被覆盖；启用后可将资料以正式对象形式保存。</p>
+        <b>世界书尚未读取完成</b>
+        <p>若读取失败，请重新进入此页重试；编辑草稿仍保留。</p>
+        <button class="control-button secondary" type="button" :disabled="busy" @click="selectSettingsSection('story')">重新读取</button>
       </div>
     </section>
     <section
@@ -944,6 +955,7 @@ const {
       @recover="recoverCompanionDefaults"
     />
     <template v-if="settingsSection === 'appearance'">
+      <SoundPreferences />
       <ThemeSelector :model-value="themeChoice" :error="themeError" @update:model-value="selectTheme" />
       <section class="settings-section settings-page-section appearance-section">
         <header>
@@ -984,7 +996,7 @@ const {
               v-model.number="assistantWidth"
               type="range"
               min="280"
-              max="460"
+              max="720"
               step="4"
               @change="saveAppearancePreferences(false)"
           /></label>
@@ -1445,9 +1457,13 @@ const {
         <p>服务单人作者的本地创作闭环；不包含云同步、多人协作、自动发布和无人值守整书生成。</p>
       </footer>
     </section>
+    <nav v-if="settingsSection === 'project'" class="data-page-navigation" aria-label="作品数据设置">
+      <button v-for="page in dataPages" :key="page.id" type="button" :data-testid="`data-page-${page.id}`" :aria-current="dataPage === page.id ? 'page' : undefined" @click="selectDataPage(page.id)"><b>{{ page.label }}</b><small>{{ page.note }}</small></button>
+    </nav>
     <section
       v-if="settingsSection === 'project' && migrationPreview"
       class="settings-section settings-page-section"
+      v-show="dataPage === 'storage'"
       data-testid="settings-page-project"
     >
       <header>
@@ -1506,6 +1522,7 @@ const {
     <section
       v-if="settingsSection === 'project' && migrationPreview"
       class="settings-section settings-page-section sqlite-shadow-section"
+      v-show="dataPage === 'storage'"
       data-testid="sqlite-shadow-section"
     >
       <header>
@@ -1665,6 +1682,7 @@ const {
     <section
       v-if="settingsSection === 'project' && migrationPreview"
       class="settings-section settings-page-section workspace-backup-section"
+      v-show="dataPage === 'backup'"
       data-testid="workspace-backup-section"
     >
       <header>
@@ -1880,7 +1898,7 @@ const {
       </div>
     </section>
     <section
-      v-if="settingsSection === 'project'"
+      v-if="settingsSection === 'project'" v-show="dataPage === 'diagnostics'"
       class="settings-section settings-page-section consistency-evaluation-section"
       data-testid="consistency-evaluation-section"
     >
@@ -1976,7 +1994,7 @@ const {
       data-testid="settings-page-research"
     >
       <header>
-        <div><b>方舟联网连接</b><small>用于公开网络资料搜索；不会伪装成抖音评论接口</small></div>
+        <div><b>方舟联网连接</b><small>用于搜索公开网页。</small></div>
       </header>
       <div class="settings-form field-grid">
         <label class="wide-field">方舟接口地址<input v-model="researchSettings.baseUrl" /></label
@@ -2011,3 +2029,48 @@ const {
     </section>
   </div>
 </template>
+
+<style scoped>
+.settings-page .shadow-migration-card { background:var(--surface-muted); border-color:var(--line); }
+.settings-page .shadow-migration-seal { color:var(--jade); background:var(--surface); border-color:var(--line); }
+.settings-page .shadow-migration-copy p { color:var(--ink); }
+.data-page-navigation { position:sticky; top:0; z-index:3; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); margin:0 0 24px; border:1px solid var(--line); background:var(--surface); }
+.data-page-navigation button { display:grid; gap:6px; padding:16px 18px; text-align:left; color:var(--muted); background:transparent; border:0; border-bottom:2px solid transparent; transition:background-color 160ms,color 160ms,border-color 160ms; }
+.data-page-navigation button + button { border-left:1px solid var(--line); }
+.data-page-navigation button[aria-current] { border-bottom-color:var(--jade); color:var(--ink); background:var(--surface-muted); }
+.data-page-navigation b { font:600 14px var(--sans); }.data-page-navigation small { font:11px/1.6 var(--sans); color:var(--muted); }
+.data-page-navigation button:focus-visible { outline:2px solid var(--jade); outline-offset:-3px; }
+@media(max-width:760px) { .data-page-navigation button { padding:12px 8px; }.data-page-navigation small { display:none; } }
+@media(prefers-reduced-motion:reduce) { .data-page-navigation button { transition:none; } }
+
+.settings-category-navigation button,
+.settings-category-navigation button i { transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease; }
+.settings-category-navigation button i { transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease, scale 120ms ease; }
+.settings-category-navigation button:active i { scale: .9; }
+.settings-page > :is(.settings-page-section, .theme-settings) { animation: settings-section-arrive 220ms var(--interaction-ease); }
+@keyframes settings-section-arrive {
+  from { opacity: .4; translate: 0 6px; }
+  to { opacity: 1; translate: 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-category-navigation button, .settings-category-navigation button i { transition: none !important; }
+  .settings-category-navigation button:active i { scale: none; }
+  .settings-page > :is(.settings-page-section, .theme-settings) { animation: none; }
+}
+:global(.redesigned-studio:not(.library-mode) .workbench > div.settings-editor.model-settings-page) {
+  background-color:var(--canvas);
+  background-image:linear-gradient(color-mix(in srgb,var(--muted) 8%,transparent) 1px,transparent 1px),linear-gradient(90deg,color-mix(in srgb,var(--muted) 8%,transparent) 1px,transparent 1px);
+  background-size:64px 64px;
+}
+.settings-editor.model-settings-page > .model-workflow-heading { position:relative; align-items:center; gap:16px; margin-bottom:16px; padding:4px 0 22px; }
+.model-workflow-heading::after { content:''; position:absolute; bottom:-1px; right:0; width:76px; height:6px; background:repeating-linear-gradient(130deg,#eaa247 0 5px,transparent 5px 10px); }
+.model-workflow-heading .model-heading-title { padding-left:14px; border-left:3px solid var(--ink); }
+.settings-editor.model-settings-page > .model-workflow-heading h2 { margin:6px 0 0; font:600 var(--type-display)/1.3 var(--serif); letter-spacing:.02em; }
+.model-settings-page .model-workflow-heading .eyebrow { margin:0; color:var(--muted); font:10px/1.5 var(--sans); letter-spacing:.15em; }
+.model-heading-context { display:grid; justify-items:end; gap:8px; min-width:0; max-width:55%; }
+.model-heading-context > span { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+.model-settings-page .model-heading-context button.archive-action.control-button { color:#f5f3eb; background:#25322b; border:1px solid #56685c; border-radius:0; gap:10px; }
+.model-settings-page .model-heading-context button.archive-action.control-button:hover { background:#34473a; color:#f5f3eb; border-color:#809d8c; }
+.settings-editor.model-settings-page > .settings-category-navigation { margin-bottom:22px; background:var(--canvas); }
+@media(max-width:1000px) { .settings-editor.model-settings-page > .model-workflow-heading { gap:12px; } .model-heading-context { max-width:100%; } }
+</style>

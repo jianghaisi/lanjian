@@ -6,6 +6,7 @@ import { globalConnectionId, type ModelConnectionSecrets } from '../domain/model
 import type { ModelRequestGuard, ModelSettingsResolver, ResolvedModelConnection } from '../domain/model-provider'
 import type { AiTask, ModelProfile } from '../../../../contracts/index'
 import { credentialUnavailable, decryptModelConnectionKey } from './model-connection-secrets'
+import type { ModelCatalogEntry } from '../../../../contracts/models/model-catalog-metadata'
 
 /** Read-only, main-process composition. No current-book writes, defaults or public key getter. */
 export class BookModelResolver implements ModelSettingsResolver {
@@ -14,7 +15,8 @@ export class BookModelResolver implements ModelSettingsResolver {
     private readonly privateKeys: PrivateModelCredentialReader,
     private readonly globals: GlobalModelCredentialReader,
     private readonly secrets: ModelConnectionSecrets,
-    private readonly currentScope: () => BookModelRequestScope | null
+    private readonly currentScope: () => BookModelRequestScope | null,
+    private readonly catalogEntries?: (id: string, revision: number) => ModelCatalogEntry[] | undefined
   ) {}
 
   async resolve(task: AiTask, connectionIdOverride?: string): Promise<ResolvedModelConnection & { profile: ModelProfile }> {
@@ -34,7 +36,7 @@ export class BookModelResolver implements ModelSettingsResolver {
     const source = connectionIdOverride?.startsWith('global:')
       ? { kind: 'global' as const, id: connectionIdOverride, globalConnectionId: globalConnectionId(connectionIdOverride.slice(7)) }
       : bookModelSource(settings, connectionIdOverride ?? selected.connectionId)
-    const profile = Object.freeze({ ...selected, connectionId: source.id })
+    const profile = Object.freeze({ ...structuredClone(selected), connectionId: source.id })
     const guard = (credentialCheck?: () => Promise<void>): ModelRequestGuard => Object.freeze({
       assertActive,
       recheck: async () => {
@@ -68,7 +70,7 @@ export class BookModelResolver implements ModelSettingsResolver {
     return credential.use(async apiKey => {
       assertActive()
       return Object.freeze({ kind: credential.protocol, connectionId: source.id, connectionName: credential.connectionName,
-        baseUrl: credential.baseUrl, apiKey, profile, requestGuard })
+        baseUrl: credential.baseUrl, apiKey, profile, requestGuard, catalogEntries: structuredClone(this.catalogEntries?.(connection.id, connection.revision)) })
     })
   }
 

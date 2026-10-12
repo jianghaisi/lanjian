@@ -37,7 +37,7 @@ test('settings navigation groups author tasks without losing deep destinations',
 })
 
 test('settings search finds human terms across categories without exposing story content as an app setting', () => {
-  assert.deepEqual(searchSettingsSections('', 'ai').map((item) => item.id), ['local-models', 'connection', 'routing', 'context'])
+  assert.deepEqual(searchSettingsSections('', 'ai').map((item) => item.id), ['connection', 'routing', 'local-models', 'context'])
   assert.deepEqual(searchSettingsSections('主题').map((item) => item.id), ['appearance'])
   assert.deepEqual(searchSettingsSections('字体').map((item) => item.id), [])
   assert.deepEqual(searchSettingsSections('加载动画').map((item) => item.id), [])

@@ -12,8 +12,9 @@ type Fetch = typeof fetch
 export class OpenAiCompatibleImageClient {
   constructor(private readonly settings: ConnectionResolver, private readonly request: Fetch = fetch) {}
 
-  async generate(connectionId: string, model: string, prompt: string, signal?: AbortSignal): Promise<GeneratedImage & { connectionName: string }> {
+  async generate(connectionId: string, model: string, prompt: string, signal?: AbortSignal, beforeSend?: () => Promise<void>): Promise<GeneratedImage & { connectionName: string }> {
     const connection = await this.settings.resolveConnection(connectionId)
+    await beforeSend?.()
     signal?.throwIfAborted()
     if (connection.requestGuard) await connection.requestGuard.recheck()
     signal?.throwIfAborted()
@@ -39,6 +40,10 @@ export class OpenAiCompatibleImageClient {
     const encoded = imageBase64(payload)
     const bytes = decodeBase64(encoded)
     const image = inspectImage(bytes)
+    signal?.throwIfAborted()
+    if (connection.requestGuard) await connection.requestGuard.recheck()
+    signal?.throwIfAborted()
+    connection.requestGuard?.assertActive()
     return { ...image, bytes, connectionName: connection.connectionName }
   }
 }

@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopPetApi, DesktopPetState } from '../contracts/companion/desktop-pet'
+import { decodeDesktopPetMotion } from '../contracts/companion/desktop-pet'
+import { createCompanionVoiceBridge } from './companion-voice-bridge'
+import { exposeCompanionSettingsBridge } from './companion-settings-bridge'
+import { exposeCompanionAsrBridge } from './companion-asr-bridge'
+import { exposeCompanionCareBridge } from './companion-care-bridge'
 
 // Intentionally self-contained: a sandboxed secondary preload cannot require a
 // generated shared chunk. It exposes neither writing-context updates nor book APIs.
@@ -17,6 +22,15 @@ const api: DesktopPetApi = {
     ipcRenderer.on('desktop-pet:state', callback)
     return () => ipcRenderer.removeListener('desktop-pet:state', callback)
   },
-  onAction: () => () => {}
+  onAction: () => () => {},
+  onMotion: listener => {
+    const callback = (_event: Electron.IpcRendererEvent, value: unknown) => { try { listener(decodeDesktopPetMotion(value)) } catch { /* Ignore malformed motion; it carries no authority. */ } }
+    ipcRenderer.on('desktop-pet:motion', callback)
+    return () => ipcRenderer.removeListener('desktop-pet:motion', callback)
+  }
 }
 contextBridge.exposeInMainWorld('desktopPet', api)
+contextBridge.exposeInMainWorld('petVoice', createCompanionVoiceBridge())
+exposeCompanionSettingsBridge(false)
+exposeCompanionAsrBridge()
+exposeCompanionCareBridge()

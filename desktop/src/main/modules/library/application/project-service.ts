@@ -10,6 +10,8 @@ import { readJson, writeJson } from '../../../platform/storage/json-store'
 import { SettingsStore } from '../../../platform/settings/settings-store'
 import { readLibraryLastEditedChapter } from './library-last-edited-chapter'
 import { ProjectCreation, type ProjectModelInitialization } from './project-creation'
+import { BookExecutionContext } from './book-execution-context'
+import { BookTaskRegistry } from './book-task-registry'
 
 type ProjectState = {
   version?: number
@@ -27,12 +29,50 @@ type ProjectState = {
 }
 
 type TrashAdapter = { trashItem: (path: string) => Promise<void> }
+export type ProjectMetadata = Omit<ProjectSummary, 'manuscript'>
 export type ProjectIdentityAuthority = (path: string) => Promise<{ title: string; genre?: string } | null>
 
 export const CURRENT_PROJECT_SCHEMA_VERSION = 2
 const PROJECT_READ_RETRY_DELAYS_MS = [25, 75, 150] as const
 
 export class ProjectService {
+  private readonly execution = new BookExecutionContext()
+  readonly backgroundTasks = new BookTaskRegistry()
+  get executionIdentity() { return this.execution.current() }
+
+  /** Captures generation or read-only export snapshots; editor/adoption writes stay UI-scoped. */
+  async runInCurrentBook<T>(operation: () => T | Promise<T>): Promise<T> {
+    if (this.executionIdentity) return operation()
+    const root = await this.currentPath()
+    return this.execution.run(root, operation)
+  }
+
+  /** Main-only creation receipt lookup; this path never comes from renderer binding input. */
+  async captureCreatedBook(root: string) {
+    return this.execution.run(root, async () => {
+      const summary = await this.currentSummary()
+      return { summary, identity: this.executionIdentity! }
+    })
+  }
+
+  /** Main-only captured group binding; never accepts an IPC-supplied root. */
+  async runInCapturedBook<T>(identity: { root: string; physicalIdentity: string }, operation: () => T | Promise<T>): Promise<T> {
+    return this.execution.run(identity.root, async () => {
+      if (this.executionIdentity?.physicalIdentity !== identity.physicalIdentity) throw new AppError('CONFLICT', '群聊关联作品身份已变化。', { recoverable: true })
+      await this.currentPath()
+      return operation()
+    })
+  }
+
+  async runBookTask<T extends { id: string; status: string; chapterId?: number }>(kind: string, start: () => T | Promise<T>, status: (id: string) => T | Promise<T>): Promise<T> {
+    return this.runInCurrentBook(async () => {
+      const book = await this.currentSummary()
+      const task = await start()
+      this.backgroundTasks.track(task, book, kind, async () => { await this.currentPath(); return status(task.id) })
+      return task
+    })
+  }
+
   private readonly creation: ProjectCreation
   constructor(
     private readonly settings: SettingsStore,
@@ -43,7 +83,9 @@ export class ProjectService {
     initializeStorage?: (root: string) => Promise<void>
   ) { this.creation = new ProjectCreation(root => this.settings.setCurrentProject(root), CURRENT_PROJECT_SCHEMA_VERSION, initializeStorage) }
 
-  private async summary(path: string): Promise<ProjectSummary> {
+  private summary(path: string): Promise<ProjectSummary>
+  private summary(path: string, includeManuscript: boolean): Promise<ProjectMetadata>
+  private async summary(path: string, includeManuscript = true): Promise<ProjectSummary | ProjectMetadata> {
     const statePath = join(path, '.webnovel', 'state.json')
     let guardedStatePath = statePath
     try { guardedStatePath = await projectExistingPath(path, statePath) }
@@ -61,6 +103,14 @@ export class ProjectService {
     const folderTitle = basename(path)
     const manifestTitle = String(info.title || '').trim()
     const title = formalIdentity?.title.trim() || manifestTitle || folderTitle
+    const metadata: ProjectMetadata = {
+      id: path, name: title, title,
+      genre: formalIdentity?.genre?.trim() || String(profile.genre || info.genre || ''),
+      path, updated_at: String(state.updated_at || state.created_at || '')
+    }
+    // Identity/default readers do not need another full manuscript word count.
+    // Omit statistics entirely; this is not a claim that manuscript files are valid.
+    if (!includeManuscript) return metadata
     const identityConflict = !formalIdentity && projectVersion(state) < CURRENT_PROJECT_SCHEMA_VERSION && Boolean(manifestTitle) && manifestTitle !== folderTitle
     const manuscriptFiles = await readdir(join(path, '正文')).catch(() => [])
     const manuscriptFilesSummary = summarizeChapterFiles(manuscriptFiles)
@@ -89,11 +139,7 @@ export class ProjectService {
         }
       : { chapterCount: manuscriptFilesSummary.chapterCount, fileCount: manuscriptFilesSummary.fileCount, wordCount, status: 'ready' as const }
     return {
-      id: path,
-      name: title,
-      title,
-      genre: formalIdentity?.genre?.trim() || String(profile.genre || info.genre || ''),
-      path,
+      ...metadata,
       updated_at: lastEditedChapter?.updatedAt && lastEditedChapter.updatedAt > String(state.updated_at || state.created_at || '') ? lastEditedChapter.updatedAt : String(state.updated_at || state.created_at || ''),
       manuscript: { ...manuscript, ...(lastEditedChapter === undefined ? {} : { lastEditedChapter }) }
     }
@@ -104,9 +150,11 @@ export class ProjectService {
     const projects: ProjectSummary[] = []
     const seen = new Set<string>()
     const excluded = new Set(value.excludedProjects.map(item => pathIdentity(resolve(item))))
-    const discovered = value.libraryRoot ? await this.libraryProjectPaths(value.libraryRoot) : []
+    const libraryRoot = value.libraryRoot ?? await this.inferRegisteredLibraryRoot(value.recentProjects, excluded)
+    const discovered = libraryRoot ? await this.libraryProjectPaths(libraryRoot) : []
     for (const path of [...value.recentProjects, ...discovered]) {
-      if (excluded.has(pathIdentity(resolve(path)))) continue
+      const candidateIdentity = pathIdentity(resolve(path))
+      if (excluded.has(candidateIdentity) || seen.has(candidateIdentity)) continue
       const project = await this.registeredProjectSummary(path)
       if (!project) continue
       const identity = pathIdentity(project.path)
@@ -122,6 +170,24 @@ export class ProjectService {
     }
     const continuation = projects.find(project => pathIdentity(project.path) === currentIdentity) ?? projects[0]
     return { projects, continueProjectId: continuation?.id ?? null }
+  }
+
+  private async inferRegisteredLibraryRoot(recentProjects: string[], excluded: Set<string>): Promise<string | null> {
+    let sharedParent: string | null = null
+    for (const path of recentProjects) {
+      if (excluded.has(pathIdentity(resolve(path)))) continue
+      let canonical: string
+      try { canonical = await canonicalDirectory(path) }
+      catch (error) {
+        if (isMissing(error)) continue
+        throw error
+      }
+      const parent = dirname(canonical)
+      if (dirname(parent) === parent) return null
+      if (sharedParent && pathIdentity(sharedParent) !== pathIdentity(parent)) return null
+      sharedParent = parent
+    }
+    return sharedParent
   }
 
   private async libraryProjectPaths(configuredRoot: string): Promise<string[]> {
@@ -206,6 +272,10 @@ export class ProjectService {
 
   async trashProject(path: string): Promise<{ success: true; recovery: 'system-trash'; title: string }> {
     const canonical = await this.recognizedProject(path)
+    const tasks = await this.backgroundTasks.list()
+    if (tasks.some(task => pathIdentity(resolve(task.bookPath)) === pathIdentity(canonical) && ['queued', 'resuming', 'preparing', 'running', 'streaming'].includes(task.status))) {
+      throw new AppError('CONFLICT', '这部作品仍有任务运行。请先在所属作品停止任务，或等待完成后再移入回收站。', { recoverable: true })
+    }
     if (dirname(canonical) === canonical) {
       throw new AppError('VALIDATION_ERROR', '不能把磁盘根目录作为作品删除。', { recoverable: false })
     }
@@ -220,6 +290,8 @@ export class ProjectService {
   }
 
   async currentPath(): Promise<string> {
+    const captured = await this.execution.path()
+    if (captured) return captured
     const path = (await this.settings.load()).currentProject
     if (!path) throw new AppError('PROJECT_NOT_OPEN', '请先选择一个本地项目', { recoverable: true })
     try { return await canonicalDirectory(path) }
@@ -234,8 +306,10 @@ export class ProjectService {
     return { initialized: true, project_root: path, project: await this.summary(path) }
   }
 
-  async currentSummary(): Promise<ProjectSummary> {
-    return this.summary(await this.currentPath())
+  currentSummary(options?: { includeManuscript?: true }): Promise<ProjectSummary>
+  currentSummary(options: { includeManuscript: false }): Promise<ProjectMetadata>
+  async currentSummary(options: { includeManuscript?: boolean } = {}): Promise<ProjectSummary | ProjectMetadata> {
+    return this.summary(await this.currentPath(), options.includeManuscript !== false)
   }
 
   async migrationPreview(): Promise<ProjectMigrationPreview> {

@@ -1,0 +1,31 @@
+title = "Lanjian public-source secret scanning"
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Only public GPT-SoVITS source-file SHA256 checksums"
+condition = "AND"
+paths = ['''desktop/src/main/modules/companion/adapters/companion-voice/gpt-sovits-assets\.json$''']
+regexTarget = "match"
+regexes = ['''(?:api\.py|api_v2\.py|onnx_api\.py)":"[a-f0-9]{64}"''']
+
+[[allowlists]]
+description = "Fixed browser localStorage preference names, not credentials"
+condition = "AND"
+paths = ['''desktop/src/renderer/features/companion/(?:composables/use-companion-dialogue-appearance|services/companion-voice-preferences)\.ts$''']
+regexTarget = "secret"
+regexes = ['''^lanjian-companion-(?:dialogue|voice)-v1$''']
+
+[[allowlists]]
+description = "Synthetic idempotency fixture only"
+condition = "AND"
+paths = ['''desktop/tests/unit/manuscript/sqlite-manuscript-service\.test\.ts$''']
+regexTarget = "secret"
+regexes = ['''^operation-v34-unsafe-retry$''']
+
+[[allowlists]]
+description = "Literal test description, not a secret"
+condition = "AND"
+paths = ['''desktop/tests/unit/world-map/world-map-service\.test\.ts$''']
+regexTarget = "match"
+regexes = ['''^keys, untrimmed/duplicate ''']

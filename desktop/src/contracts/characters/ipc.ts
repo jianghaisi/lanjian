@@ -1,3 +1,4 @@
+import { readWorldbookProfile } from './worldbook'
 import type { ArgsDecoder } from '../core/validation'
 import {
   boundedInteger,
@@ -58,9 +59,9 @@ export const decodeStoryEntityArgs: ArgsDecoder<
   if (value.profileJson !== undefined) {
     const profileJson = boundedString(value.profileJson, 'storyEntity.profileJson', 500_000)
     try {
-      JSON.parse(profileJson)
+      readWorldbookProfile(JSON.parse(profileJson))
     } catch {
-      invalid('storyEntity.profileJson', '必须是有效 JSON')
+      invalid('storyEntity.profileJson', '必须是有效 JSON，且世界书版本、字段和引用格式正确')
     }
     result.profileJson = profileJson
   }

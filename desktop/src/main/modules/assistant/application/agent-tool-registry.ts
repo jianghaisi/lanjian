@@ -51,8 +51,10 @@ const inputSchema = {
   }
 }
 
+const longFormContextCompileTimeoutMs = 60_000
+
 const definitions: Record<AgentToolId, AgentToolDescriptor> = {
-  compileContextSources: descriptor('compileContextSources', '编译上下文来源', 'read', 'current-chapter', 'array', 15_000),
+  compileContextSources: descriptor('compileContextSources', '编译上下文来源', 'read', 'current-chapter', 'array', longFormContextCompileTimeoutMs),
   currentChapter: descriptor('currentChapter', '当前正文', 'read', 'current-chapter', 'object', 5_000),
   chapterContract: descriptor('chapterContract', '章纲契约', 'read', 'current-chapter', 'object', 10_000),
   contextFacts: descriptor('contextFacts', '关联前文', 'read', 'current-chapter', 'object', 15_000),
@@ -108,25 +110,42 @@ export class AgentToolRegistry {
     }
   }
 
-  async execute<T>(grant: WritingAgentToolGrant, toolId: AgentToolId, scope: AgentToolScopeInput, operation: () => Promise<T> | T): Promise<T> {
+  async execute<T>(grant: WritingAgentToolGrant, toolId: AgentToolId, scope: AgentToolScopeInput, operation: (signal: AbortSignal) => Promise<T> | T, taskSignal?: AbortSignal): Promise<T> {
     this.assertGrant(grant, scope)
     if (!grant.allowedToolIds.includes(toolId)) {
       throw new AppError('VALIDATION_ERROR', `当前任务不允许使用工具：${toolId}。`, { recoverable: true })
     }
     const definition = definitions[toolId]
     const timeoutMs = this.timeoutOverrides[toolId] ?? definition.timeoutMs
+    taskSignal?.throwIfAborted()
+    const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
+    let stop: (() => void) | undefined
     try {
       const output = await Promise.race([
-        Promise.resolve().then(operation),
+        Promise.resolve().then(() => {
+          controller.signal.throwIfAborted()
+          return operation(controller.signal)
+        }),
         new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => reject(new AppError('FEATURE_UNAVAILABLE', `${definition.label}读取超时，请重试。`, { recoverable: true })), timeoutMs)
+          stop = () => {
+            reject(taskSignal?.reason)
+            controller.abort(taskSignal?.reason)
+          }
+          taskSignal?.addEventListener('abort', stop, { once: true })
+        }),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            reject(new AppError('FEATURE_UNAVAILABLE', `${definition.label}读取超时，请重试。`, { recoverable: true }))
+            controller.abort()
+          }, timeoutMs)
         })
       ])
       assertOutputRoot(output, definition.outputSchema.type, definition.label)
       return output
     } finally {
       if (timer) clearTimeout(timer)
+      if (stop) taskSignal?.removeEventListener('abort', stop)
     }
   }
 }

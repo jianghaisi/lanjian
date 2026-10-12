@@ -8,6 +8,7 @@ import {
   type GlobalConnectionSnapshot, type GlobalConnectionCommitGuard
 } from '../domain/model-connections'
 import { atomicWriteText } from '../../../platform/storage/atomic-file'
+import { projectTargetPath } from '../../../platform/storage/project-path'
 import { readModelConnectionFile, sameModelFileIdentity, fileErrorCode, type ModelFileIdentity } from './model-connection-file'
 
 export const GLOBAL_CONNECTIONS_FILE = 'global-model-connections.json'
@@ -53,6 +54,18 @@ export class ModelConnectionsStore implements GlobalConnectionRepository {
       const current = await this.readAt(root)
       if (current.fingerprint !== fingerprint || current.document.revision !== revision) throw new StoreConflict()
       assertGlobalConnectionTransition(current.document, next)
+      const policyVersions = (d: GlobalConnectionDocument) => d.newBookDefaults?.template
+        ? [d.newBookDefaults.template.shared, ...Object.values(d.newBookDefaults.template.tasks)].map(p => p.parameterPolicy?.version ?? 0) : []
+      const oldVersions = policyVersions(current.document)
+      if (current.document.newBookDefaults?.template && policyVersions(next).some((v, i) => v === 2 && oldVersions[i] !== 2)) {
+        // Recover the old template only; never duplicate encrypted credentials in a parameter backup.
+        const previous = JSON.stringify(current.document.newBookDefaults, null, 2) + '\n'
+        const path = await projectTargetPath(root, join(root, `model-defaults-recovery-${digest(Buffer.from(previous))}.json`))
+        await atomicWriteText(path, previous, async () => {
+          await beforePublish?.recheck()
+          if (await realpath(this.userData) !== root || (await this.readAt(root)).fingerprint !== current.fingerprint) throw new StoreConflict()
+        }, () => beforePublish?.assertActive())
+      }
       await this.publish(join(root, GLOBAL_CONNECTIONS_FILE), content, async () => {
         if (beforePublish) {
           try { await beforePublish.recheck() } catch { throw new StoreConflict() }

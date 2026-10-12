@@ -1,0 +1,161 @@
+{
+  "apiVersion": 1,
+  "id": "lanjian.official.creative-writing",
+  "name": "正文与审校方法",
+  "version": "1.2.0",
+  "description": "通用助笔对话、已确认章节样稿、正文、审校与修订方法资产。可派生替换；作者确认和正式事实由应用检查。",
+  "runtime": "quickjs-js",
+  "entry": "main.js",
+  "capabilities": [],
+  "tools": [],
+  "categoryIds": [
+    "style",
+    "review",
+    "workflow"
+  ],
+  "tags": [
+    "创作方法",
+    "正文",
+    "审校"
+  ],
+  "assets": [
+    "prose.md",
+    "review.md",
+    "selection-revision.md",
+    "chapter-discussion.md",
+    "work-query.md",
+    "annotation-revision.md",
+    "assistant-conversation.md",
+    "assistant-sample.md"
+  ],
+  "contributions": [
+    {
+      "id": "annotation-revision",
+      "name": "批注改稿方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "review"
+      ],
+      "kind": "creative-policy",
+      "slot": "annotation-revision",
+      "mode": "replace",
+      "asset": "annotation-revision.md"
+    },
+    {
+      "id": "prose",
+      "name": "正文场景创作方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "writing"
+      ],
+      "kind": "creative-policy",
+      "slot": "prose",
+      "mode": "replace",
+      "asset": "prose.md"
+    },
+    {
+      "id": "review",
+      "name": "正文与场景审校方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "review"
+      ],
+      "kind": "creative-policy",
+      "slot": "review",
+      "mode": "replace",
+      "asset": "review.md"
+    },
+    {
+      "id": "selection-revision",
+      "name": "选段处理方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "writing"
+      ],
+      "kind": "creative-policy",
+      "slot": "selection-revision",
+      "mode": "replace",
+      "asset": "selection-revision.md"
+    },
+    {
+      "id": "chapter-discussion",
+      "name": "章卡讨论方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "planning"
+      ],
+      "kind": "creative-policy",
+      "slot": "chapter-discussion",
+      "mode": "replace",
+      "asset": "chapter-discussion.md"
+    },
+    {
+      "id": "work-query",
+      "name": "作品问答方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "review"
+      ],
+      "kind": "creative-policy",
+      "slot": "work-query",
+      "mode": "replace",
+      "asset": "work-query.md"
+    },
+    {
+      "id": "assistant-conversation",
+      "name": "通用助笔对话方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "assistant"
+      ],
+      "kind": "creative-policy",
+      "slot": "assistant-conversation",
+      "mode": "replace",
+      "asset": "assistant-conversation.md"
+    },
+    {
+      "id": "assistant-sample",
+      "name": "对话样稿方法",
+      "configSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "stages": [
+        "writing"
+      ],
+      "kind": "creative-policy",
+      "slot": "assistant-sample",
+      "mode": "replace",
+      "asset": "assistant-sample.md"
+    }
+  ]
+}

@@ -15,11 +15,12 @@ export type CompanionInferencePort = {
   stop(): void
   cancel(): void
 }
-type Session = { id: string; owner: number; continueId: string | null; history: Array<{ role: 'user' | 'assistant'; content: string }>; lastReply: string; controller?: AbortController; seen: Set<string> }
+type Session = { id: string; owner: number; continueId: string | null; work?: CompanionLibraryProjection; page: '我的作品' | '写作工作台'; history: Array<{ role: 'user' | 'assistant'; content: string }>; lastReply: string; controller?: AbortController; seen: Set<string> }
 export class CompanionVoiceService {
   private session?: Session
   private library: CompanionLibraryProjection[] = []
   private continueId: string | null = null
+  private work: CompanionLibraryProjection | null = null
   private notices = new CompanionNoticePolicy()
   private preparation?: { voice: CompanionVoiceId; controller: AbortController; promise: Promise<boolean> }
   private textPreparation?: { controller: AbortController; promise: Promise<boolean> }
@@ -28,7 +29,7 @@ export class CompanionVoiceService {
   private active = true
   private tapIndex = 0
   private lastTap = -Infinity
-  constructor(private readonly inference: CompanionInferencePort, private readonly id: () => string, private readonly now: () => Date) {}
+  constructor(private readonly inference: CompanionInferencePort, private readonly id: () => string, private readonly now: () => Date, private readonly onEnd: (id: string, owner: number) => void = () => {}) {}
   configure(options: CompanionRuntimeOptions): boolean {
     const previous = this.options
     if (Object.keys(options).every(key => options[key as keyof CompanionRuntimeOptions] === previous[key as keyof CompanionRuntimeOptions])) return true
@@ -75,14 +76,19 @@ export class CompanionVoiceService {
     this.active = true
     this.library = items.map(item => ({ ...item, title: item.title.slice(0, 200), chapter: item.chapter?.slice(0, 200) || null }))
     this.continueId = this.library.find(item => item.id === continueProjectId)?.id ?? this.library[0]?.id ?? null
-    if (this.session?.continueId && this.session.continueId !== this.continueId) this.endSession()
+    if (this.session?.page === '我的作品' && this.session.continueId && this.session.continueId !== this.continueId) this.endSession()
+  }
+  updateWork(work: CompanionLibraryProjection): void {
+    if (this.session?.page === '写作工作台' && this.session.continueId !== work.id) this.endSession()
+    this.work = { ...work, title: work.title.slice(0, 200), chapter: work.chapter?.slice(0, 200) || null }; this.active = true
   }
   open(owner: number, selector: string | null): { sessionId: string } {
-    if (selector !== null && (selector !== 'library-current' || !this.continueId)) throw new AppError('CONFLICT', '作品列表已变化，请刷新后再交流。', { recoverable: true })
-    const continueId = selector === 'library-current' ? this.continueId : null
+    if (selector !== null && (selector === 'work-current' ? !this.work : selector !== 'library-current' || !this.continueId)) throw new AppError('CONFLICT', '作品已变化，请刷新后再交流。', { recoverable: true })
+    const work = selector === 'work-current' ? this.work! : this.library.find(item => item.id === this.continueId)
+    const continueId = selector === null ? null : work?.id ?? null
     this.endSession()
     const id = this.id()
-    this.session = { id, owner, continueId, history: [], lastReply: '', seen: new Set() }
+    this.session = { id, owner, continueId, ...(selector === null || !work ? {} : { work: { ...work } }), page: selector === 'work-current' ? '写作工作台' : '我的作品', history: [], lastReply: '', seen: new Set() }
     return { sessionId: id }
   }
   private owned(owner: number, id: string): Session {
@@ -97,12 +103,14 @@ export class CompanionVoiceService {
     return true
   }
   close(owner: number, id: string): boolean { this.owned(owner, id); this.endSession(); return true }
+  closeOwner(owner: number): void { if (this.session?.owner === owner) this.endSession() }
   private endSession(): void {
     if (this.session?.controller) { this.session.controller.abort(); this.inference.cancel() }
+    if (this.session) this.onEnd(this.session.id, this.session.owner)
     this.session = undefined
   }
   clear(): void {
-    this.active = false; this.epoch++
+    this.active = false; this.epoch++; this.work = null
     this.textPreparation?.controller.abort(); this.textPreparation = undefined
     this.endSession(); this.inference.stopText()
     // Silent speech warmup belongs to the application, not the current library view.
@@ -127,14 +135,14 @@ export class CompanionVoiceService {
         this.lastTap = now; reply = companionTapReply(this.tapIndex++)
       }
       if (input.action === 'notice') {
-        const now = this.now(), work = this.library.find(item => item.id === session.continueId)
+        const now = this.now(), work = session.work
         if (!input.notice || !this.notices.claim(input.notice, now, work?.id || null)) throw new AppError('CONFLICT', '这条陪伴提醒已略过。', { recoverable: true })
         reply = input.notice === 'late-night'
           ? '已经很晚了。灵感可以先记下来，今天也记得早点休息。'
           : `要开始创作《${work!.title.slice(0, 32)}》了吗？${work!.chapter ? '可以从上次的章节继续，我陪着你。' : '先写下此刻最想写的画面吧。'}`
       }
       if (input.action === 'chat') {
-        const now = this.now(), work = this.library.find(item => item.id === session.continueId)
+        const now = this.now(), work = session.work
         if (this.options.textModel) {
           send({ kind: 'phase', phase: 'thinking' })
           if (this.textPreparation) { await this.textPreparation.promise; assertCurrent() }
@@ -142,9 +150,9 @@ export class CompanionVoiceService {
           // preparation instead of exhausting its bounded 30-second waiter.
           // Text-only mode already aborts/removes that preparation in configure().
           if (this.preparation && this.options.speechModel) { await this.preparation.promise; assertCurrent() }
-          const context = JSON.stringify({ time: now.toLocaleString('zh-CN', { hour12: false }), page: '我的作品', continueWork: work ? { title: work.title, chapter: work.chapter } : null, operation: '未提供确认的操作记录', permission: '只能交流，不能保存或修改作品' })
+          const context = JSON.stringify({ time: now.toLocaleString('zh-CN', { hour12: false }), page: session.page, continueWork: work ? { title: work.title, chapter: work.chapter } : null, operation: '未提供确认的操作记录', permission: '只能交流，不能保存或修改作品' })
           reply = await this.inference.chat(input.text, context, session.history, controller.signal, text => send({ kind: 'text', text }))
-        } else reply = companionPresetReply(input.text, { now, work })
+        } else reply = companionPresetReply(input.text, { now, work, page: session.page })
         assertCurrent()
         if (!reply.trim() || reply.length > 600) throw new AppError('AI_RESPONSE_INVALID', '本地模型没有返回可用文字，请重试。', { recoverable: true })
         session.history = [...session.history, { role: 'user' as const, content: input.text.slice(0, 600) }, { role: 'assistant' as const, content: reply }].slice(-6)

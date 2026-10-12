@@ -15,7 +15,7 @@ export type ManuscriptRecoveryDialogItem = {
 </script>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import StudioIcon from '../../../ui/StudioIcon.vue'
 
 const props = withDefaults(defineProps<{
@@ -38,7 +38,8 @@ const emit = defineEmits<{
 const dialog = ref<HTMLElement | null>(null)
 const selectedId = ref(props.initialSelectedId || props.items[0]?.id || '')
 const showingFullComparison = ref(false)
-let previouslyFocused: HTMLElement | null = null
+const reading = ref<HTMLElement | null>(null)
+let selectionRevision = 0
 
 const selected = computed(() => props.items.find((item) => item.id === selectedId.value) || props.items[0] || null)
 const isBusy = computed(() => Boolean(props.busyId))
@@ -65,19 +66,14 @@ watch(() => props.initialSelectedId, (id) => {
   if (id && props.items.some((item) => item.id === id)) selectedId.value = id
 })
 
-onMounted(async () => {
-  previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  await nextTick()
-  dialog.value?.querySelector<HTMLElement>('[data-autofocus]')?.focus()
-})
-
-onBeforeUnmount(() => {
-  if (previouslyFocused?.isConnected) previouslyFocused.focus()
-})
+onBeforeUnmount(() => { selectionRevision++ })
 
 function choose(item: ManuscriptRecoveryDialogItem): void {
+  if (isBusy.value || selected.value?.id === item.id) return
+  selectionRevision++
   selectedId.value = item.id
   showingFullComparison.value = false
+  if (reading.value) reading.value.scrollTop = 0
   emit('select', item)
 }
 
@@ -87,17 +83,29 @@ function toggleComparison(item: ManuscriptRecoveryDialogItem): void {
 }
 
 function chooseRelative(direction: 1 | -1): void {
-  if (!props.items.length) return
+  if (!props.items.length || isBusy.value) return
   const currentIndex = Math.max(0, props.items.findIndex((item) => item.id === selected.value?.id))
   const nextIndex = (currentIndex + direction + props.items.length) % props.items.length
+  const id = props.items[nextIndex].id
   choose(props.items[nextIndex])
-  nextTick(() => dialog.value?.querySelector<HTMLElement>(`[data-recovery-id="${cssEscape(props.items[nextIndex].id)}"]`)?.focus())
+  const ticket = selectionRevision
+  nextTick(() => {
+    if (ticket !== selectionRevision || !dialog.value?.isConnected || dialog.value.closest('[inert]')) return
+    dialog.value.querySelector<HTMLElement>(`[data-recovery-id="${cssEscape(id)}"]`)?.focus({ preventScroll: true })
+  })
+}
+
+function handleIndexKeydown(event: KeyboardEvent): void {
+  if (event.isComposing || !['ArrowUp', 'ArrowDown'].includes(event.key)) return
+  event.preventDefault()
+  chooseRelative(event.key === 'ArrowUp' ? -1 : 1)
 }
 
 function handleDialogKeydown(event: KeyboardEvent): void {
+  if (event.isComposing || event.defaultPrevented) return
   if (event.key === 'Escape') {
     event.preventDefault()
-    emit('close')
+    if (!isBusy.value) emit('close')
     return
   }
   if (event.key !== 'Tab' || !dialog.value) return
@@ -155,7 +163,7 @@ function cssEscape(value: string): string {
 </script>
 
 <template>
-  <div class="recovery-backdrop" @mousedown.self="emit('close')">
+  <div class="recovery-backdrop" @mousedown.self="!isBusy && emit('close')">
     <section
       ref="dialog"
       class="recovery-dialog"
@@ -173,7 +181,7 @@ function cssEscape(value: string): string {
           <h2 id="manuscript-recovery-title">发现尚未归档的正文</h2>
           <span id="manuscript-recovery-description">先核对恢复稿与当前正式稿，再决定恢复或丢弃。关闭窗口不会删除这些草稿。</span>
         </div>
-        <button class="close-button" type="button" aria-label="暂时关闭恢复窗口" data-autofocus @click="emit('close')">
+        <button class="close-button" type="button" :disabled="isBusy" aria-label="暂时关闭恢复窗口" data-autofocus @click="emit('close')">
           <StudioIcon name="close" :size="18" />
         </button>
       </header>
@@ -184,8 +192,7 @@ function cssEscape(value: string): string {
           aria-label="待核对的恢复草稿"
           role="listbox"
           :aria-activedescendant="selected ? `recovery-${selected.id}` : undefined"
-          @keydown.up.prevent="chooseRelative(-1)"
-          @keydown.down.prevent="chooseRelative(1)"
+          @keydown="handleIndexKeydown"
         >
           <div class="index-caption"><span>待核案卷</span><b>{{ items.length }}</b></div>
           <button
@@ -198,6 +205,7 @@ function cssEscape(value: string): string {
             :class="{ selected: selected?.id === item.id, conflict: item.status === 'conflict' }"
             :aria-selected="selected?.id === item.id"
             :data-recovery-id="item.id"
+            :disabled="isBusy"
             @click="choose(item)"
           >
             <span class="chapter-number">{{ chapterLabel(item) }}</span>
@@ -209,6 +217,7 @@ function cssEscape(value: string): string {
         </nav>
 
         <article v-if="selected && comparison" class="recovery-review">
+          <div ref="reading" class="recovery-reading">
           <header class="review-heading">
             <div>
               <span>{{ chapterLabel(selected) }} · {{ sourceLabel(selected.source) }}</span>
@@ -236,6 +245,7 @@ function cssEscape(value: string): string {
             </section>
           </div>
 
+          </div>
           <footer class="review-actions">
             <button class="discard-action" type="button" :disabled="isBusy" @click="emit('discard', selected)">丢弃这份草稿</button>
             <span class="action-guidance">恢复会建立一个新版本，历史稿仍会保留。</span>
@@ -262,13 +272,9 @@ function cssEscape(value: string): string {
 
 <style scoped>
 .recovery-backdrop {
-  --ink: #172b27;
-  --ink-soft: #53615c;
-  --paper: #f5f0e5;
-  --paper-bright: #fbf8f0;
-  --rule: rgba(56, 70, 63, .18);
-  --jade: #24584e;
-  --cinnabar: #a8493b;
+  --ink-soft: var(--muted);
+  --paper-bright: var(--surface);
+  --rule: var(--line);
   position: fixed;
   inset: 0;
   z-index: 1200;
@@ -519,4 +525,27 @@ function cssEscape(value: string): string {
 @media (prefers-reduced-motion: reduce) {
   .recovery-dialog { animation: none; }
 }
+
+/* One scrolling reading area; decisions remain visible at every text length. */
+.recovery-backdrop { padding:16px; }
+.recovery-dialog { display:grid; grid-template-rows:auto minmax(0,1fr); width:min(1480px,calc(100vw - 32px)); height:calc(100dvh - 32px); max-height:none; border-radius:3px; border-color:var(--line); background:var(--surface); animation:none; }
+.dialog-workbench { min-height:0; max-height:none; overflow:hidden; grid-template-columns:220px minmax(0,1fr); }
+.recovery-index { min-height:0; background:var(--surface-muted); }
+.recovery-index-item { transition:background-color 150ms,border-color 150ms; }
+.recovery-index-item.selected,.recovery-index-item:hover { background:var(--surface); border-color:var(--line); }
+.recovery-index-item:disabled { cursor:wait; }
+.recovery-review { min-height:0; display:grid; grid-template-rows:minmax(0,1fr) auto; overflow:hidden; padding:0; }
+.recovery-reading { min-height:0; overflow:auto; overscroll-behavior:contain; padding:24px; scrollbar-gutter:stable; }
+.review-heading { flex-wrap:wrap; gap:10px; }
+.paper { min-height:240px; background:var(--surface-muted); border-color:var(--line); box-shadow:none; border-radius:2px; }
+.paper pre { color:var(--ink); font:14px/1.95 var(--serif); }
+.comparison-summary.full .paper pre { max-height:none; overflow:visible; }
+.review-actions { position:relative; margin:0; padding:16px 20px; background:var(--surface); border-color:var(--line); }
+.review-actions button { min-height:38px; font-size:12px; }
+.compare-action,.compare-action:hover,.close-button:hover,.close-button:focus-visible { background:var(--surface-muted); color:var(--ink); border-color:var(--line); }
+.restore-action,.restore-action:hover { background:var(--jade); color:var(--surface); }
+.recovery-empty { min-height:0; }
+@media(max-width:1100px) { .action-guidance { display:none; }.review-actions { grid-template-columns:auto minmax(0,1fr); gap:8px; padding:12px; }.review-actions > div { justify-content:flex-end; flex-wrap:wrap; }.recovery-reading { padding:18px; }.comparison-summary { grid-template-columns:minmax(0,1fr) 24px minmax(0,1fr); }.comparison-axis span { width:21px; height:21px; }.paper { padding:12px; } }
+@media(max-width:720px) { .dialog-heading { min-height:0; }.dialog-workbench { grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); }.recovery-index { max-height:100px; }.recovery-review { overflow:hidden; padding:0; }.comparison-summary { grid-template-columns:minmax(0,1fr); }.review-actions > div { display:flex; }.review-actions button { padding:8px; }.restore-action i { display:none; } }
+@media(prefers-reduced-motion:reduce) { .recovery-index-item { transition:none; } }
 </style>

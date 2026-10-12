@@ -1,10 +1,13 @@
 import { AppError, isAppError } from '../../../core/errors/app-error'
-import { assertEventMigrationReviewable, eventMigrationMirrorAcknowledgements, reviewEventMigrationDecisions,
+import { assertEventMigrationReviewable, eventMigrationDisplayOrder, eventMigrationMirrorAcknowledgements, reviewEventMigrationDecisions,
   type EventMigrationDecisionPlan, type EventMigrationInspection } from '../domain/event-migration-decisions'
 import { inspectEventMigrationSources } from '../domain/event-migration-review'
 import { prepareEventMigrationPayloads, type EventMigrationPayloads } from '../domain/event-migration-payloads'
 import type { EventSnapshotScope, EventSourceSnapshot } from '../domain/event-source-snapshot'
+import type { ClaimedEventMigrationReview } from '../domain/event-migration-commit'
 import { assertStoryIdentifier } from '../domain/story-event-version'
+
+export type { ClaimedEventMigrationReview } from '../domain/event-migration-commit'
 
 export const EVENT_MIGRATION_REVIEW_TTL_MS = 15 * 60 * 1000
 export const EVENT_MIGRATION_MAX_CAPTURES = 3
@@ -20,14 +23,9 @@ type Pending = {
   previewId: string; snapshot: EventSourceSnapshot; inspection: EventMigrationInspection
   expiresAt: number; reviewSequence: number; confirmation: Confirmation | null
 }
-export type ClaimedEventMigrationReview = Readonly<{
-  operationId: string; decisionFingerprint: string; plan: EventMigrationDecisionPlan; snapshot: EventSourceSnapshot; payloads: EventMigrationPayloads
-}>
 
-/** Private main-process review owner. No writer, IPC route, mirror operation or receipt lookup.
- * claimConfirmation consumes a grant, NOT a commit. The future transaction must recheck
- * live DB state again and retire old writes/mirrors before it may publish a module pointer.
- */
+/** Main-private review owner. withConfirmation keeps its one-use grant live
+ * through an injected submit operation; claiming alone never commits data. */
 export class EventMigrationReviewSession {
   private pending: Pending | null = null
   private claimingPreviewId: string | null = null
@@ -80,10 +78,16 @@ export class EventMigrationReviewSession {
     const token = this.identifier(), operationId = this.identifier()
     this.assertPending(pending)
     pending.confirmation = { token, operationId, decisionFingerprint, plan, payloads }
-    return Object.freeze({ token, operationId, decisionFingerprint, fingerprint: pending.snapshot.fingerprint, expiresAt: pending.expiresAt })
+    return Object.freeze({ token, operationId, decisionFingerprint, fingerprint: pending.snapshot.fingerprint, expiresAt: pending.expiresAt,
+      displayOrderRowIndices: eventMigrationDisplayOrder(plan) })
   }
 
   async claimConfirmation(token: string): Promise<ClaimedEventMigrationReview> {
+    return this.withConfirmation(token, async review => review)
+  }
+
+  /** Keeps cancellation and expiry live through queueing and the final commit. */
+  async withConfirmation<T>(token: string, submit: (review: ClaimedEventMigrationReview, assertActive: () => void) => Promise<T>): Promise<T> {
     assertStoryIdentifier(token)
     const pending = this.pending, confirmation = pending?.confirmation
     if (!pending || !confirmation || confirmation.token !== token) throw conflict()
@@ -100,8 +104,14 @@ export class EventMigrationReviewSession {
       if (!sameScope(current.scope, pending.snapshot.scope) || current.fingerprint !== pending.snapshot.fingerprint || this.time() >= pending.expiresAt) throw conflict()
       assertEventMigrationReviewable(current)
       // Keep the ORIGINAL reviewed snapshot, not a refreshed replacement.
-      return Object.freeze({ operationId: confirmation.operationId, decisionFingerprint: confirmation.decisionFingerprint,
+      const review = Object.freeze({ operationId: confirmation.operationId, decisionFingerprint: confirmation.decisionFingerprint,
         plan: confirmation.plan, snapshot: pending.snapshot, payloads: confirmation.payloads })
+      const assertActive = () => {
+        this.assertGeneration(generation)
+        if (this.claimingPreviewId !== pending.previewId || this.time() >= pending.expiresAt) throw conflict()
+      }
+      assertActive()
+      return await submit(review, assertActive)
     } finally {
       if (this.claimingPreviewId === pending.previewId) this.claimingPreviewId = null
     }

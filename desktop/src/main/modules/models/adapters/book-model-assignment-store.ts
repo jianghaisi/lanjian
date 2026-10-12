@@ -19,6 +19,15 @@ export class BookModelAssignmentStore implements BookModelAssignmentWriter {
   async save(source: BookModelSnapshot, value: BookModelSettings, guard: ModelRequestGuard): Promise<BookModelAssignmentCommit> {
     const settings = decodeBookModelSettings(value)
     bookModelConfigInputs(settings)
+    // Saved before the first v5 commit, policy-version upgrade or route change; contains no credentials.
+    const slots = (s: BookModelSettings) => [s.shared, ...Object.values(s.tasks)].map(p => [p.connectionId, p.parameterPolicy?.version ?? 0])
+    if (settings.version === 5 && (source.settings.version !== 5 || JSON.stringify(slots(settings)) !== JSON.stringify(slots(source.settings)))) {
+      await guard.recheck()
+      const previous = source.recoveryContent ?? JSON.stringify(source.settings, null, 2) + '\n'
+      const recovery = await projectTargetPath(source.bookRoot, join(source.bookRoot, '.webnovel', 'model-settings-recovery', `${modelSourceHash(previous)}.json`))
+      await mkdir(dirname(recovery), { recursive: true })
+      await atomicWriteText(recovery, previous, guard.recheck, guard.assertActive)
+    }
     if (source.storage.mode === 'sqlite') {
       if (source.storage.schemaVersion !== WORKSPACE_DATABASE_SCHEMA_VERSION) throw new AppError('FEATURE_UNAVAILABLE', '请先在项目数据中核对并升级数据库，再保存模型分配；本次未执行升级。', { recoverable: true })
       return this.formal.saveBookModelAssignment(source, JSON.stringify(settings), guard)

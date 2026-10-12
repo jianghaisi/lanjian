@@ -1,0 +1,30 @@
+{
+  "name": "@lanjian/hosted-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "build": "tsc --noEmit && node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "test:recovery": "tsx --test tests/recovery.test.ts tests/writing-storage.test.ts tests/tenant-files.test.ts",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@lanjian/hosted-contracts": "file:../../packages/hosted-contracts",
+    "better-auth": "1.7.7",
+    "fastify": "5.12.5",
+    "jszip": "3.10.1",
+    "mammoth": "1.12.2"
+  },
+  "devDependencies": {
+    "@types/node": "26.3.0",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.12",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,4 +1,5 @@
 import { type LocalModelView, isLocalConnection } from '../../../../contracts/models/local-model-contracts'
+import { catalogTextSupport, type ModelCatalogEntry } from '../../../../contracts/models/model-catalog-metadata'
 export type ModelFamilyId = 'gpt' | 'gemini' | 'doubao' | 'deepseek' | 'claude' | 'qwen' | 'kimi' | 'glm' | 'other'
 
 export type ModelFamily = {
@@ -69,7 +70,8 @@ export function buildModelCatalog(
   connections: ModelConnectionSummary[],
   discoveredModels: Record<string, string[]>,
   assignedProfiles: RoutedModelProfile[] = [],
-  localModels: LocalModelView[] = []
+  localModels: LocalModelView[] = [],
+  metadataByConnection: Record<string, ModelCatalogEntry[]> = {}
 ): ModelCatalogChoice[] {
   const rows: Array<Omit<ModelCatalogChoice, 'duplicateModel'>> = []
   const exactModels = new Map<string, number>()
@@ -80,6 +82,7 @@ export function buildModelCatalog(
       .map((profile) => profile.model.trim())
       .filter(Boolean)
     const models = [...new Set([...discovered, ...assigned])]
+    const metadata = new Map((metadataByConnection[connection.id] ?? []).map(entry => [entry.id, entry]))
     for (const model of models) {
       const family = classifyModelFamily(model)
       const connectionName = connection.name.trim() || '未命名接口'
@@ -96,7 +99,8 @@ export function buildModelCatalog(
         family,
         discovered: discovered.has(model),
         ...(connection.disabledReason || connection.enabled === false ? { disabledReason: connection.disabledReason || '接口已停用' } : {}),
-        ...(isLocalConnection(connection.id) ? { disabledReason: localModels.find(m => m.id === model)?.state === 'ready' ? undefined : '请先到本地模型商店检测', recommendedOutputTokens: localModels.find(m => m.id === model)?.recommendedOutputTokens ?? 2048 } : {})
+        ...(isLocalConnection(connection.id) ? { disabledReason: localModels.find(m => m.id === model)?.state === 'ready' ? undefined : '请先到模型超市检测', recommendedOutputTokens: localModels.find(m => m.id === model)?.recommendedOutputTokens ?? 2048 } : {}),
+        ...(catalogTextSupport(metadata.get(model)) === 'unsupported' ? { disabledReason: '此型号不支持文本生成，请选择写作模型' } : {})
       })
     }
   }
@@ -105,6 +109,14 @@ export function buildModelCatalog(
     .sort((left, right) => left.family.order - right.family.order
       || left.model.localeCompare(right.model, 'en-US')
       || left.connectionName.localeCompare(right.connectionName, 'zh-CN'))
+}
+
+/** Manual IDs use the same source/model restrictions as discovered and retained choices. */
+export function manualModelDisabledReason(connections: ModelConnectionSummary[], choices: ModelCatalogChoice[], connectionId: string, model: string): string | undefined {
+  const connection = connections.find(c => c.id === connectionId)
+  if (!connection || isLocalConnection(connection.id)) return '请选择可用的在线接口'
+  if (connection.disabledReason || connection.enabled === false) return connection.disabledReason || '接口已停用'
+  return choices.find(c => c.connectionId === connectionId && c.model === model.trim())?.disabledReason
 }
 
 function safeConnectionHost(value = ''): string {

@@ -1,10 +1,14 @@
 <script setup>
+import ArchivePageHeader from '../../../ui/ArchivePageHeader.vue'
 import { genreCatalog } from '../../../../contracts/worldbuilding/genre-catalog'
 import BookDefinitionForm from './BookDefinitionForm.vue'
 import StudioIcon from '../../../ui/StudioIcon.vue'
+import FormalSkeletonAdoption from '../../planning/components/FormalSkeletonAdoption.vue'
+import ChapterEventPreview from '../../planning/components/ChapterEventPreview.vue'
 import { toRefs } from 'vue'
 
 const props = defineProps({ scope: { type: Object, required: true } })
+const emit = defineEmits(['import-project'])
 const {
   active,
   adoptedPlanningVolumeCount,
@@ -81,6 +85,7 @@ const {
   planningDetailStatuses,
   planningDraft,
   planningDraftSaveState,
+  refreshJointChapterAdoption,
   planningFoundationAdoptedCount,
   planningFoundationReady,
   planningJob,
@@ -106,14 +111,24 @@ const {
 } = toRefs(props.scope)
 </script>
 
+<style scoped>
+.profile-editor .planning-chapter-skeleton { color: var(--color-ink); background: var(--color-surface); }
+.profile-editor .planning-chapter-skeleton > header,
+.profile-editor .skeleton-volume > summary { color: var(--color-ink); background: var(--color-paper); border-color: var(--color-line); }
+.profile-editor .skeleton-volume > summary:hover { background: var(--color-surface); }
+.profile-editor .skeleton-volume > ol > li { background: var(--color-surface); }
+.profile-editor .planning-chapter-skeleton > header em { color: var(--color-jade); background: var(--color-surface); border-color: var(--color-line); }
+.profile-editor .planning-chapter-details,
+.profile-editor .detail-chapters,
+.profile-editor .detail-chapter > div { color: var(--color-ink); background: var(--color-surface); border-color: var(--color-line); }
+.profile-editor .planning-chapter-details > header,
+.profile-editor .detail-volume > summary,
+.profile-editor .detail-chapter > summary { color: var(--color-ink); background: var(--color-paper); border-color: var(--color-line); }
+</style>
+
 <template>
-  <div class="profile-editor" :class="{ 'preparation-editor': active === 'preparation' }">
-    <header v-if="active === 'profile'">
-      <div>
-        <p class="eyebrow">第 1 步 · 作品定义</p>
-        <h2>先定下这是一部什么小说</h2>
-        <p>这里保存本书独立的题材、篇幅和默认写作约束；人物、世界观与大纲仍在各自区域维护。</p>
-      </div>
+  <div class="profile-editor archive-page" :class="{ 'preparation-editor': active === 'preparation' }">
+    <ArchivePageHeader v-if="active === 'profile'" eyebrow="01 / BOOK DEFINITION · 作品档案" title="作品定义" description="设定题材、篇幅与全书约束。">
       <button
         v-if="!newProjectGuide"
         class="control-button primary save-action"
@@ -123,7 +138,11 @@ const {
       >
         <StudioIcon name="save" :size="16" />保存作品定义
       </button>
-    </header>
+    </ArchivePageHeader>
+    <nav v-if="active === 'preparation' && preparationMode !== 'skeleton'" aria-label="筹备方式">
+      <button class="text-action" type="button" :disabled="busy" :aria-pressed="preparationMode === 'automatic'" data-testid="preparation-automatic" @click="preparationMode = 'automatic'">自动筹备</button>
+      <button class="text-action" type="button" :disabled="busy" :aria-pressed="preparationMode === 'continuation'" data-testid="preparation-continuation" @click="preparationMode = 'continuation'">旧稿接续</button>
+    </nav>
     <section
       v-if="active === 'profile' && newProjectGuide"
       class="new-project-guide"
@@ -147,32 +166,21 @@ const {
         <StudioIcon name="save" :size="16" /><span>{{ busy ? '正在保存…' : '保存并继续到素材' }}</span>
       </button>
     </section>
-    <header v-if="active === 'preparation'">
-      <div>
-        <p class="eyebrow">{{ preparationMode === 'skeleton' ? '谋篇 · 章节安排' : '谋篇 · 创作筹备' }}</p>
-        <h2>
-          {{
-            preparationMode === 'automatic'
-              ? '把素材整理成可修改的创作候选'
-              : preparationMode === 'skeleton'
-                ? '按卷安排全书章节与核心事件停点'
-                : '从旧稿中核清事实与缺口'
-          }}
-        </h2>
-        <p>
-          {{
-            preparationMode === 'automatic'
-              ? '模型结果只放在候选工作区。人物、世界观和大纲采用后，仍要回到各自模块复核。'
-              : preparationMode === 'skeleton'
-                ? '每章先用几句话写核心事件、人物、地点和章末结果，再扩写详细章纲。这里保存的是候选；采用和正式确认会另行提示。'
-                : '逐项核对原文证据；没有经过你采用的内容不会进入正式设定、大纲或正文。'
-          }}
-        </p>
-      </div>
-      <span class="candidate-safety-mark">候选不等于正式</span>
-    </header>
+    <ArchivePageHeader v-if="active === 'preparation'" eyebrow="05 / STORY PLANNING · 创作工作稿"
+      :title="preparationMode === 'skeleton' ? '章节安排' : preparationMode === 'automatic' ? '创作筹备' : '旧稿接续'"
+      :description="preparationMode === 'skeleton' ? '按卷安排每章的核心事件、人物、地点与章末结果，再扩写详细章纲。' : preparationMode === 'automatic' ? '从素材整理可修改的候选。采用后，再到人物、世界观和大纲中复核。' : '逐项核对原文证据，决定哪些事实与设定可以接续。'">
+      <span class="candidate-safety-mark">候选工作区 · 采用后进入正式内容</span>
+    </ArchivePageHeader>
     <section
-      v-if="active === 'preparation' && preparationMode === 'continuation' && continuationBlockedReason"
+      v-if="active === 'preparation' && preparationMode === 'continuation' && !continuationBlockedReason && !continuationAnalysis"
+      class="continuation-analysis"
+      data-testid="continuation-empty"
+    >
+      <h3>尚未导入旧稿</h3><p>导入已有作品后，可逐项核对接续资料。</p>
+      <button class="control-button primary" type="button" :disabled="busy" @click="emit('import-project')">导入已有作品</button>
+    </section>
+    <section
+      v-else-if="active === 'preparation' && preparationMode === 'continuation' && continuationBlockedReason"
       class="continuation-analysis blocked"
       data-testid="continuation-analysis-blocked"
     >
@@ -543,8 +551,8 @@ const {
     />
     <section v-if="active === 'profile' && !newProjectGuide" class="profile-next-step" data-testid="profile-next-step">
       <div>
-        <span>下一步 · 素材 → 灵感便签</span><b>定义保存后，整理你已有的资料或发起联网采风</b
-        ><small>有资料和采风可以一起使用；没有素材也可以先写几条自己的想法。前往素材不会自动生成或确认正式内容。</small>
+        <span>下一步 · 素材 → 灵感便签</span><b>整理已有资料，或去采风。</b
+        ><details><summary>还没有素材？</summary><p>可以先记灵感，再补充资料。</p></details>
       </div>
       <button class="control-button primary" type="button" @click="selectWorkspaceLeaf('ideas')">
         <span>前往素材</span><StudioIcon name="arrow" :size="15" />
@@ -601,7 +609,7 @@ const {
         </div>
         <progress :value="planningJob.progress.completed" :max="planningJob.progress.total"></progress>
         <small>{{ planningJob.progress.message }}</small>
-        <p v-if="planningJob.error">{{ planningJob.error.message }}</p>
+        <p v-if="planningJob.error">{{ planningJob.error.message }}</p><details v-if="planningJob.rawResult"><summary>查看未通过的候选与复核</summary><pre>{{ planningJob.rawResult }}</pre></details>
       </div>
     </section>
     <article
@@ -860,6 +868,11 @@ const {
                   >已写入正式章纲 · 待复核</em
                 >
               </summary>
+              <ChapterEventPreview :proposal-id="planningDraft.id" :work-item-id="planningDraft.workItemId"
+                :chapter-id="chapter.chapter" :candidate="planningDraft" :saved="planningDraftSaveState === 'saved'"
+                :disabled="planningDetailRunning || planningAdoptionBusy" @adopted="refreshJointChapterAdoption" />
+              <label v-if="chapter.storyContent !== undefined">故事章纲<textarea v-assist-field="{ id: 'AppShell.chapter.storyContent', read: () => chapter.storyContent, write: value => { chapter.storyContent = String(value); markPlanningChapterDetailEdited(chapter.chapter) }, identity: () => chapter }" v-model="chapter.storyContent" :disabled="planningDetailRunning" @input="markPlanningChapterDetailEdited(chapter.chapter)" /></label>
+              <details :open="chapter.storyContent === undefined"><summary>写作约束（单独核对）</summary>
               <div>
                 <label
                   >进入状态<textarea
@@ -933,6 +946,7 @@ const {
                   ></textarea>
                 </label>
               </div>
+              </details>
             </details>
           </div>
         </details>
@@ -1017,17 +1031,17 @@ const {
               v-model="volume.goal"
               @input="markPlanningVolumeOutlineEdited(volume.order)" /></label
           ><label
-            >事件链<textarea
+            >本卷故事<textarea
               v-assist-field="{
                 id: 'AppShell.volume.summary',
-                read: () => volume.summary,
+                read: () => volume.storyContent ?? volume.summary,
                 write: (value) => {
-                  volume.summary = String(value)
+                  volume[volume.storyContent === undefined ? 'summary' : 'storyContent'] = String(value)
                   markPlanningVolumeOutlineEdited(volume.order)
                 },
                 identity: () => volume
               }"
-              v-model="volume.summary"
+              v-model="volume[volume.storyContent === undefined ? 'summary' : 'storyContent']"
               @input="markPlanningVolumeOutlineEdited(volume.order)"
             ></textarea></label
           ><label
@@ -1079,6 +1093,11 @@ const {
               ><small>{{ volume.chapters.length }} 章 · {{ volume.goal }}</small></span
             >
           </summary>
+          <FormalSkeletonAdoption
+            :proposal-id="planningDraft.id" :work-item-id="planningDraft.workItemId" :volume="volume.order"
+            :candidate="volume.chapters" :saved="planningDraftSaveState === 'saved'"
+            :disabled="planningSkeletonRunning || planningAdoptionBusy"
+          />
           <ol>
             <li v-for="chapter in volume.chapters" :key="chapter.chapter">
               <span class="skeleton-number">{{ String(chapter.chapter).padStart(3, '0') }}</span>

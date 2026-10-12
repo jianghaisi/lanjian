@@ -1,8 +1,9 @@
 <script setup>
 import ModelCreationDefaults from '../../models/components/ModelCreationDefaults.vue'
+import { hostedModelMode } from '../../models/services/hosted-model-mode'
 import { genreCatalog } from '../../../../contracts/worldbuilding/genre-catalog'
 import StudioIcon from '../../../ui/StudioIcon.vue'
-import { toRefs } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, toRefs } from 'vue'
 
 const props = defineProps({ scope: { type: Object, required: true } })
 const {
@@ -25,11 +26,36 @@ const {
   txtImportEntry,
   txtPreview
 } = toRefs(props.scope)
+const step = ref(0)
+const steps = ['文件用途', '章节核对', '作品配置', '确认导入']
+const scrollArea = ref(null)
+const stepHeading = ref(null)
+const scrollPositions = [0, 0, 0, 0]
+let navigation = 0
+const filesReady = computed(() => txtImportEntry.value === 'create-from-files'
+  ? Boolean(importManifest.value?.files.length) && importManifest.value.files.every(file => Boolean(manifestRoles.value[file.token]))
+  : Boolean(txtPreview.value))
+const manuscriptFiles = computed(() => (importManifest.value?.files || []).filter(file => manifestRoles.value[file.token] === 'manuscript'))
+const selectedChapters = computed(() => txtImportEntry.value === 'create-from-files'
+  ? manuscriptFiles.value.reduce((count, file) => count + (manifestChapterSelections.value[file.token] || []).length, 0)
+  : txtImport.value.selectedChapterIndexes.length)
+async function goToStep(index) {
+  if (busy.value || index < 0 || index >= steps.length || (index > 0 && !filesReady.value)) return
+  scrollPositions[step.value] = scrollArea.value?.scrollTop || 0
+  const ticket = ++navigation
+  if (index === 1 && manuscriptFiles.value.length && !manuscriptFiles.value.some(file => file.token === txtPreview.value?.token)) txtPreview.value = manuscriptFiles.value[0]
+  step.value = index
+  await nextTick()
+  if (ticket !== navigation || !scrollArea.value?.isConnected || scrollArea.value.closest('[inert]')) return
+  scrollArea.value.scrollTop = scrollPositions[index]
+  stepHeading.value?.focus({ preventScroll: true })
+}
+onBeforeUnmount(() => { navigation++ })
 </script>
 
 <template>
-  <div class="modal-backdrop txt-import-backdrop" @click.self="showTxtImport = false">
-    <section class="modal txt-import-modal" role="dialog" aria-modal="true" aria-labelledby="txt-import-title">
+  <div class="modal-backdrop txt-import-backdrop" @click.self="!busy && (showTxtImport = false)">
+    <section class="modal txt-import-modal import-workpage" role="dialog" aria-modal="true" aria-labelledby="txt-import-title">
       <header class="import-heading">
         <div>
           <p class="eyebrow">
@@ -39,13 +65,17 @@ const {
             {{ txtImportEntry === 'create-from-files' ? '从文稿创建作品' : '导入文稿或资料' }}
           </h2>
         </div>
-        <button type="button" aria-label="关闭" @click="showTxtImport = false">
+        <button type="button" aria-label="关闭" :disabled="busy" @click="showTxtImport = false">
           <StudioIcon name="close" :size="18" />
         </button>
       </header>
 
-      <div class="import-scroll">
-        <section v-if="txtPreview" class="file-rubbing">
+      <nav class="import-steps" aria-label="导入步骤">
+        <button v-for="(label, index) in steps" :key="label" type="button" :data-testid="`import-step-${index}`" :aria-current="step === index ? 'step' : undefined" :disabled="busy || (index > 0 && !filesReady)" @click="goToStep(index)"><i>{{ String(index + 1).padStart(2, '0') }}</i><span>{{ label }}</span></button>
+      </nav>
+      <div ref="scrollArea" class="import-scroll">
+        <h3 ref="stepHeading" tabindex="-1" class="import-step-heading">{{ steps[step] }}<small>{{ step + 1 }} / 04</small></h3>
+        <section v-if="txtPreview" v-show="step === 0" class="file-rubbing">
           <span class="file-seal">文</span>
           <div>
             <b>{{ txtPreview.fileName }}</b
@@ -59,10 +89,11 @@ const {
 
         <section
           v-if="txtImportEntry === 'create-from-files'"
+          v-show="step === 0"
           class="import-purpose-note"
           data-testid="txt-create-explanation"
         >
-          <b>这不是“打开项目”</b>
+          <b>从已有文稿开始，建立新的作品档案</b>
           <p>
             “打开岚笺作品”只识别已经由岚笺管理的工作项；这里会根据 TXT、Markdown 或 Word
             文稿新建一张书案。正文进入章节，作品相关文件进入素材库，模型只生成可审阅候选，不会直接改写正文或把推断当成正式事实。
@@ -71,6 +102,7 @@ const {
 
         <section
           v-if="txtImportEntry === 'create-from-files' && !importManifest"
+          v-show="step === 0"
           class="continuation-file-queue-empty"
           data-testid="continuation-file-queue-empty"
         >
@@ -92,6 +124,7 @@ const {
 
         <section
           v-if="txtImportEntry === 'create-from-files' && importManifest"
+          v-show="step === 0"
           class="import-section manifest-review"
           data-testid="import-manifest"
         >
@@ -183,7 +216,7 @@ const {
           >
         </section>
 
-        <section v-if="txtImportEntry !== 'create-from-files'" class="import-section">
+        <section v-if="txtImportEntry !== 'create-from-files'" v-show="step === 0" class="import-section">
           <div class="section-kicker">
             <b>一、这份 TXT 是什么？</b><span>先分清正文、自己的创作资料和外部参考，避免互相污染。</span>
           </div>
@@ -216,7 +249,7 @@ txtImport.externalConfirmed = false;"
           </div>
         </section>
 
-        <section v-if="txtImport.ownership === 'owned'" class="import-section compact-section">
+        <section v-if="txtImport.ownership === 'owned'" v-show="step === 2" class="import-section compact-section">
           <div class="section-kicker"><b>二、创作方式</b><span>只记录来源，不影响你继续编辑。</span></div>
           <div class="origin-pills">
             <button
@@ -235,7 +268,7 @@ txtImport.externalConfirmed = false;"
           </div>
         </section>
 
-        <section class="import-section compact-section">
+        <section v-show="step === 2" class="import-section compact-section">
           <div class="section-kicker">
             <b>{{ txtImport.ownership === 'owned' ? '三、落入哪一张书案？' : '二、归入哪部作品？' }}</b
             ><span>{{
@@ -245,7 +278,7 @@ txtImport.externalConfirmed = false;"
             }}</span>
           </div>
           <template v-if="txtImport.ownership === 'owned'">
-            <div v-if="txtImportEntry !== 'create-from-files'" class="origin-pills destination-pills">
+            <div v-if="txtImportEntry !== 'create-from-files' && !hostedModelMode()" class="origin-pills destination-pills">
               <button
                 type="button"
                 :class="{ selected: txtImport.destination === 'new' }"
@@ -353,7 +386,12 @@ txtImport.externalConfirmed = false;"
           </template>
         </section>
 
+        <nav v-if="manuscriptFiles.length > 1" v-show="step === 1" class="import-file-tabs" aria-label="待核对正文文件">
+          <button v-for="file in manuscriptFiles" :key="file.token" type="button" :aria-pressed="txtPreview?.token === file.token" @click="txtPreview = file">{{ file.fileName }}<small>{{ (manifestChapterSelections[file.token] || []).length }} / {{ file.chapterCount }} 章</small></button>
+        </nav>
+        <p v-if="step === 1 && (txtImport.ownership !== 'owned' || (txtImportEntry === 'create-from-files' && !manuscriptFiles.length))" class="import-purpose-note">资料与外部参考不作为正文章节导入。若要从文稿建立作品，请返回第一步将至少一份文件标为正文。</p>
         <details
+          v-show="step === 1"
           v-if="
             txtPreview &&
             txtImport.ownership === 'owned' &&
@@ -404,13 +442,12 @@ txtImport.externalConfirmed = false;"
             </li>
           </ol>
         </details>
-        <div v-if="txtPreview" class="import-warnings">
+        <div v-if="txtPreview" v-show="step < 2" class="import-warnings">
           <span v-for="warning in txtPreview.warnings" :key="warning">{{ warning }}</span>
         </div>
-      </div>
-
       <ModelCreationDefaults
         v-if="txtImport.ownership === 'owned' && txtImport.destination === 'new' && !importCreatedProject"
+        v-show="step === 2"
         :api="desktop.modelConnections"
         :disabled="busy"
         @ready="importModelsPreview = $event"
@@ -418,6 +455,17 @@ txtImport.externalConfirmed = false;"
       <p v-if="partialImportCreation" role="alert">
         {{ partialImportCreation.message }}再次确认只会重试本次未完成创建，不会覆盖其他目录。
       </p>
+      <section v-show="step === 3" class="import-review" aria-label="导入确认摘要">
+        <p class="eyebrow">READY TO ARCHIVE / 核对后入档</p>
+        <h3>{{ txtImport.title || '尚未填写名称' }}</h3>
+        <dl><dt>导入内容</dt><dd>{{ txtImportEntry === 'create-from-files' ? `${importManifest?.files.length || 0} 份文件 · ${selectedChapters} 章正文` : txtImport.ownership === 'owned' ? `${selectedChapters} 章正文` : txtImport.ownership === 'material' ? '作品资料' : '外部参考' }}</dd>
+          <dt>保存位置</dt><dd>{{ txtImport.ownership === 'owned' && txtImport.destination === 'new' ? txtImport.parentPath || '尚未选择文件夹' : current?.title || '尚未打开作品' }}</dd>
+          <template v-if="txtImport.ownership === 'owned' && txtImport.destination === 'new'"><dt>模型分配</dt><dd>{{ !importModelsPreview ? '正在读取或尚未就绪，请返回作品配置查看' : importModelsPreview.withoutDefaults ? '这本书暂不使用 AI' : importModelsPreview.defaults.template ? '使用已配置的新书默认模型' : '尚无默认模型，可正常手写' }}</dd></template>
+        </dl>
+        <p>原始文件完整留档。只有你确认的章节会进入正文，资料与外部参考分别保存。</p>
+        <p v-if="!txtCanImport" role="status" class="import-blocked">还有内容需要核对：请检查文件用途、正文章节选择、名称、保存位置及外部参考确认。</p>
+      </section>
+      </div>
       <footer class="import-footer">
         <span>{{
           importCreatedProject
@@ -427,8 +475,10 @@ txtImport.externalConfirmed = false;"
               : '原始文件会完整留档；没有勾选的内容不会丢失。'
         }}</span>
         <div>
-          <button type="button" class="text-action" @click="showTxtImport = false">取消</button
-          ><button type="button" class="seal-action small" :disabled="busy || !txtCanImport" @click="commitTxtImport">
+          <button v-if="step > 0" type="button" class="text-action" :disabled="busy" @click="goToStep(step - 1)">上一步</button>
+          <button v-else type="button" class="text-action" :disabled="busy" @click="showTxtImport = false">取消</button>
+          <button v-if="step < 3" type="button" class="seal-action small" data-testid="import-next-step" :disabled="busy || !filesReady" @click="goToStep(step + 1)"><span>下一步</span><i>→</i></button>
+          <button v-else type="button" class="seal-action small" :disabled="busy || !txtCanImport" @click="commitTxtImport">
             <span>{{
               importCreatedProject
                 ? '继续未完成导入'
@@ -447,3 +497,33 @@ txtImport.externalConfirmed = false;"
     </section>
   </div>
 </template>
+
+<style scoped>
+.txt-import-backdrop { padding:16px; }
+.txt-import-modal.import-workpage { width:min(1280px,calc(100vw - 32px)); height:calc(100dvh - 32px); max-height:none; grid-template-rows:auto auto minmax(0,1fr) auto; background:var(--surface); border-color:var(--line); outline:none; box-shadow:0 24px 80px #0004; }
+.import-workpage::before,.import-workpage::after { display:none; }
+.import-workpage > .import-heading { padding:20px 32px 16px; }
+.import-workpage .import-scroll { padding:24px 32px; scroll-behavior:auto; overscroll-behavior:contain; }
+.import-step-heading { margin:0 0 24px; display:flex; justify-content:space-between; align-items:center; font:600 24px/1.4 var(--serif); outline:none; }
+.import-step-heading small { font:11px var(--sans); color:var(--muted); letter-spacing:.18em; }
+.import-steps { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); padding:0 32px; border-bottom:1px solid var(--line); }
+.import-steps button { display:flex; gap:12px; align-items:center; padding:14px 8px; border:0; border-bottom:2px solid transparent; background:transparent; color:var(--muted); font:13px var(--sans); transition:color 160ms,border-color 160ms; }
+.import-steps button[aria-current] { color:var(--jade); border-bottom-color:var(--jade); }
+.import-steps i { font:11px var(--sans); opacity:.7; }
+.import-steps button:disabled { opacity:.5; }
+.import-file-tabs { display:flex; flex-wrap:wrap; gap:8px; margin:20px 0; }
+.import-file-tabs button { padding:10px 14px; border:1px solid var(--line); background:var(--surface); color:var(--ink); text-align:left; }
+.import-file-tabs button[aria-pressed=true] { border-color:var(--jade); }
+.import-file-tabs small { display:block; margin-top:4px; color:var(--muted); }
+.import-workpage > .import-footer { padding:16px 32px; display:flex; gap:16px; }
+.import-footer > span { font-size:12px; line-height:1.6; max-width:60%; }
+.import-footer > div { flex-shrink:0; }
+.import-review { max-width:850px; margin:24px auto; padding:28px; border:1px solid var(--line); border-top:3px solid var(--jade); }
+.import-review h3 { font:600 30px/1.5 var(--serif); margin:12px 0 28px; }
+.import-review dl { display:grid; grid-template-columns:100px minmax(0,1fr); gap:20px; font:14px/1.7 var(--sans); }
+.import-review dt { color:var(--muted); }.import-review dd { margin:0; overflow-wrap:anywhere; }
+.import-review > p { line-height:1.8; color:var(--muted); }
+.import-workpage :is(button,input,select):focus-visible { outline:2px solid var(--jade); outline-offset:3px; }
+@media(max-width:760px) { .txt-import-backdrop { padding:8px; }.txt-import-modal.import-workpage { width:calc(100vw - 16px); height:calc(100dvh - 16px); }.import-workpage > .import-heading,.import-workpage .import-scroll,.import-workpage > .import-footer { padding:14px 18px; }.import-steps { padding:0 12px; }.import-steps button { gap:5px; font-size:12px; }.import-footer > span { display:none; }.import-workpage > .import-footer { justify-content:flex-end; }.import-review { padding:18px; }.import-review dl { grid-template-columns:70px minmax(0,1fr); } }
+@media(prefers-reduced-motion:reduce) { .import-steps button { transition:none; } }
+</style>

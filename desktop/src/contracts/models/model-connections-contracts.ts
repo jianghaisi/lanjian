@@ -1,11 +1,15 @@
+import { decodeGenerationDiagnostics, type GenerationDiagnostics } from './generation-diagnostics'
 import { AppError, type AppErrorCode } from '../core/app-error'
 import { connectionRecord as record, connectionRevision as revision, globalConnectionId as id, modelConnectionEndpoint as endpoint,
-  modelConnectionName as name, connectionReuseOperationId as reuseToken, decodeConnectionCreate, decodeConnectionUpdate,
-  modelConnectionKey, remoteModelProtocol, type ConnectionCreate, type ConnectionUpdate, type GlobalConnectionsView } from './model-connections'
+  modelConnectionName as name, connectionReuseOperationId as reuseToken, decodeConnectionCreate, decodeConnectionUpdate, decodeConnectionRemove,
+  modelConnectionKey, remoteModelProtocol, type ConnectionCreate, type ConnectionUpdate, type ConnectionRemove, type GlobalConnectionsView } from './model-connections'
 import { decodeBookModelSettings, type BookModelSettings } from './book-model-settings'
 import { decodeModelDefaultTemplate, decodeModelDefaultsSave, type ModelDefaultsSave, type ModelDefaultTemplate } from './new-book-model-defaults'
 import { decodeLegacyReusePreview, legacyConnectionId, type LegacyReusePreview, type LegacyReuseResult } from './legacy-connection-reuse'
 import type { ProjectCreateInput, ProjectSummary } from '../index'
+import { decodeThinkingLevel, type ThinkingLevel } from './thinking-level'
+import { decodeParameterPolicy, type ParameterPolicy } from './parameter-policy'
+import { decodeCatalogSnapshot, type ModelCatalogSnapshot } from './model-catalog-metadata'
 
 export type ModelDefaultsView = { revision: number; catalogRevision: number; template: ModelDefaultTemplate | null;
   references: Array<{ id: string; state: 'missing' | 'enabled' | 'disabled'; name?: string; baseUrl?: string; revision?: number }> }
@@ -13,8 +17,9 @@ export type BookModelsView = { token: string; revision: string; bookIdentity: st
 export type BookModelsSaved = { settings: BookModelSettings; authority: 'files' | 'sqlite'; mirrorStatus: 'not-applicable' | 'pending' | 'synced' | 'conflict' | 'failed' }
 export type DefaultApplicationPreview = { token: string; expiresAt: number; bookRevision: string; defaultRevision: number;
   before: BookModelSettings; after: BookModelSettings; changes: Array<{ field: string; before: string; after: string }> }
-export type ModelProbe = { id: string; revision: number; model: string }
-export type ModelProbeResult = { id: string; revision: number; model: string; testedAt: string; success: boolean; message: string; models: string[] }
+export type ModelProbe = { id: string; revision: number; model: string; thinkingLevel?: ThinkingLevel; parameterPolicy?: ParameterPolicy }
+export type ModelCatalogQuery = { id: string; revision: number; model?: string }
+export type ModelProbeResult = { id: string; revision: number; model: string; thinkingLevel?: ThinkingLevel; parameterPolicy?: ParameterPolicy; parameterFingerprint?: string; diagnostics?: GenerationDiagnostics; catalog?: ModelCatalogSnapshot; testedAt: string; success: boolean; message: string; models: string[] }
 export type ModelCreationPreview = { token: string; defaults: ModelDefaultsView; withoutDefaults: boolean }
 export type PartialProjectCreation = { status: 'partial'; operationId: string; title: string; code: AppErrorCode; message: string; modelsWritten: boolean }
 export type ModelCreationResult = { status: 'created'; project: ProjectSummary } | PartialProjectCreation
@@ -22,6 +27,7 @@ export type ModelConnectionsApi = {
   list(): Promise<GlobalConnectionsView>
   create(input: ConnectionCreate): Promise<GlobalConnectionsView>
   update(input: ConnectionUpdate): Promise<GlobalConnectionsView>
+  remove(input: ConnectionRemove): Promise<GlobalConnectionsView>
   defaults(): Promise<ModelDefaultsView>
   saveDefaults(input: ModelDefaultsSave): Promise<ModelDefaultsView>
   book(): Promise<BookModelsView>
@@ -36,7 +42,7 @@ export type ModelConnectionsApi = {
   cancelPreviews(): Promise<boolean>
   leaveBook(): Promise<boolean>
   test(input: ModelProbe): Promise<ModelProbeResult>
-  catalog(input: ModelProbe): Promise<ModelProbeResult>
+  catalog(input: ModelCatalogQuery): Promise<ModelProbeResult>
   cancelTest(): Promise<boolean>
   previewCreation(withoutDefaults: boolean): Promise<ModelCreationPreview>
   createProject(input: { token: string; project: ProjectCreateInput }): Promise<ModelCreationResult>
@@ -49,12 +55,12 @@ function text(v: unknown, max = 500): string { if (typeof v !== 'string' || v.le
 function bool(v: unknown): boolean { if (typeof v !== 'boolean') invalid(); return v }
 function hash(v: unknown): string { const s = text(v, 128); if (!/^[a-f0-9]{64}$/.test(s)) invalid(); return s }
 function array<T>(v: unknown, decode: (v: unknown) => T, max = 100): T[] { if (!Array.isArray(v) || v.length > max) invalid(); return Array.from(v, decode) }
-function probe(v: unknown): ModelProbe { const r = record(v, ['id', 'revision', 'model']); const model = text(r.model); if (!model.trim()) invalid(); return { id: id(r.id), revision: revision(r.revision, 1), model } }
+function probe(v: unknown): ModelProbe { const r = record(v, ['id', 'revision', 'model', 'thinkingLevel', 'parameterPolicy']); const model = text(r.model); if (!model.trim() || (Object.hasOwn(r, 'thinkingLevel') && Object.hasOwn(r, 'parameterPolicy'))) invalid(); return { id: id(r.id), revision: revision(r.revision, 1), model, ...(Object.hasOwn(r, 'thinkingLevel') ? { thinkingLevel: decodeThinkingLevel(r.thinkingLevel) } : {}), ...(Object.hasOwn(r, 'parameterPolicy') ? { parameterPolicy: decodeParameterPolicy(r.parameterPolicy) } : {}) } }
 function noArgs(args: unknown[]): [] { if (args.length) invalid(); return [] }
 const one = <T>(decode: (v: unknown) => T) => (args: unknown[]): [T] => { if (args.length !== 1) invalid(); return [decode(args[0])] }
 
 export const modelConnectionArgs = {
-  list: noArgs, create: one(decodeConnectionCreate), update: one(decodeConnectionUpdate), defaults: noArgs, saveDefaults: one(decodeModelDefaultsSave),
+  list: noArgs, create: one(decodeConnectionCreate), update: one(decodeConnectionUpdate), remove: one(decodeConnectionRemove), defaults: noArgs, saveDefaults: one(decodeModelDefaultsSave),
   book: noArgs,
   saveBook: one(v => { const r = record(v, ['token', 'patch']); const patch = record(r.patch, ['routingMode', 'shared', 'tasks', 'globalReferences', 'globalRevisions']); return { token: token(r.token), patch: structuredClone(patch) } }),
   renamePrivate: one(v => { const r = record(v, ['token', 'id', 'name']); return { token: token(r.token), id: legacyConnectionId(r.id), name: name(r.name) } }),
@@ -64,7 +70,7 @@ export const modelConnectionArgs = {
   }),
   previewApply: one(v => { const r = record(v, ['bookRevision', 'defaultRevision']); return { bookRevision: hash(r.bookRevision), defaultRevision: revision(r.defaultRevision) } }),
   confirmApply: one(token), previewReuse: one(decodeLegacyReusePreview), confirmReuse: one(reuseToken), reuseReceipt: one(reuseToken), cancelPreviews: noArgs, leaveBook: noArgs,
-  test: one(probe), catalog: one(probe), cancelTest: noArgs, previewCreation: one(bool),
+  test: one(probe), catalog: one(v => { const r = record(v, ['id', 'revision', 'model']); return { id: id(r.id), revision: revision(r.revision, 1), ...(Object.hasOwn(r, 'model') ? { model: text(r.model) } : {}) } }), cancelTest: noArgs, previewCreation: one(bool),
   // project fields are decoded with the existing ProjectCreate owner in main.
   createProject: one(v => { const r = record(v, ['token', 'project']); return { token: token(r.token), project: r.project } }),
   retryCreation: one(v => { const r = record(v, ['token', 'operationId']); return { token: token(r.token), operationId: token(r.operationId) } })
@@ -102,12 +108,18 @@ function reusePreview(v: unknown): LegacyReusePreview { const r = record(v, ['to
 function applyPreview(v: unknown): DefaultApplicationPreview {
   const r = record(v, ['token', 'expiresAt', 'bookRevision', 'defaultRevision', 'before', 'after', 'changes'])
   return { token: token(r.token), expiresAt: revision(r.expiresAt, 1), bookRevision: hash(r.bookRevision), defaultRevision: revision(r.defaultRevision, 1),
-    before: decodeBookModelSettings(r.before), after: decodeBookModelSettings(r.after), changes: array(r.changes, v => { const c = record(v, ['field', 'before', 'after']); return { field: text(c.field, 80), before: text(c.before), after: text(c.after) } }, 30) }
+    before: decodeBookModelSettings(r.before), after: decodeBookModelSettings(r.after), changes: array(r.changes, v => { const c = record(v, ['field', 'before', 'after']); return { field: text(c.field, 80), before: text(c.before), after: text(c.after) } }, 40) }
 }
 function probeResult(v: unknown): ModelProbeResult {
-  const r = record(v, ['id', 'revision', 'model', 'testedAt', 'success', 'message', 'models'])
+  const r = record(v, ['id', 'revision', 'model', 'thinkingLevel', 'parameterPolicy', 'parameterFingerprint', 'diagnostics', 'catalog', 'testedAt', 'success', 'message', 'models'])
   const testedAt = text(r.testedAt, 30); if (!Number.isFinite(Date.parse(testedAt))) invalid()
-  return { id: id(r.id), revision: revision(r.revision, 1), model: text(r.model), testedAt, success: bool(r.success), message: text(r.message), models: array(r.models, v => text(v), 2000) }
+  const catalog = Object.hasOwn(r, 'catalog') ? decodeCatalogSnapshot(r.catalog) : undefined
+  const models = array(r.models, v => text(v), 2000)
+  if (catalog && (catalog.connectionId !== r.id || catalog.revision !== r.revision || JSON.stringify(catalog.entries.map(e => e.id)) !== JSON.stringify(models))) invalid()
+  return { id: id(r.id), revision: revision(r.revision, 1), model: text(r.model), ...(Object.hasOwn(r, 'thinkingLevel') ? { thinkingLevel: decodeThinkingLevel(r.thinkingLevel) } : {}),
+    ...(Object.hasOwn(r, 'parameterPolicy') ? { parameterPolicy: decodeParameterPolicy(r.parameterPolicy) } : {}), ...(Object.hasOwn(r, 'parameterFingerprint') ? { parameterFingerprint: hash(r.parameterFingerprint) } : {}),
+    ...(Object.hasOwn(r, 'diagnostics') ? { diagnostics: decodeGenerationDiagnostics(r.diagnostics) } : {}),
+    ...(catalog ? { catalog } : {}), testedAt, success: bool(r.success), message: text(r.message), models }
 }
 export function decodeModelCreationResult(v: unknown, projectDecoder: (v: unknown) => ProjectSummary): ModelCreationResult {
   const r = record(v, ['status', 'project', 'operationId', 'title', 'code', 'message', 'modelsWritten'])
@@ -117,7 +129,7 @@ export function decodeModelCreationResult(v: unknown, projectDecoder: (v: unknow
   return { status: 'partial', operationId: token(r.operationId), title: text(r.title, 500), code: r.code as PartialProjectCreation['code'], message: text(r.message), modelsWritten: bool(r.modelsWritten) }
 }
 export const modelConnectionResults = {
-  list: decodeGlobalConnectionsView, create: decodeGlobalConnectionsView, update: decodeGlobalConnectionsView,
+  list: decodeGlobalConnectionsView, create: decodeGlobalConnectionsView, update: decodeGlobalConnectionsView, remove: decodeGlobalConnectionsView,
   defaults: decodeModelDefaultsView, saveDefaults: decodeModelDefaultsView, book, saveBook: saved, previewApply: applyPreview, confirmApply: saved,
   renamePrivate: saved, savePrivateKey: bool,
   previewReuse: reusePreview, confirmReuse: reuse, reuseReceipt: (v: unknown) => v === null ? null : reuse(v), cancelPreviews: bool, leaveBook: bool,

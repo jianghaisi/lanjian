@@ -1,4 +1,6 @@
+import { compileGeneration } from '../../../../contracts/models/generation-parameters'
 import { localModelCatalog } from '../../models/adapters/local-models/catalog'
+import type { ChapterEventAdoption, ChapterEventOutput, ChapterEventStorageSnapshot } from '../../planning/domain/chapter-event-adoption'
 import { isLocalConnection } from '../../../../contracts/models/local-model-contracts'
 import { parseBookModelSettings } from '../../models/domain/book-model-settings'
 import { bookModelConfigInputs } from '../../models/adapters/book-model-configs'
@@ -176,7 +178,7 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
     return this.withFormalMutation(workItemId, async (database) => {
       await this.syncPending(workItemId, database, { sourceTypes: ['chapter_markdown', 'chapter_order_json'] })
       await this.detectSyncedChapterMirrorDrift(workItemId, database)
-      return database.formalChapters().map(toChapter)
+      return (await (database.formalChaptersAsync?.() ?? database.formalChapters())).map(toChapter)
     })
   }
 
@@ -213,6 +215,10 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
       await this.ensurePromptProfileReady(workItemId, database, defaultProfileWorkItemId)
       return database.promptProfile()
     })
+  }
+
+  async readPromptProfileForGuard(workItemId: string): Promise<WorkspacePromptProfileRecord | null> {
+    return this.withFormalDatabase(workItemId, database => database.formalPromptReady() ? database.promptProfile() : null)
   }
 
   async writePromptProfile(workItemId: string, input: Omit<WorkspacePromptProfileRecord, 'mirrorStatus'>): Promise<WorkspacePromptProfileRecord> {
@@ -321,7 +327,45 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
     return this.withFormalDatabase(workItemId, (database) => database.formalWorkspaceConfigReady(kind))
   }
 
+  async chapter(workItemId: string, id: number): Promise<Chapter> {
+    return this.withFormalMutation(workItemId, async (database) => {
+      await this.syncPending(workItemId, database, { sourceTypes: ['chapter_markdown', 'chapter_order_json'] })
+      await this.detectSyncedChapterMirrorDrift(workItemId, database)
+      const chapter = database.textAuthority() === 'files-v1'
+        ? Number.isSafeInteger(id) && id > 0 ? database.formalChapter(id) : undefined
+        : database.formalChapters().find(item => item.legacyChapterId === id)
+      if (!chapter) throw new AppError('NOT_FOUND', `第 ${id} 章不存在`, { recoverable: true, details: { chapterId: id } })
+      return toChapter(chapter)
+    })
+  }
+
+  /** One fresh acquisition for mode, readiness and the managed document. */
+  async readWorkspaceConfig(workItemId: string, kind: WorkspaceConfigDocumentKind): Promise<{ formal: boolean; document: { content: string; contentHash: string } | null }> {
+    return this.writes.run(workItemId, async () => {
+      const database = await this.databases.openExisting(workItemId)
+      if (!database) return { formal: false, document: null }
+      try {
+        if (database.storageMode() !== 'sqlite') return { formal: false, document: null }
+        if (!database.formalWorkspaceConfigReady(kind)) return { formal: true, document: null }
+        database.recoverManuscriptCommits()
+        return { formal: true, document: await this.readManagedWorkspaceConfig(workItemId, database, kind) }
+      } finally { database.close() }
+    })
+  }
+
+  async readWorkspaceConfigForGuard(workItemId: string, kind: WorkspaceConfigDocumentKind): Promise<{ formal: boolean; document: { content: string; contentHash: string } | null }> {
+    return this.withEventReadOnly(workItemId, database => {
+      if (!database || database.storageMode() !== 'sqlite') return { formal: false, document: null }
+      return { formal: true, document: database.formalWorkspaceConfigReady(kind) ? database.workspaceConfig(kind) : null }
+    })
+  }
+
   /** No mirror synchronization or read-create; suitable for read-only map views. */
+  async worldMapChaptersForGuard(root: string): Promise<Array<{ id: number; position: number; title: string }>> {
+    return this.writes.read(root, () => this.withRecoveryReadOnly(root, database => database.formalChapters()
+      .map(chapter => ({ id: chapter.legacyChapterId, position: chapter.position, title: chapter.title }))))
+  }
+
   async readWorldMapConfig(root: string): Promise<{ content: string; contentHash: string; revision: number; mirrorStatus: WorkspaceMirrorStatus | null } | null> {
     return this.withFormalDatabase(root, database => {
       if (!database.formalWorkspaceConfigReady('world_map')) return null
@@ -343,12 +387,14 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
   }
 
   async workspaceConfig(workItemId: string, kind: WorkspaceConfigDocumentKind): Promise<{ content: string; contentHash: string }> {
-    return this.withFormalMutation(workItemId, async (database) => {
-      await this.syncPending(workItemId, database, { sourceTypes: ['workspace_config_json'], sourceId: kind })
-      await this.detectWorkspaceConfigMirrorDrift(workItemId, database, kind)
-      const document = database.workspaceConfig(kind)
-      return { content: document.content, contentHash: document.contentHash }
-    })
+    return this.withFormalMutation(workItemId, database => this.readManagedWorkspaceConfig(workItemId, database, kind))
+  }
+
+  private async readManagedWorkspaceConfig(workItemId: string, database: WorkspaceDatabasePort, kind: WorkspaceConfigDocumentKind): Promise<{ content: string; contentHash: string }> {
+    await this.syncPending(workItemId, database, { sourceTypes: ['workspace_config_json'], sourceId: kind })
+    await this.detectWorkspaceConfigMirrorDrift(workItemId, database, kind)
+    const document = database.workspaceConfig(kind)
+    return { content: document.content, contentHash: document.contentHash }
   }
 
   async importWorkspaceConfig(workItemId: string, kind: WorkspaceConfigDocumentKind, content: string, observedMirrorHash?: string): Promise<{ content: string; contentHash: string }> {
@@ -381,6 +427,10 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
       await this.syncPlan(workItemId, database, result.mirror)
       return result.aliases.map((item) => ({ characterId: item.characterId, canonicalName: item.canonicalName, alias: item.alias }))
     })
+  }
+
+  async worldbookChapterOrder(workItemId: string): Promise<Array<{ id: number; position: number }>> {
+    return this.withFormalDatabase(workItemId, database => database.worldbookChapterOrder())
   }
 
   async storyEntities(workItemId: string): Promise<WorkspaceEntityRecord[]> {
@@ -536,6 +586,49 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
       await this.detectOutlinePlanningStateMirrorDrift(workItemId, database)
       const document = database.outlinePlanningState()
       return { content: document.content, contentHash: document.contentHash }
+    })
+  }
+
+  async chapterEventSnapshot(workItemId: string, chapterId: number, volume: number): Promise<ChapterEventStorageSnapshot> {
+    return this.withEventReadOnly(workItemId, database => {
+      if (!database) throw new AppError('FEATURE_UNAVAILABLE', '正式作品尚未准备完成。', { recoverable: true })
+      return database.chapterEventSnapshot(chapterId, volume)
+    })
+  }
+
+  async recoverChapterEvent(workItemId: string, operationId: string, guard?: () => Promise<void>): Promise<{ output: ChapterEventOutput; mirrorsPending: boolean; planningMirrorsPending: boolean }> {
+    return this.writes.run(workItemId, () => this.withFormalOutlineDatabase(workItemId, async database => {
+      await guard?.()
+      const output = database.recoverChapterEvent(operationId)
+      try { await this.syncPending(workItemId, database, { sourceTypes: ['outline_planning_state_json', 'outline_markdown'] }) } catch { /* Report pending separately. */ }
+      const planningMirrorsPending = database.outlinePlanningStateMirror()?.status !== 'synced'
+      return { output, mirrorsPending: planningMirrorsPending || database.canonicalEventsMirror()?.status !== 'synced', planningMirrorsPending }
+    }))
+  }
+
+  async adoptChapterEvent(workItemId: string, input: ChapterEventAdoption, guard?: () => Promise<void>): Promise<{ output: ChapterEventOutput; mirrorsPending: boolean; planningMirrorsPending: boolean }> {
+    return this.withFormalOutlineMutation(workItemId, async database => {
+      const prior = JSON.parse(database.outlinePlanningState().content).chapterEventOutputs as ChapterEventOutput[] | undefined
+      if (!prior?.some(r => r.operationId === input.operationId)) {
+        await this.detectOutlinePlanningStateMirrorDrift(workItemId, database)
+        if (!this.databases.openEventMirrorWrite) throw new AppError('FEATURE_UNAVAILABLE', '正式事件副本核对暂不可用。', { recoverable: true })
+        const mirror = await this.databases.openEventMirrorWrite(workItemId)
+        try {
+          const plan = mirror.read()
+          const observed = await this.readManagedHash(workItemId, '.webnovel/research/events.json')
+          if (observed !== plan.expectedFileHash && observed !== plan.contentHash) throw new AppError('CONFLICT', '事件 JSON 被外部修改，请先核对；原文件已保留。', { recoverable: true })
+        } finally { mirror.close() }
+      }
+      await guard?.()
+      const output = database.adoptChapterEvent(input)
+      let mirrorsPending = false
+      try {
+        await this.syncPending(workItemId, database, { sourceTypes: ['outline_planning_state_json', 'outline_markdown'] })
+        // Unified events use their own publisher; the legacy mirror lane excludes them.
+        mirrorsPending = database.canonicalEventsMirror()?.status !== 'synced'
+          || database.pendingMirrorPlans({ sourceTypes: ['outline_planning_state_json'], statuses: ['pending', 'conflict', 'failed'] }).length > 0
+      } catch { mirrorsPending = true }
+      return { output, mirrorsPending, planningMirrorsPending: database.outlinePlanningStateMirror()?.status !== 'synced' }
     })
   }
 
@@ -774,8 +867,8 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
     await this.withFormalMutation(workItemId, (database) => { database.decideFinding(input) })
   }
 
-  async recordCharacterFactCandidates(workItemId: string, chapter: Chapter, changes: CharacterDynamicChange[], idempotencyKey: string, extractorTaskRunId?: string): Promise<FactBatchView | null> {
-    if (!changes.length) return null
+  async recordCharacterFactCandidates(workItemId: string, chapter: Chapter, changes: CharacterDynamicChange[], idempotencyKey: string, extractorTaskRunId?: string, beforeWrite?: () => Promise<void>): Promise<FactBatchView | null> {
+    if (!changes.length) { await beforeWrite?.(); return null }
     if (!chapter.bodyVersionId || !chapter.revision) throw new AppError('CONFLICT', '正文正式版本尚未就绪，不能建立事实候选。', { recoverable: true })
     return this.withFormalMutation(workItemId, (database) => {
       const mergedChanges = mergeCharacterFactChanges(changes)
@@ -826,7 +919,29 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
         changes: candidates
       })
       return toFactBatch(workItemId, batch)
-    })
+    }, beforeWrite)
+  }
+
+  /** Main-only guard read; never opens the mutation/recovery entry point. */
+  async readProjectWritingConfigForGuard(workItemId: string): Promise<WorkspaceProjectWritingConfig> {
+    const database = await this.databases.openRecoveryReadOnly?.(workItemId)
+    if (!database) throw new AppError('FEATURE_UNAVAILABLE', '创作预算的只读依据暂不可用。', { recoverable: true })
+    try {
+      if (database.storageMode() !== 'sqlite') throw new AppError('CONFLICT', '原 SQLite 创作依据已经变化。', { recoverable: true })
+      return database.projectWritingConfig()
+    } finally { database.close() }
+  }
+
+  /** Pure, verified source snapshot: no recovery, upgrades or mirror preparation. */
+  async factExtractionSource(workItemId: string, chapterId: number, bodyVersionId?: string): Promise<Chapter> {
+    const database = await this.databases.openRecoveryReadOnly?.(workItemId)
+    if (!database) throw new AppError('FEATURE_UNAVAILABLE', '确认正文的只读来源暂不可用。', { recoverable: true })
+    try {
+      if (database.storageMode() !== 'sqlite') throw new AppError('CONFLICT', '请先切换为 SQLite 正式数据后再提炼事实。', { recoverable: true })
+      const confirmed = database.chapterPlanning(chapterId).confirmedBodyVersionId
+      if (!confirmed || bodyVersionId && confirmed !== bodyVersionId) throw new AppError('CONFLICT', '原确认正文版本已经变化，请从当前章节重新发起。', { recoverable: true })
+      return toChapter(database.formalBodyVersion(chapterId, confirmed))
+    } finally { database.close() }
   }
 
   async chapterPlanning(workItemId: string, legacyChapterId: number): Promise<WorkspaceChapterPlanningRecord> {
@@ -937,6 +1052,7 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
       reason: revision.reason,
       label: revision.label,
       isCurrent: revision.isCurrent,
+      ...(revision.reviewedSource ? { reviewedSource: revision.reviewedSource } : {}),
       sourceTaskRunId: revision.sourceTaskRunId,
       generationArtifactId: revision.generationArtifactId
     })))
@@ -955,7 +1071,8 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
         reason: revision.reason,
         label: revision.label,
         isCurrent: revision.isCurrent,
-        sourceTaskRunId: revision.sourceTaskRunId,
+        ...(revision.reviewedSource ? { reviewedSource: revision.reviewedSource } : {}),
+      sourceTaskRunId: revision.sourceTaskRunId,
         generationArtifactId: revision.generationArtifactId
       }
     })
@@ -1058,6 +1175,11 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
     })
     this.mirrorRecoveryTokens.delete(token)
     return result
+  }
+
+  async readOutlinePlanningState(workItemId: string): Promise<{ content: string; contentHash: string } | null> {
+    return this.withEventReadOnly(workItemId, database => database?.storageMode() === 'sqlite' && database.formalOutlinePlanningStateReady()
+      ? database.outlinePlanningState() : null)
   }
 
   async adoptReviewedExternalRevision(workItemId: string, value: ReviewedExternalRevision, beforeCommit: () => Promise<void>) {
@@ -1185,8 +1307,8 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
   }
 
   async outlines(workItemId: string): Promise<OutlineList> {
-    return this.withFormalOutlineDatabase(workItemId, (database) => {
-      const outlines = database.formalOutlines()
+    return this.withFormalOutlineDatabase(workItemId, async (database) => {
+      const outlines = await (database.formalOutlinesAsync?.() ?? database.formalOutlines())
       const total = outlines.find((outline) => outline.nodeType === 'summary')
       return {
         total: total ? { content: total.content } : null,
@@ -1198,6 +1320,21 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
         stages: outlines.filter((outline) => outline.nodeType === 'stage').map((outline) => stageOutlineView(outline, outlines)),
         chapterOutlines: plannedChapterEntries(outlines, new Set(database.formalChapterIds()))
       }
+    })
+  }
+
+  async outline(workItemId: string, volume: OutlineVolume): Promise<import('../../../../contracts/index').OutlineDocument> {
+    return this.withFormalOutlineDatabase(workItemId, database => {
+      const [node] = database.formalOutlines(volume === 'total' ? { nodeType: 'summary' } : { nodeType: 'volume', seq: volume })
+      if (volume === 'total') return { content: node?.content ?? '' }
+      return node ? { volume: node.seq, title: node.title, content: node.content } : { volume, content: '' }
+    })
+  }
+
+  async chapterOutline(workItemId: string, chapterId: number): Promise<ChapterOutlineDocument> {
+    return this.withFormalOutlineDatabase(workItemId, database => {
+      const [node] = database.formalOutlines({ nodeType: 'chapter', seq: chapterId })
+      return { chapterId, content: node?.content ?? '' }
     })
   }
 
@@ -1606,7 +1743,7 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
     }
     // Byte-copy acquisition must not race our own imports/checkpoints. This lane
     // grants no write capability: only the read facade reaches the callback.
-    return this.writes.run(workItemId, async () => {
+    return this.writes.read(workItemId, async () => {
       const database = await this.databases.openEventReadOnly!(workItemId)
       try { return operation(database) } finally { database?.close() }
     })
@@ -1621,11 +1758,15 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
     try { return await operation(database) } finally { database.close() }
   }
 
-  private async withFormalMutation<T>(workItemId: string, operation: (database: WorkspaceDatabasePort) => T | Promise<T>): Promise<T> {
-    return this.writes.run(workItemId, () => this.withFormalDatabase(workItemId, database => {
-      database.recoverManuscriptCommits()
-      return operation(database)
-    }))
+  private async withFormalMutation<T>(workItemId: string, operation: (database: WorkspaceDatabasePort) => T | Promise<T>, beforeWrite?: () => Promise<void>): Promise<T> {
+    return this.writes.run(workItemId, async () => {
+      await beforeWrite?.()
+      return this.withFormalDatabase(workItemId, async database => {
+        await beforeWrite?.()
+        database.recoverManuscriptCommits()
+        return operation(database)
+      })
+    })
   }
 
   private async withFormalOutlineDatabase<T>(workItemId: string, operation: (database: WorkspaceDatabasePort) => T | Promise<T>): Promise<T> {
@@ -1766,6 +1907,10 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
       }
       return 'synced'
     }
+    const eventPlan = plan.sourceType === 'canonical_events_json' || (plan.sourceType === 'workspace_config_json' && plan.sourceId === 'timeline')
+    const checkEventPlan = () => { if (eventPlan) database.assertMirrorPlanCurrent(plan) }
+    // Also rejects an already-loaded plan after the module transition.
+    checkEventPlan()
     let conflictingObservedHash: string | undefined
     let guardFailed = false
     const checkGuard = async () => {
@@ -1773,7 +1918,7 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
       catch (error) { guardFailed = true; throw error }
     }
     const assertActive = () => {
-      try { guard?.assertActive() }
+      try { guard?.assertActive(); checkEventPlan() }
       catch (error) { guardFailed = true; throw error }
     }
     try {
@@ -1789,7 +1934,9 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
           conflictingObservedHash = existingHash
           throw mirrorConflict()
         }
-        await this.trash.trashItem(await this.existingManagedPath(workItemId, relativePath))
+        const trashPath = await this.existingManagedPath(workItemId, relativePath)
+        checkEventPlan()
+        await this.trash.trashItem(trashPath)
         database.acknowledgeMirror(plan, 'synced')
         return 'synced'
       }
@@ -1818,16 +1965,17 @@ export class SqliteManuscriptService implements ManuscriptAuthority {
         throw mirrorConflict()
       }
       await mkdir(dirname(target), { recursive: true })
-      if (targetHash !== plan.contentHash) await atomicWriteText(target, plan.content, guard ? async () => {
+      if (targetHash !== plan.contentHash) await atomicWriteText(target, plan.content, (guard || eventPlan) ? async () => {
         await checkGuard()
         const latestHash = await this.readManagedHash(workItemId, plan.relativePath)
         if (latestHash !== targetHash) {
           conflictingObservedHash = latestHash ?? undefined
           throw mirrorConflict()
         }
-      } : undefined, guard ? assertActive : undefined)
+      } : undefined, (guard || eventPlan) ? assertActive : undefined)
       if (previousRelativePath && previousRelativePath !== plan.relativePath) {
         const previous = await this.targetManagedPath(workItemId, previousRelativePath)
+        checkEventPlan()
         await unlink(previous).catch((error) => {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
         })
@@ -2180,12 +2328,13 @@ function modelConfigInputs(settings: AiSettings) {
     const connection = settings.connections.find((item) => item.id === profile.connectionId)
     if (!connection) throw new Error(`模型“${profile.model}”绑定的接口已经不存在`)
     const localModel = isLocalConnection(profile.connectionId) ? localModelCatalog.find(m => m.id === profile.model) : undefined
+    const effective = compileGeneration(profile, scope === 'shared' ? 'prose' : scope as 'outline' | 'chapterOutline' | 'prose' | 'review', { protocol: connection.kind ?? 'openai-compatible', baseUrl: connection.baseUrl, model: profile.model, localLimits: localModel })
     return {
       provider: connection.kind === 'local' ? `${connection.id}#${scope}` : `${connection.id}:${connection.baseUrl}#${scope}`,
       modelName: profile.model,
       displayName: scope === 'shared' ? profile.model : `${profile.model} · ${scope}`,
-      settingsJson: JSON.stringify({ routingMode: settings.routingMode, scope, connectionId: connection.id, connectionName: connection.name, temperature: profile.temperature, topP: profile.topP, maxTokens: profile.maxTokens }),
-      inputTokenBudget: localModel ? Math.max(0, localModel.contextTokens - profile.maxTokens - localModel.systemReserveTokens) : profile.maxTokens,
+      settingsJson: JSON.stringify({ routingMode: settings.routingMode, scope, connectionId: connection.id, connectionName: connection.name, parameterPolicy: profile.parameterPolicy, effective }),
+      inputTokenBudget: localModel ? Math.max(0, localModel.contextTokens - effective.outputTokens - localModel.systemReserveTokens) : effective.outputTokens,
       enabled: true,
       isDefault
     }

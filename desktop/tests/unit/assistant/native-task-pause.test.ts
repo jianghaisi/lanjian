@@ -183,7 +183,11 @@ test('v35 rebuild preserves all incoming foreign keys, task/contracts/artifacts 
   const raw = new DatabaseSync(file)
   try {
     assert.equal(raw.prepare('PRAGMA user_version').get()?.user_version, WORKSPACE_DATABASE_SCHEMA_VERSION)
-    for (const table of tables.filter(name => name !== 'schema_migrations')) assert.deepEqual(raw.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(), rows[table])
+    for (const table of tables.filter(name => name !== 'schema_migrations')) {
+      const actual = raw.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()
+      if (table === 'body_versions') for (const row of actual) { assert.equal(row.review_application_id, null); delete row.review_application_id }
+      assert.deepEqual(actual, rows[table])
+    }
     assert.deepEqual(raw.prepare('SELECT * FROM schema_migrations WHERE version<=35 ORDER BY version').all(), rows.schema_migrations)
     for (const entry of schema.filter(row => String(row.name).startsWith('custom_'))) assert.deepEqual(raw.prepare('SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name=?').get(entry.name), entry)
     for (const entry of schema.filter(row => row.type === 'table' && row.name !== 'task_runs')) {
@@ -196,7 +200,9 @@ test('v35 rebuild preserves all incoming foreign keys, task/contracts/artifacts 
           ? { ...entry, sql: String(entry.sql).replace('CREATE TABLE canonical_events', 'CREATE TABLE "canonical_events"').replace(',\n  UNIQUE(project_id, event_signature)', '') }
           : entry.name === 'projects'
             ? { ...entry, sql: String(entry.sql).replace(/\)$/, ", text_authority TEXT NOT NULL DEFAULT 'legacy-sqlite'\n  CHECK(text_authority IN ('legacy-sqlite', 'files-v1')))") }
-            : entry
+            : ['body_versions', 'outline_versions'].includes(String(entry.name))
+              ? { ...entry, sql: String(entry.sql).replace(',\n  UNIQUE', ', review_application_id TEXT REFERENCES document_review_applications(id),\n  UNIQUE') }
+              : entry
       assert.deepEqual({ ...raw.prepare('SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name=?').get(entry.name) }, { ...expected }, 'incoming foreign-key definitions must remain verbatim')
     }
     assert.deepEqual(raw.prepare('PRAGMA foreign_key_check').all(), []); assert.equal(raw.prepare('PRAGMA quick_check').get()?.quick_check, 'ok')

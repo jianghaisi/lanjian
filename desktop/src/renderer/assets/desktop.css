@@ -249,7 +249,7 @@ select:focus-visible {
   width: 100%;
   height: 100%;
   grid-template-columns: 52px 252px minmax(0, 1fr);
-  grid-template-rows: 42px minmax(0, 1fr) 24px;
+  grid-template-rows: 42px minmax(0, 1fr);
   background: var(--canvas);
 }
 .studio.assistant-collapsed {
@@ -265,8 +265,7 @@ select:focus-visible {
 }
 .studio.writing-focus > .titlebar,
 .studio.writing-focus > .activitybar,
-.studio.writing-focus > .explorer,
-.studio.writing-focus > .statusbar {
+.studio.writing-focus > .explorer {
   display: none;
 }
 .studio.writing-focus > .workbench {
@@ -5911,31 +5910,6 @@ button.tree-item.selected::before { color: var(--jade-deep); }
   color: var(--muted);
   font: 400 11px/1.7 var(--serif);
 }
-.statusbar {
-  grid-column: 1/-1;
-  grid-row: 3;
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  height: 24px;
-  padding: 0 10px;
-  background: var(--jade-deep);
-  color: #dce5df;
-  font-size: 9px;
-  letter-spacing: 0.035em;
-}
-.statusbar span {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.statusbar i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #9db9a9;
-  box-shadow: 0 0 0 2px rgba(157, 185, 169, 0.18);
-}
 .save-state.dirty i {
   background: var(--archive-gold, #9a7440);
   box-shadow: 0 0 0 2px rgba(154, 116, 64, 0.18);
@@ -5954,9 +5928,6 @@ button.tree-item.selected::before { color: var(--jade-deep); }
 }
 @keyframes save-breath {
   to { opacity: 0.42; transform: scale(0.75); }
-}
-.status-spacer {
-  flex: 1;
 }
 .modal-backdrop {
   position: fixed;
@@ -7966,16 +7937,6 @@ button.tree-item.selected::before { color: var(--jade-deep); }
 /* 2026 interface coherence pass
    A readable editorial desktop: one type scale, one spacing rhythm, fewer labels. */
 :root {
-  --type-caption: 11px;
-  --type-meta: 12px;
-  --type-control: 13px;
-  --type-body: 14px;
-  --type-reading: 18px;
-  --type-section-title: 24px;
-  --type-page-title: 28px;
-  --control-height: 40px;
-  --panel-gutter: 16px;
-  --focus-ring: #2f6f64;
   --surface-muted: #eee9de;
 }
 
@@ -7989,9 +7950,9 @@ h4 {
   text-wrap: balance;
 }
 small {
-  font-size: var(--type-meta) !important;
-  line-height: 1.45 !important;
-  letter-spacing: 0 !important;
+  font-size: var(--type-meta);
+  line-height: 1.5;
+  letter-spacing: 0;
 }
 button,
 input,
@@ -8010,7 +7971,7 @@ select:focus-visible {
 
 .studio {
   grid-template-columns: 60px 280px minmax(500px, 1fr);
-  grid-template-rows: 48px minmax(0, 1fr) 28px;
+  grid-template-rows: 48px minmax(0, 1fr);
 }
 .studio.assistant-collapsed { grid-template-columns: 60px 280px minmax(500px, 1fr); }
 .titlebar {
@@ -8365,8 +8326,6 @@ button.tree-item { padding-right: 30px; }
 .adherence-preview { margin: 14px 12px; padding: 12px 0; }
 .adherence-preview small { font-size: 12px !important; }
 
-.statusbar { min-height: 28px; padding-inline: 10px; }
-.statusbar span { font-size: 11px; }
 .toast { top: 8px; min-height: 40px; display: flex; align-items: center; font-size: 13px; }
 
 .modal-backdrop { background: rgba(24, 29, 26, .56); }

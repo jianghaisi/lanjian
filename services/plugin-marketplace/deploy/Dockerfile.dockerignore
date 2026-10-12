@@ -1,0 +1,13 @@
+**
+!packages/
+!packages/writing-plugin-contracts/
+!packages/writing-plugin-contracts/**
+!packages/writing-plugin-package/
+!packages/writing-plugin-package/**
+!services/
+!services/plugin-marketplace/
+!services/plugin-marketplace/**
+**/node_modules
+**/dist
+**/data
+**/.env

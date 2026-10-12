@@ -186,7 +186,7 @@ const invalidTemplates: Array<[string, (v: ReturnType<typeof template>) => unkno
   ['catalog dump', v => ({ ...v, references: [...v.references, { kind: 'global', id: 'unused', globalConnectionId: 'global-unused' }] })],
   ['duplicate alias', v => ({ ...v, references: [...v.references, v.references[0]] })],
   ['sparse alias', v => ({ ...v, references: new Array(1) })], ['oversized aliases', v => ({ ...v, references: new Array(101) })],
-  ['null', () => null], ['future', v => ({ ...v, version: 5 })],
+  ['null', () => null], ['future', v => ({ ...v, version: 6 })],
   ['unknown task', v => ({ ...v, tasks: { ...v.tasks, image: p() } })],
   ['nonfinite', v => ({ ...v, shared: { ...v.shared, temperature: NaN } })],
   ['missing inactive', v => ({ ...v, tasks: { prose: v.tasks.prose } })],

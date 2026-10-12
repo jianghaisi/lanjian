@@ -1,3 +1,4 @@
+import { isReferencedBookSettings } from '../../../../contracts/models/book-model-settings'
 import { AppError } from '../../../core/errors/app-error'
 import { decodeBookModelSettings, referenceBookModelSettings } from '../domain/book-model-settings'
 import { modelConnectionName } from '../domain/model-connections'
@@ -36,7 +37,7 @@ export class BookPrivateModelConnections {
     return { revision: source.documentFingerprint,
       rename: (id: string, value: string) => perform(id, async () => {
         const name = modelConnectionName(value), settings = decodeBookModelSettings(source.settings)
-        if (settings.version === 4) settings.references = settings.references.map(r => r.id === id && r.kind === 'legacy-private' ? { ...r, name } : r)
+        if (isReferencedBookSettings(settings)) settings.references = settings.references.map(r => r.id === id && r.kind === 'legacy-private' ? { ...r, name } : r)
         else settings.connections = settings.connections.map(c => c.id === id ? { ...c, name } : c)
         const saved = await this.writer.save(source, settings, guard)
         return { settings: decodeBookModelSettings(JSON.parse(saved.content)), authority: saved.authority, mirrorStatus: saved.mirrorStatus }

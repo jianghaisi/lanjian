@@ -1,10 +1,11 @@
-import { lstat, mkdir, readFile } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, readFile, readdir } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { isAbsolute, join } from 'node:path'
 import { AppError } from '../../../core/errors/app-error'
 import { atomicWriteText } from '../../../platform/storage/atomic-file'
 import type { DesktopPetCommand, DesktopPetContext, DesktopPetPreferences } from '../../../../contracts/companion/desktop-pet'
 
-export const defaultDesktopPetPreferences: Readonly<DesktopPetPreferences> = Object.freeze({ scale: 1, alwaysOnTop: true, clickThrough: false, reminderMinutes: 0 })
+export const defaultDesktopPetPreferences: Readonly<DesktopPetPreferences> = Object.freeze({ scale: 1, alwaysOnTop: true, clickThrough: false, positionLocked: false, reminderMinutes: 0 })
 export type DesktopPetPosition = { x: number; y: number }
 export type StoredDesktopPetPreferences = { enabled: boolean; preferences: DesktopPetPreferences; position: DesktopPetPosition | null }
 type WorkArea = DesktopPetPosition & { width: number; height: number }
@@ -25,9 +26,10 @@ function identifier(value: unknown): string {
   if (typeof value !== 'string' || value.length > 200 || /[\u0000-\u001f\u007f]/u.test(value)) throw invalid()
   return value
 }
-function preferences(value: unknown): DesktopPetPreferences {
-  const input = record(value, ['scale', 'alwaysOnTop', 'clickThrough', 'reminderMinutes'])
-  return { scale: number(input.scale, .6, 1.8), alwaysOnTop: boolean(input.alwaysOnTop), clickThrough: boolean(input.clickThrough), reminderMinutes: number(input.reminderMinutes, 0, 240, true) }
+function preferences(value: unknown, allowLegacy = false): DesktopPetPreferences {
+  const legacy = allowLegacy && value !== null && typeof value === 'object' && !Object.hasOwn(value, 'positionLocked')
+  const input = record(value, ['scale', 'alwaysOnTop', 'clickThrough', 'reminderMinutes', ...(legacy ? [] : ['positionLocked'])])
+  return { scale: number(input.scale, .6, 1.8), alwaysOnTop: boolean(input.alwaysOnTop), clickThrough: boolean(input.clickThrough), positionLocked: legacy ? false : boolean(input.positionLocked), reminderMinutes: number(input.reminderMinutes, 0, 240, true) }
 }
 function position(value: unknown): DesktopPetPosition {
   const input = record(value, ['x', 'y'])
@@ -36,7 +38,7 @@ function position(value: unknown): DesktopPetPosition {
 function stored(value: unknown, allowLegacy = false): StoredDesktopPetPreferences {
   const legacy = allowLegacy && value !== null && typeof value === 'object' && !Object.hasOwn(value, 'enabled')
   const input = record(value, legacy ? ['preferences', 'position'] : ['enabled', 'preferences', 'position'])
-  return { enabled: legacy ? false : boolean(input.enabled), preferences: preferences(input.preferences), position: input.position === null ? null : position(input.position) }
+  return { enabled: legacy ? false : boolean(input.enabled), preferences: preferences(input.preferences, allowLegacy), position: input.position === null ? null : position(input.position) }
 }
 
 export function decodeDesktopPetContext(value: unknown): DesktopPetContext {
@@ -51,7 +53,15 @@ export function decodeDesktopPetCommand(value: unknown): DesktopPetCommand {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid()
   const type = (value as Record<string, unknown>).type
   switch (type) {
-    case 'toggle': case 'hide': case 'locate': case 'return-to-writing': case 'settings': case 'drag-start': case 'drag-end':
+    case 'panel': {
+      const input = record(value, ['type', 'panel'])
+      if (input.panel !== null && input.panel !== 'menu' && input.panel !== 'chat' && input.panel !== 'care' && input.panel !== 'settings') throw invalid()
+      return { type, panel: input.panel }
+    }
+    case 'enable': { const input = record(value, ['type', 'enabled']); return { type, enabled: boolean(input.enabled) } }
+    case 'interaction': { const input = record(value, ['type', 'busy']); return { type, busy: boolean(input.busy) } }
+    case 'pointer-press': { const input = record(value, ['type', 'pressed']); return { type, pressed: boolean(input.pressed) } }
+    case 'toggle': case 'hide': case 'locate': case 'recover-settings': case 'return-to-writing': case 'settings': case 'drag-start': case 'drag-end':
       record(value, ['type']); return { type }
     case 'hover': {
       const input = record(value, ['type', 'interactive']); return { type, interactive: boolean(input.interactive) }
@@ -108,6 +118,14 @@ export class DesktopPetPreferencesStore {
     this.file = join(directory, 'desktop-pet.json')
   }
   read(): Promise<StoredDesktopPetPreferences> { return this.exclusive(() => this.readNow()) }
+  recover(): Promise<StoredDesktopPetPreferences> { return this.exclusive(async () => {
+    try { const info = await lstat(this.file); if (!info.isFile() || info.isSymbolicLink()) throw invalid(); await copyFile(this.file, `${this.file}.${randomUUID()}.bak`) }
+    catch (cause) { if (!(cause && typeof cause === 'object' && 'code' in cause && cause.code === 'ENOENT')) throw new AppError('STORAGE_ERROR', '桌宠设置未能备份，恢复已取消。', { recoverable: true, cause }) }
+    const next = { enabled: false, preferences: { ...defaultDesktopPetPreferences }, position: null }
+    try { await mkdir(this.directory, { recursive: true }); await this.writer(this.file, `${JSON.stringify(next, null, 2)}\n`) }
+    catch (cause) { throw new AppError('STORAGE_ERROR', '新设置未能保存，原记录备份已保留。', { recoverable: true, cause }) }
+    return next
+  }) }
   async save(value: StoredDesktopPetPreferences): Promise<void> {
     const snapshot = stored(value)
     return this.exclusive(async () => {
@@ -126,7 +144,10 @@ export class DesktopPetPreferencesStore {
       if (!info.isFile() || info.isSymbolicLink() || info.size > 16_384) throw invalid()
       return stored(JSON.parse(await readFile(this.file, 'utf8')), true)
     } catch (cause) {
-      if (cause && typeof cause === 'object' && 'code' in cause && cause.code === 'ENOENT') return { enabled: false, preferences: { ...defaultDesktopPetPreferences }, position: null }
+      if (cause && typeof cause === 'object' && 'code' in cause && cause.code === 'ENOENT') {
+        const names = await readdir(this.directory).catch(reason => { if (reason?.code === 'ENOENT') return []; throw invalid() })
+        if (!names.some(name => name.startsWith('desktop-pet.json.') && name.endsWith('.efs-backup'))) return { enabled: false, preferences: { ...defaultDesktopPetPreferences }, position: null }
+      }
       throw new AppError('STORAGE_ERROR', '桌面伙伴设置无法读取，原文件已保留，请检查设置文件后重试。', { recoverable: true, cause })
     }
   }

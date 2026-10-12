@@ -18,6 +18,18 @@ export function createAssistantNavigationActions(ports) {
   }
 
   async function sendAssistantProse(input) {
+    if (input.taskId) {
+      const book = ports.current.value?.id
+      const task = await ports.desktop.ai.writingAgentTask(input.taskId)
+      if (!book || task.workItemId !== book || ports.current.value?.id !== book) throw new Error('候选不属于当前作品。')
+      await ports.selectWorkspaceLeaf('chapters')
+      if (ports.current.value?.id !== book || ports.activeWorkspaceLeaf.value?.id !== 'chapters') throw new Error('原章节未能打开，当前草稿已保留。')
+      if (ports.selectedId.value !== task.chapterId) await ports.selectChapter(await ports.desktop.chapters.get(task.chapterId))
+      if (ports.current.value?.id !== book || ports.selectedId.value !== task.chapterId) throw new Error('原章节未能打开，当前草稿已保留。')
+      ports.syncWritingAgentTask(task)
+      if (['queued', 'resuming', 'preparing', 'running', 'streaming'].includes(task.status)) ports.pollWritingAgentTask(task.id)
+      return
+    }
     if (!ports.embeddedWritingAgent.value) throw new Error('请先打开要处理的章节。')
     const workItemId = ports.current.value?.id
     const storage = await ports.desktop.projects.sqliteStorageStatus()

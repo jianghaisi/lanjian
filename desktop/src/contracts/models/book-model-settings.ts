@@ -1,3 +1,5 @@
+import { decodeParameterPolicy } from './parameter-policy'
+import { decodeThinkingLevel } from './thinking-level'
 import { AppError } from '../core/app-error'
 import { connectionRecord, connectionRevision, globalConnectionId, modelConnectionEndpoint, modelConnectionName } from './model-connection-values'
 import { LOCAL_CONNECTION_ID } from './local-model-contracts'
@@ -12,7 +14,7 @@ export type LegacyBookModelSettings = BookModelRouting & { version: 2 | 3; conne
 export type BookLegacyReference = { kind: 'legacy-private'; id: string; originalConnectionId: string; name: string; baseUrl: string }
 export type BookGlobalReference = { kind: 'global'; id: string; globalConnectionId: string; lastKnownName?: string; lastKnownBaseUrl?: string }
 export type BookModelReference = BookLegacyReference | BookGlobalReference
-export type ReferencedBookModelSettings = BookModelRouting & { version: 4; references: BookModelReference[]; defaultRevision?: number }
+export type ReferencedBookModelSettings = BookModelRouting & { version: 4 | 5; references: BookModelReference[]; defaultRevision?: number }
 export type BookModelSettings = LegacyBookModelSettings | ReferencedBookModelSettings
 export type BookModelSource = BookModelReference | { kind: 'local'; id: typeof LOCAL_CONNECTION_ID }
 
@@ -29,13 +31,18 @@ function number(value: unknown, min: number, max: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) throw invalid()
   return value
 }
-function profile(value: unknown, available: Set<string>, fallback?: ModelProfile): ModelProfile {
-  const r = connectionRecord(value, ['connectionId', 'model', 'temperature', 'topP', 'maxTokens'])
-  const p = { ...fallback, ...r }
+function profile(value: unknown, available: Set<string>, fallback?: ModelProfile, adaptive = false): ModelProfile {
+  const r = connectionRecord(value, ['connectionId', 'model', 'temperature', 'topP', 'maxTokens', 'thinkingLevel', ...(adaptive ? ['parameterPolicy'] : [])])
+  const p: Record<string, unknown> = { ...fallback, ...r }
   if (typeof p.connectionId !== 'string' || !available.has(p.connectionId)) throw invalid()
+  if (Object.hasOwn(r, 'parameterPolicy')) {
+    connectionRecord(r, ['connectionId', 'model', 'parameterPolicy'])
+    return { connectionId: p.connectionId, model: model(p.model), parameterPolicy: decodeParameterPolicy(p.parameterPolicy) }
+  }
   const maxTokens = number(p.maxTokens, 128, 128000)
   if (!Number.isInteger(maxTokens)) throw invalid()
-  return { connectionId: p.connectionId, model: model(p.model), temperature: number(p.temperature, 0, 2), topP: number(p.topP, 0, 1), maxTokens }
+  return { connectionId: p.connectionId, model: model(p.model), temperature: number(p.temperature, 0, 2), topP: number(p.topP, 0, 1), maxTokens,
+    ...(Object.hasOwn(p, 'thinkingLevel') ? { thinkingLevel: decodeThinkingLevel(p.thinkingLevel) } : {}) }
 }
 function routing(r: Record<string, unknown>, ids: string[], legacyDefaults?: BookModelRouting): BookModelRouting {
   const available = new Set([...ids, LOCAL_CONNECTION_ID])
@@ -43,8 +50,8 @@ function routing(r: Record<string, unknown>, ids: string[], legacyDefaults?: Boo
   if (routingMode !== 'shared' && routingMode !== 'perTask') throw invalid()
   const t = connectionRecord(r.tasks === undefined && legacyDefaults ? {} : r.tasks, BOOK_MODEL_TASKS)
   return { routingMode,
-    shared: profile(r.shared === undefined && legacyDefaults ? {} : r.shared, available, legacyDefaults?.shared),
-    tasks: Object.fromEntries(BOOK_MODEL_TASKS.map(task => [task, profile(t[task] === undefined && legacyDefaults ? {} : t[task], available, legacyDefaults?.tasks[task])])) as Record<AiTask, ModelProfile>
+    shared: profile(r.shared === undefined && legacyDefaults ? {} : r.shared, available, legacyDefaults?.shared, r.version === 5),
+    tasks: Object.fromEntries(BOOK_MODEL_TASKS.map(task => [task, profile(t[task] === undefined && legacyDefaults ? {} : t[task], available, legacyDefaults?.tasks[task], r.version === 5)])) as Record<AiTask, ModelProfile>
   }
 }
 
@@ -65,10 +72,10 @@ export function decodeBookModelSettings(value: unknown): BookModelSettings {
 }
 function decode(value: unknown): BookModelSettings {
   const envelope = connectionRecord(value, ['version', 'baseUrl', 'connections', 'references', 'defaultRevision', 'routingMode', 'shared', 'tasks'])
-  if (envelope.version !== undefined && (typeof envelope.version !== 'number' || ![1, 2, 3, 4].includes(envelope.version))) {
+  if (envelope.version !== undefined && (typeof envelope.version !== 'number' || ![1, 2, 3, 4, 5].includes(envelope.version))) {
     throw new AppError('FEATURE_UNAVAILABLE', '模型配置版本不受支持，原配置已保留。', { recoverable: true })
   }
-  if (envelope.version === 4) {
+  if (envelope.version === 4 || envelope.version === 5) {
     const r = connectionRecord(value, ['version', 'references', 'defaultRevision', 'routingMode', 'shared', 'tasks'])
     if (!Array.isArray(r.references) || r.references.length > MAX_BOOK_MODEL_REFERENCES) throw invalid()
     const ids = new Set<string>(), originals = new Set<string>()
@@ -90,7 +97,7 @@ function decode(value: unknown): BookModelSettings {
         ...(Object.hasOwn(c, 'lastKnownName') ? { lastKnownName: modelConnectionName(c.lastKnownName) } : {}),
         ...(Object.hasOwn(c, 'lastKnownBaseUrl') ? { lastKnownBaseUrl: modelConnectionEndpoint(c.lastKnownBaseUrl) } : {}) }
     })
-    return { version: 4, references, ...routing(r, [...ids]),
+    return { version: envelope.version, references, ...routing(r, [...ids]),
       ...(Object.hasOwn(r, 'defaultRevision') ? { defaultRevision: connectionRevision(r.defaultRevision, 1) } : {}) }
   }
   if (envelope.version === undefined || envelope.version === 1) {
@@ -130,7 +137,7 @@ export function serializeBookModelSettings(value: unknown): string {
 /** Selects portable identity only. Global diagnostic metadata is deliberately not a send target. */
 export function bookModelSource(settings: BookModelSettings, connectionId: string): BookModelSource {
   if (connectionId === LOCAL_CONNECTION_ID) return { kind: 'local', id: LOCAL_CONNECTION_ID }
-  if (settings.version === 4) {
+  if (isReferencedBookSettings(settings)) {
     const reference = settings.references.find(c => c.id === connectionId)
     if (reference) return { ...reference }
   } else {
@@ -143,7 +150,11 @@ export function bookModelSource(settings: BookModelSettings, connectionId: strin
 /** Explicit conversion helper only; callers must bind this operation to the captured book revision. */
 export function referenceBookModelSettings(value: unknown): ReferencedBookModelSettings {
   const settings = decodeBookModelSettings(value)
-  if (settings.version === 4) return settings
+  if (isReferencedBookSettings(settings)) return settings
   return { version: 4, routingMode: settings.routingMode, shared: settings.shared, tasks: settings.tasks,
     references: settings.connections.map(c => ({ kind: 'legacy-private', ...c, originalConnectionId: c.id })) }
+}
+
+export function isReferencedBookSettings(settings: BookModelSettings): settings is ReferencedBookModelSettings {
+  return settings.version === 4 || settings.version === 5
 }

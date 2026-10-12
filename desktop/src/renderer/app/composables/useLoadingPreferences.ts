@@ -1,15 +1,21 @@
 import { readonly, ref } from 'vue'
 
 export type LoadingTheme = 'standard' | 'impact'
-export interface LoadingPreferences { theme: LoadingTheme }
+export type BootStyle = 'cinematic' | 'impact' | 'brief'
+export type BootPalette = 'system' | 'light' | 'dark'
+export interface LoadingPreferences { theme: LoadingTheme; bootStyle: BootStyle; bootPalette: BootPalette }
 export const LOADING_PREFERENCES_KEY = 'lanjian-loading-v1'
-const defaults: LoadingPreferences = { theme: 'impact' }
+const defaults: LoadingPreferences = { theme: 'impact', bootStyle: 'cinematic', bootPalette: 'system' }
 export function parseLoadingPreferences(raw: string | null): LoadingPreferences {
   if (raw === null) return { ...defaults }
   const value: unknown = JSON.parse(raw)
   if (!value || typeof value !== 'object' || !('theme' in value)
     || (value.theme !== 'standard' && value.theme !== 'impact')) throw new Error('加载外观设置无法读取，原设置已保留。')
-  return { theme: value.theme }
+  const bootStyle = 'bootStyle' in value ? value.bootStyle : defaults.bootStyle
+  const bootPalette = 'bootPalette' in value ? value.bootPalette : defaults.bootPalette
+  if (bootStyle !== 'cinematic' && bootStyle !== 'impact' && bootStyle !== 'brief') throw new Error('开场样式无法读取。')
+  if (bootPalette !== 'system' && bootPalette !== 'light' && bootPalette !== 'dark') throw new Error('档案材质无法读取。')
+  return { theme: value.theme, bootStyle, bootPalette }
 }
 /** Visual preferences only; never contains book identity, credentials or manuscripts. */
 export function createLoadingPreferenceStore(storage: Pick<Storage, 'getItem' | 'setItem'> | null) {
@@ -44,6 +50,7 @@ export function useLoadingPreferences() {
     let storage: Storage | null = null
     try { if (typeof window !== 'undefined') storage = window.localStorage } catch { /* Visual defaults remain usable. */ }
     shared = createLoadingPreferenceStore(storage)
+
   }
   return shared
 }

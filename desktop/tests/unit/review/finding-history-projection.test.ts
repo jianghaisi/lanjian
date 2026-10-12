@@ -78,15 +78,17 @@ test('historical resolution has a nullable repair link; attaching fixed never tu
 const planning = { totalOutlineExists: false, totalApproval: { status: 'missing' }, chapterPlacements: [], volumes: [], eventChapterPlacements: [], assignedEventIds: [], unplacedEventIds: [] } as unknown as OutlinePlanningStatus
 const workflow = { steps: [], missingForProse: [], readyForProse: false } as unknown as WorkflowStatus
 class ProjectionWorkspace extends WorkspaceService {
-  override async workflowStatus() { return workflow }
+  override async workflowStatus(_chapterId?: number, _planning?: OutlinePlanningStatus, _position?: number, realms?: { levels: unknown[] }) {
+    assert.deepEqual(realms, { levels: [] }); return workflow
+  }
   override async realms() { return { levels: [] } }
 }
 function projectionFixture(options: { formal?: boolean; history?: () => Promise<ConsistencyFindingHistory>; afterPlanning?: () => void } = {}) {
-  let root = 'book-a', historyCalls = 0, chapterReads = 0
+  let root = 'book-a', historyCalls = 0, chapterReads = 0, activeReads = 0
   const persistedVersions: string[] = []
   const chapter = { id: 1, position: 1, title: '第一章', content: '安静的正文。', bodyVersionId: 'current-body' } as Chapter
   const formal = {
-    active: async () => options.formal !== false,
+    active: async () => { activeReads++; return options.formal !== false },
     recordConsistencyFindings: async (_root: string, input: { bodyVersionId: string }) => { persistedVersions.push(input.bodyVersionId); return [] },
     consistencyFindingHistory: async (scope: string, id: number) => { assert.equal(scope, 'book-a'); assert.equal(id, 1); historyCalls++; return options.history ? options.history() : { bodyVersionId: 'current-body', entries: [] } }
   } as unknown as NonNullable<ConstructorParameters<typeof WorkspaceService>[6]>
@@ -95,7 +97,7 @@ function projectionFixture(options: { formal?: boolean; history?: () => Promise<
     { status: async () => { options.afterPlanning?.(); return planning } }, undefined,
     { chapter: async () => { chapterReads++; return chapter } }, undefined, undefined, formal
   )
-  return { service, switchBook: () => { root = 'book-b' }, counts: () => ({ historyCalls, chapterReads, persistedVersions }) }
+  return { service, switchBook: () => { root = 'book-b' }, activeReads: () => activeReads, counts: () => ({ historyCalls, chapterReads, persistedVersions }) }
 }
 
 test('chapter projection returns same-version history and records findings against its frozen initial body', async () => {
@@ -103,6 +105,7 @@ test('chapter projection returns same-version history and records findings again
   const value = await fixture.service.chapterProjection(1)
   assert.deepEqual(value.findingHistory, { bodyVersionId: 'current-body', entries: [] })
   assert.deepEqual(fixture.counts(), { historyCalls: 1, chapterReads: 1, persistedVersions: ['current-body', 'current-body', 'current-body'] })
+  assert.equal(fixture.activeReads(), 1)
 })
 
 test('file-mode projection does not open or expose finding history', async () => {

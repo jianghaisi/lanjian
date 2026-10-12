@@ -10,14 +10,15 @@ import type {
   DocumentImportRecovery,
   DocumentImportManifestRequest,
   DocumentImportManifestResult,
-  TxtCreationMethod,
   TxtImportPreview,
   TxtImportRequest,
   TxtImportResult
 } from '../../../../contracts/index'
 import { DocumentService } from '../../manuscript/application/document-service'
-import { readJson, writeJson } from '../../../platform/storage/json-store'
+import { writeJson } from '../../../platform/storage/json-store'
 import { ProjectService } from './project-service'
+import { WorkspaceWriteCoordinator } from '../../../core/application/workspace-write-coordinator'
+import { assertNoPartialImport, importConflict, importUuid, object, publishImportLedger, readImportLedger, writeImportOperation, type ImportRecord } from './import-ledger'
 
 type ParsedChapter = {
   sourceIndex: number
@@ -31,20 +32,6 @@ type ParsedChapter = {
   selectedByDefault: boolean
 }
 type PendingImport = TxtImportPreview & { hash: string; content: string; bytesBuffer: Buffer; sourceExtension: string; parsedChapters: ParsedChapter[]; expiresAt: number }
-type ImportRecord = {
-  id: string
-  importedAt: string
-  fileName: string
-  title: string
-  sha256: string
-  ownership: 'owned' | 'material' | 'external'
-  creationMethod?: TxtCreationMethod
-  chapterIds: number[]
-  sourceIds?: string[]
-  selectedChapterIndexes?: number[]
-  storagePath: string
-}
-type ImportLedger = { version: 1; records: ImportRecord[] }
 type ManifestJournalFile = {
   token: string
   fileName: string
@@ -72,6 +59,7 @@ export type CompletedManifestEvidence = {
     ownership: 'owned' | 'material' | 'external'
     title: string
     content: string
+    chapters?: Array<{ id: number; content: string; bodyVersionId?: string }>
   }>
 }
 
@@ -92,6 +80,20 @@ const volumeHeading = new RegExp(`^\\s*第${chineseOrdinal}[卷部篇集](?:[：
 export class BookImportService {
   private readonly pending = new Map<string, PendingImport>()
   private readonly pendingManifests = new Map<string, Set<string>>()
+  private readonly importWrites = new WorkspaceWriteCoordinator()
+  private readonly claimed = new Set<string>()
+
+  private async inImport<T>(claims: string[], expectedWorkItemId: string | undefined, operation: () => Promise<T>): Promise<T> {
+    if (claims.some(key => this.claimed.has(key))) throw importConflict('这次导入正在处理中，请勿重复提交。')
+    claims.forEach(key => this.claimed.add(key))
+    try {
+      return await this.projects.runInCurrentBook(async () => {
+        const root = await this.projects.currentPath()
+        if (expectedWorkItemId !== undefined && root !== expectedWorkItemId) throw importConflict('作品已切换，请在目标作品重新确认导入。')
+        return this.importWrites.run(root, async () => { await this.projects.currentPath(); return operation() })
+      })
+    } finally { claims.forEach(key => this.claimed.delete(key)) }
+  }
 
   constructor(
     private readonly projects: ProjectService,
@@ -239,6 +241,12 @@ export class BookImportService {
   }
 
   async commitManifest(input: DocumentImportManifestRequest): Promise<DocumentImportManifestResult> {
+    if (!importUuid.test(input.id)) invalidImport('导入清单编号格式无效')
+    return this.inImport([`manifest:${input.id}`, ...input.files.map(file => file.token)], input.expectedWorkItemId,
+      () => this.commitManifestScoped(input))
+  }
+
+  private async commitManifestScoped(input: DocumentImportManifestRequest): Promise<DocumentImportManifestResult> {
     this.prunePending()
     if (!input.files.length || input.files.length > maxManifestFiles) invalidImport(`导入清单必须包含 1 到 ${maxManifestFiles} 个文件`)
     const tokens = input.files.map((file) => file.token)
@@ -249,6 +257,8 @@ export class BookImportService {
     const manifestRoot = await projectDirectory(root, join(root, '.webnovel', 'imports', 'manifests', input.id))
     const journalPath = await projectDirectory(root, join(manifestRoot, 'manifest.json'))
     let journal = await readManifestJournal(journalPath)
+    const ledgerSnapshot = await readImportLedger(root, input.id)
+    await assertNoPartialImport(root, input.id, ledgerSnapshot.ledger)
 
     if (!journal) {
       const expectedTokens = this.pendingManifests.get(input.id)
@@ -259,13 +269,16 @@ export class BookImportService {
         const source = this.pending.get(file.token)
         if (!source || source.expiresAt < Date.now()) throw new AppError('CONFLICT', `“${file.title}”的预览已经失效，请重新选择全部文件`, { recoverable: true })
       }
+      if (ledgerSnapshot.bytes === null) await publishImportLedger(root, ledgerSnapshot, () => this.projects.currentPath())
+      await this.projects.currentPath()
       await mkdir(await projectDirectory(root, join(manifestRoot, 'sources')), { recursive: true })
       const now = new Date().toISOString()
       const files: ManifestJournalFile[] = []
       for (const file of input.files) {
         const source = this.pending.get(file.token)!
         const relativeSource = `.webnovel/imports/manifests/${input.id}/sources/${source.hash}${source.sourceExtension}`
-        await writeFile(await projectDirectory(root, join(root, relativeSource)), source.bytesBuffer)
+        await this.projects.currentPath()
+        await writeFile(await projectDirectory(root, join(root, relativeSource)), source.bytesBuffer, { flag: 'wx' })
         files.push({
           token: file.token,
           fileName: source.fileName,
@@ -276,7 +289,7 @@ export class BookImportService {
         })
       }
       journal = { version: 1, id: input.id, status: 'ready', createdAt: now, updatedAt: now, files }
-      await writeJson(journalPath, journal)
+      await this.writeManifestJournal(journalPath, journal)
     } else {
       if (journal.version !== 1 || journal.id !== input.id) invalidImport('导入恢复日志已损坏，请保留项目并人工核对')
       const requestByToken = new Map(input.files.map((file) => [file.token, file]))
@@ -294,7 +307,7 @@ export class BookImportService {
     journal.status = 'committing'
     journal.updatedAt = new Date().toISOString()
     delete journal.lastError
-    await writeJson(journalPath, journal)
+    await this.writeManifestJournal(journalPath, journal)
     for (let index = 0; index < journal.files.length; index += 1) {
       const file = journal.files[index]
       if (file.status === 'completed' || file.status === 'skipped') continue
@@ -304,29 +317,29 @@ export class BookImportService {
         journal.status = 'interrupted'
         journal.lastError = `在“${file.fileName}”写入前中断；已经完成的文件不会重复导入。`
         journal.updatedAt = new Date().toISOString()
-        await writeJson(journalPath, journal)
+        await this.writeManifestJournal(journalPath, journal)
         throw new AppError('CONFLICT', journal.lastError, { recoverable: true })
       }
       file.status = 'running'
       journal.updatedAt = new Date().toISOString()
-      await writeJson(journalPath, journal)
+      await this.writeManifestJournal(journalPath, journal)
       try {
-        file.result = await this.commit(file.request as TxtImportRequest)
+        file.result = await this.commitScoped(file.request as TxtImportRequest, input.id)
         file.status = 'completed'
         journal.updatedAt = new Date().toISOString()
-        await writeJson(journalPath, journal)
+        await this.writeManifestJournal(journalPath, journal)
       } catch (error) {
         file.status = 'review'
         journal.status = 'needs-review'
         journal.lastError = `“${file.fileName}”写入期间失败，可能存在部分落盘；已停止自动重试。`
         journal.updatedAt = new Date().toISOString()
-        await writeJson(journalPath, journal)
+        await this.writeManifestJournal(journalPath, journal)
         throw new AppError('CONFLICT', journal.lastError, { recoverable: true, cause: error })
       }
     }
     journal.status = 'completed'
     journal.updatedAt = new Date().toISOString()
-    await writeJson(journalPath, journal)
+    await this.writeManifestJournal(journalPath, journal)
     this.pendingManifests.delete(input.id)
     for (const file of input.files) if (file.ownership === 'skip') this.pending.delete(file.token)
     return { id: journal.id, status: 'completed', results: journal.files.flatMap((file) => file.result ? [file.result] : []) }
@@ -363,12 +376,19 @@ export class BookImportService {
     return recoveries.sort((left, right) => right.createdAt.localeCompare(left.createdAt))
   }
 
-  async resumeManifest(id: string): Promise<DocumentImportManifestResult> {
+  async resumeManifest(id: string, expectedWorkItemId?: string): Promise<DocumentImportManifestResult> {
+    if (!importUuid.test(id)) invalidImport('导入清单编号格式无效')
+    return this.inImport([`manifest:${id}`], expectedWorkItemId, () => this.resumeManifestScoped(id))
+  }
+
+  private async resumeManifestScoped(id: string): Promise<DocumentImportManifestResult> {
     if (!manifestIdPattern.test(id)) invalidImport('导入清单编号格式无效')
     const root = await this.projects.currentPath()
     const manifestRoot = await projectDirectory(root, join(root, '.webnovel', 'imports', 'manifests', id))
     const journalPath = await projectDirectory(root, join(manifestRoot, 'manifest.json'))
     const journal = await readManifestJournal(journalPath)
+    const ledger = await readImportLedger(root, id)
+    await assertNoPartialImport(root, id, ledger.ledger)
     if (!journal || journal.id !== id) throw new AppError('NOT_FOUND', '没有找到这份导入恢复记录', { recoverable: true })
     if (journal.status === 'completed') {
       return { id, status: 'completed', results: journal.files.flatMap((file) => file.result ? [file.result] : []) }
@@ -397,8 +417,16 @@ export class BookImportService {
     journal.status = 'interrupted'
     journal.updatedAt = new Date().toISOString()
     journal.lastError = '应用重新启动后已从项目内暂存文件恢复，等待继续未完成项。'
-    await writeJson(journalPath, journal)
-    return this.commitManifest({ id, files: journal.files.map((file) => file.request) })
+    await this.writeManifestJournal(journalPath, journal)
+    if (ledger.bytes === null) await publishImportLedger(root, ledger, () => this.projects.currentPath())
+    return this.commitManifestScoped({ id, files: journal.files.map((file) => file.request) })
+  }
+
+  private async writeManifestJournal(path: string, journal: ManifestJournal): Promise<void> {
+    // Validate before staging as well as publication: a replaced root must not
+    // receive even a newly created metadata directory from the old operation.
+    await this.projects.currentPath()
+    await writeJson(path, journal, async () => { await this.projects.currentPath() })
   }
 
   async latestCompletedManifestId(): Promise<string | undefined> {
@@ -422,7 +450,7 @@ export class BookImportService {
     return completed.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]?.id
   }
 
-  async completedManifestEvidence(id: string): Promise<CompletedManifestEvidence> {
+  async completedManifestEvidence(id: string, includeCurrentChapters = false): Promise<CompletedManifestEvidence> {
     if (!manifestIdPattern.test(id)) invalidImport('导入清单编号格式无效')
     const root = await this.projects.currentPath()
     const manifestRoot = await projectDirectory(root, join(root, '.webnovel', 'imports', 'manifests', id))
@@ -430,6 +458,9 @@ export class BookImportService {
     if (!journal || journal.id !== id) throw new AppError('NOT_FOUND', '没有找到这份导入清单', { recoverable: true })
     if (journal.status !== 'completed') throw new AppError('CONFLICT', '这批文件尚未全部安全导入，不能开始接续分析', { recoverable: true })
     const files: CompletedManifestEvidence['files'] = []
+    const chapters = includeCurrentChapters
+      ? new Map((await this.documents.chapters()).map((chapter) => [chapter.id, chapter]))
+      : new Map<number, Awaited<ReturnType<DocumentService['chapters']>>[number]>()
     const fingerprintParts: string[] = []
     for (const file of journal.files) {
       if (file.status === 'skipped' || file.request.ownership === 'skip') continue
@@ -439,11 +470,17 @@ export class BookImportService {
       const hash = createHash('sha256').update(bytes).digest('hex')
       if (hash !== file.sha256) throw new AppError('CONFLICT', `“${file.fileName}”的暂存原文件已经变化，不能分析`, { recoverable: true })
       const decoded = await decodeDocument(extname(file.fileName).toLowerCase(), bytes)
+      const importedChapterIds = file.result?.ownership === 'owned' ? file.result.importedChapterIds : []
       files.push({
         fileName: file.fileName,
         ownership: file.request.ownership,
         title: file.request.title?.trim() || parse(file.fileName).name,
-        content: boundedAnalysisSource(normalizeText(decoded.content))
+        content: boundedAnalysisSource(normalizeText(decoded.content)),
+        ...(includeCurrentChapters ? { chapters: importedChapterIds.map((chapterId) => {
+          const chapter = chapters.get(chapterId)
+          if (!chapter) throw new AppError('CONFLICT', `“${file.fileName}”导入的第 ${chapterId} 章已经缺失，不能证明已有剧情。`, { recoverable: true })
+          return { id: chapter.id, content: chapter.content, ...(chapter.bodyVersionId ? { bodyVersionId: chapter.bodyVersionId } : {}) }
+        }) } : {})
       })
       fingerprintParts.push(`${file.sha256}:${file.request.ownership}:${file.request.title}`)
     }
@@ -452,12 +489,17 @@ export class BookImportService {
   }
 
   async commit(input: TxtImportRequest): Promise<TxtImportResult> {
+    return this.inImport([input.token], input.expectedWorkItemId, () => this.commitScoped(input))
+  }
+
+  private async commitScoped(input: TxtImportRequest, ownManifest?: string): Promise<TxtImportResult> {
     const source = this.pending.get(input.token)
     if (!source || source.expiresAt < Date.now()) throw new AppError('CONFLICT', '导入预览已经失效，请重新选择文稿文件', { recoverable: true })
     const root = await this.projects.currentPath()
     const importsRoot = await projectDirectory(root, join(root, '.webnovel', 'imports'))
-    const ledgerPath = await projectDirectory(root, join(importsRoot, 'index.json'))
-    const ledger = await readJson<ImportLedger>(ledgerPath, { version: 1, records: [] })
+    const snapshot = await readImportLedger(root, ownManifest)
+    const ledger = snapshot.ledger
+    await assertNoPartialImport(root, ownManifest, ledger)
     if (ledger.records.some((record) => record.sha256 === source.hash)) throw new AppError('CONFLICT', '这份文件已经导入过，无需重复导入', { recoverable: true })
 
     const title = safeName(input.title?.trim() || source.suggestedTitle)
@@ -465,24 +507,36 @@ export class BookImportService {
     const importedAt = new Date().toISOString()
     let result: TxtImportResult
     let record: ImportRecord
+    const selectedIndexes = input.selectedChapterIndexes ?? source.parsedChapters.filter(item => item.selectedByDefault).map(item => item.sourceIndex)
+    const selected = selectedIndexes.map(index => source.parsedChapters.find(item => item.sourceIndex === index))
+    if (input.ownership === 'owned' && (!selectedIndexes.length || new Set(selectedIndexes).size !== selectedIndexes.length || selected.some(item => !item))) invalidImport('章节选择已经失效，请重新预览文稿')
+    if (input.ownership === 'material' && !this.researchLibrary) throw new AppError('INTERNAL_ERROR', '作者资料导入服务尚未就绪', { recoverable: false })
+    const guard = () => this.projects.currentPath()
+    // Claims are consumed before the durable guard or content mutation; a failed
+    // write must never turn the same preview into another authorization.
+    this.pending.delete(input.token)
+    const operation = { id, sha256: source.hash, request: input, chapterIds: [] as number[], sourceIds: [] as string[] }
+    await writeImportOperation(root, operation, 'running', guard)
+    const archiveRoot = await projectDirectory(root, join(importsRoot, 'sources'))
+    await guard()
+    await mkdir(archiveRoot, { recursive: true })
+    const archivePath = await projectDirectory(root, join(archiveRoot, `${source.hash}${source.sourceExtension}`))
+    await guard()
+    try { await writeFile(archivePath, source.bytesBuffer, { flag: 'wx' }) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || !(await readFile(archivePath)).equals(source.bytesBuffer)) throw importConflict('导入原件留档失败或已有原件发生变化，请先核对。')
+    }
 
     if (input.ownership === 'owned') {
-      const selectedIndexes = input.selectedChapterIndexes ?? source.parsedChapters.filter((item) => item.selectedByDefault).map((item) => item.sourceIndex)
-      if (!selectedIndexes.length || new Set(selectedIndexes).size !== selectedIndexes.length) invalidImport('请至少选择一个不重复的章节')
-      const selected = selectedIndexes.map((sourceIndex) => source.parsedChapters.find((item) => item.sourceIndex === sourceIndex))
-      if (selected.some((item) => !item)) invalidImport('章节选择已经失效，请重新预览文稿')
-      const existing = await this.documents.chapters()
-      let nextId = Math.max(0, ...existing.map((chapter) => chapter.id)) + 1
-      const chapterIds: number[] = []
+      const chapterIds = operation.chapterIds
       for (const chapter of selected as ParsedChapter[]) {
-        await this.documents.updateChapter(nextId, { title: chapter.title, content: chapter.content })
-        chapterIds.push(nextId)
-        nextId += 1
+        await guard()
+        const created = await this.documents.createChapter()
+        chapterIds.push(created.id)
+        await writeImportOperation(root, operation, 'running', guard)
+        if (!created.revision) throw importConflict('新章节缺少写入版本，已停止导入并保留现场。')
+        await this.documents.updateChapter(created.id, { title: chapter.title, content: chapter.content, expectedRevision: created.revision })
       }
-      const archiveRoot = await projectDirectory(root, join(importsRoot, 'sources'))
-      await mkdir(archiveRoot, { recursive: true })
-      const archivePath = await projectDirectory(root, join(archiveRoot, `${source.hash}${source.sourceExtension}`))
-      await writeFile(archivePath, source.bytesBuffer)
       record = {
         id, importedAt, fileName: source.fileName, title, sha256: source.hash,
         ownership: 'owned', creationMethod: input.creationMethod ?? 'mixed', chapterIds,
@@ -491,13 +545,11 @@ export class BookImportService {
       }
       result = { ownership: 'owned', title, importedChapterIds: chapterIds }
     } else if (input.ownership === 'material') {
-      if (!this.researchLibrary) throw new AppError('INTERNAL_ERROR', '作者资料导入服务尚未就绪', { recoverable: false })
-      const archiveRoot = await projectDirectory(root, join(importsRoot, 'sources'))
-      await mkdir(archiveRoot, { recursive: true })
-      const archivePath = await projectDirectory(root, join(archiveRoot, `${source.hash}${source.sourceExtension}`))
-      const sources = await this.researchLibrary.importManualDocument(title, source.content)
-      await writeFile(archivePath, source.bytesBuffer)
+      await guard()
+      const sources = await this.researchLibrary!.importManualDocument(title, source.content)
       const sourceIds = sources.map((item) => item.id)
+      operation.sourceIds = sourceIds
+      await writeImportOperation(root, operation, 'running', guard)
       record = {
         id, importedAt, fileName: source.fileName, title, sha256: source.hash,
         ownership: 'material', chapterIds: [], sourceIds,
@@ -506,11 +558,15 @@ export class BookImportService {
       result = { ownership: 'material', title, importedChapterIds: [], importedSourceIds: sourceIds }
     } else {
       const referenceRoot = await projectDirectory(root, join(root, '参考资料', '外部书籍', `${title}-${source.hash.slice(0, 8)}`))
+      await guard()
       await mkdir(referenceRoot, { recursive: true })
       const originalPath = await projectDirectory(root, join(referenceRoot, `原始文件${source.sourceExtension}`))
       const searchablePath = await projectDirectory(root, join(referenceRoot, '可检索文本.md'))
-      await writeFile(originalPath, source.bytesBuffer)
-      await writeFile(searchablePath, source.content, 'utf8')
+      await guard()
+      await writeFile(originalPath, source.bytesBuffer, { flag: 'wx' })
+      await guard()
+      await writeFile(searchablePath, source.content, { encoding: 'utf8', flag: 'wx' })
+      await guard()
       await writeJson(await projectDirectory(root, join(referenceRoot, '来源说明.json')), {
         version: 1,
         title,
@@ -520,7 +576,7 @@ export class BookImportService {
         purpose: 'reference-only',
         sha256: source.hash,
         note: '外部作品仅作为参考资料保存，默认不进入正文，也不自动加入模型上下文。'
-      })
+      }, async () => { await guard() })
       record = {
         id, importedAt, fileName: source.fileName, title, sha256: source.hash,
         ownership: 'external', chapterIds: [], storagePath: `参考资料/外部书籍/${title}-${source.hash.slice(0, 8)}`
@@ -529,8 +585,8 @@ export class BookImportService {
     }
 
     ledger.records.push(record)
-    await writeJson(ledgerPath, ledger)
-    this.pending.delete(input.token)
+    await publishImportLedger(root, snapshot, guard)
+    await writeImportOperation(root, operation, 'completed', guard)
     return result
   }
 
@@ -580,10 +636,40 @@ async function readManifestJournal(path: string): Promise<ManifestJournal | null
   } catch {
     throw new AppError('CONFLICT', '导入恢复日志已损坏，已停止写入以保护现有作品', { recoverable: true })
   }
-  if (!value || typeof value !== 'object' || (value as ManifestJournal).version !== 1 || !Array.isArray((value as ManifestJournal).files)) {
+  if (raw.length > 20 * 1024 * 1024 || !object(value) || value.version !== 1 || typeof value.id !== 'string' || !importUuid.test(value.id)
+    || typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt))
+    || typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt))
+    || typeof value.status !== 'string' || !['ready', 'committing', 'interrupted', 'completed', 'needs-review'].includes(value.status)
+    || !Array.isArray(value.files) || value.files.length < 1 || value.files.length > maxManifestFiles
+    || !value.files.every(file => validManifestFile(file, String(value.id)))
+    || new Set(value.files.map(file => file.token)).size !== value.files.length
+    || (value.status === 'completed' && value.files.some(file => !['completed', 'skipped'].includes(file.status)))) {
     throw new AppError('CONFLICT', '导入恢复日志格式无法识别，已停止写入以保护现有作品', { recoverable: true })
   }
   return value as ManifestJournal
+}
+
+function validManifestFile(file: unknown, id: string): file is ManifestJournalFile {
+  if (!object(file) || typeof file.token !== 'string' || !importUuid.test(file.token) || typeof file.fileName !== 'string'
+    || typeof file.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(file.sha256) || typeof file.stagedSource !== 'string'
+    || typeof file.status !== 'string' || !['pending', 'running', 'completed', 'skipped', 'review'].includes(file.status) || !object(file.request)) return false
+  const request = file.request
+  if (request.token !== file.token || typeof request.ownership !== 'string' || !['owned', 'material', 'external', 'skip'].includes(request.ownership)) return false
+  if (typeof request.title !== 'string' || !request.title.trim() || request.title.length > 4096
+    || (request.creationMethod !== undefined && (typeof request.creationMethod !== 'string' || !['human', 'ai', 'mixed'].includes(request.creationMethod)))) return false
+  if (request.selectedChapterIndexes !== undefined && (request.ownership !== 'owned' || !Array.isArray(request.selectedChapterIndexes)
+    || !request.selectedChapterIndexes.length || request.selectedChapterIndexes.length > 5000
+    || new Set(request.selectedChapterIndexes).size !== request.selectedChapterIndexes.length
+    || !request.selectedChapterIndexes.every(n => Number.isInteger(n) && n >= 0 && n < 5000))) return false
+  if (!['.txt', '.md', '.docx'].some(extension => file.stagedSource === `.webnovel/imports/manifests/${id}/sources/${file.sha256}${extension}`)) return false
+  if (file.status === 'skipped' && request.ownership !== 'skip') return false
+  if (file.status === 'completed') {
+    const result = file.result
+    if (!object(result) || result.ownership !== request.ownership || typeof result.title !== 'string' || !Array.isArray(result.importedChapterIds)
+      || !result.importedChapterIds.every(n => Number.isSafeInteger(n) && n > 0)) return false
+    if (result.importedSourceIds !== undefined && (!Array.isArray(result.importedSourceIds) || !result.importedSourceIds.every(id => typeof id === 'string' && id.length > 0))) return false
+  }
+  return true
 }
 
 function publicRecovery(journal: ManifestJournal): DocumentImportRecovery {
@@ -622,7 +708,7 @@ function boundedAnalysisSource(content: string): string {
   return `${content.slice(0, edge)}\n\n【中段省略；保留目录线索】\n${headings.slice(0, 8_000)}\n\n【末段】\n${content.slice(-edge)}`.slice(0, limit)
 }
 
-async function decodeDocument(extension: string, bytes: Buffer): Promise<{ content: string; encoding: string; sourceFormat: TxtImportPreview['sourceFormat']; warnings: string[] }> {
+export async function decodeDocument(extension: string, bytes: Buffer): Promise<{ content: string; encoding: string; sourceFormat: TxtImportPreview['sourceFormat']; warnings: string[] }> {
   if (extension === '.docx') {
     try {
       const result = await mammoth.extractRawText({ buffer: bytes })

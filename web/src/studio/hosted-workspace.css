@@ -1,0 +1,44 @@
+/* Only the hosted workspace adapts the native multi-column layout to a phone. */
+.hosted-panel:not([open]) { display:none; }
+@media(max-width:900px) {
+  :root[data-hosted] .app-frame { min-width:0; }
+  :root[data-hosted] .book-tabs { flex-wrap:wrap; height:auto; min-height:48px; padding:4px 8px; gap:4px; overflow:visible; }
+  :root[data-hosted] .book-tabs .workspace-brand-actions,
+  :root[data-hosted] .book-tabs .book-tabs-scroll,
+  :root[data-hosted] .book-tabs .library-local-status,
+  :root[data-hosted] .book-tabs .desktop-companion-anchor { display:none; }
+  :root[data-hosted] .book-tabs .title-actions { margin:0; gap:2px; }
+  :root[data-hosted] .book-tabs button { min-width:40px; min-height:44px; }
+  :root[data-hosted] .book-tabs .hosted-navigation-trigger { display:inline-flex; width:auto; gap:4px; align-items:center; }
+  :root[data-hosted] .narrative-terminal.redesigned-studio.studio.archive-workspace:not(.library-mode):not(.writing-focus) {
+    --activity-width:0px; --explorer-layout-width:0px; --assistant-layout-width:0px;
+    grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); min-width:0;
+  }
+  :root[data-hosted] .narrative-terminal.redesigned-studio.studio > .workbench,
+  :root[data-hosted] .narrative-terminal.redesigned-studio.studio > .group-workspace,
+  :root[data-hosted] .narrative-terminal.redesigned-studio.studio > .inspiration-library { grid-column:1; grid-row:1; min-width:0; }
+  :root[data-hosted] .narrative-terminal.redesigned-studio.studio > :is(.explorer-resizer,.assistant-resizer) { display:none; }
+  :root[data-hosted] .narrative-terminal.redesigned-studio .hosted-panel[open] {
+    position:fixed; inset:0; margin:auto; width:calc(100vw - 16px); max-width:520px; height:calc(100dvh - 16px); max-height:none;
+    display:grid; grid-template-columns:112px minmax(0,1fr); grid-template-rows:auto minmax(0,1fr);
+    gap:0; padding:0; border:1px solid var(--line); color:var(--ink); background:var(--surface); overflow:hidden;
+  }
+  :root[data-hosted] .hosted-panel::backdrop { background:rgb(0 0 0 / .4); }
+  :root[data-hosted] .hosted-panel-heading { grid-column:1/-1; display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid var(--line); }
+  :root[data-hosted] .hosted-panel-heading h2 { font:600 18px/1.4 var(--sans); margin:0; }
+  :root[data-hosted] .hosted-panel-heading button { min-height:44px; padding:8px 12px; color:var(--ink); background:var(--surface); border:1px solid var(--line); }
+  :root[data-hosted] .narrative-terminal.redesigned-studio .hosted-panel > .activitybar {
+    position:static; grid-column:1; grid-row:2; display:flex; flex-direction:column; width:auto; inline-size:auto; height:auto; padding:8px 4px; overflow:auto; transform:none; clip-path:none;
+  }
+  :root[data-hosted] .narrative-terminal.redesigned-studio .hosted-panel > .activitybar button { display:flex; flex-direction:column; align-items:center; width:100%; inline-size:100%; min-height:64px; flex-shrink:0; padding:8px; }
+  :root[data-hosted] .narrative-terminal.redesigned-studio .hosted-panel > .activitybar button span { display:block; opacity:1; visibility:visible; max-width:none; width:auto; font-size:12px; }
+  :root[data-hosted] .narrative-terminal.redesigned-studio .hosted-panel > :is(.explorer,.planning-sidebar,.chronicle-sidebar) { position:static; grid-column:2; grid-row:2; width:auto; min-width:0; height:auto; max-height:none; overflow:auto; }
+  :root[data-hosted] #hosted-assistant-panel[open] { grid-template-columns:minmax(0,1fr); }
+  :root[data-hosted] #hosted-assistant-panel .global-assistant-host.assistant-workspace { display:flex; position:static; inset:auto; width:100%; min-width:0; max-width:none; height:100%; grid-column:1; grid-row:2; border:0; }
+  :root[data-hosted] .narrative-terminal.redesigned-studio .workbench { width:100%; padding:0; }
+  :root[data-hosted] .narrative-terminal.redesigned-studio .manuscript-editor { min-width:0; }
+  :root[data-hosted] .narrative-terminal.redesigned-studio .editor-foot { flex-wrap:wrap; gap:4px; height:auto; padding:6px 8px; }
+  :root[data-hosted] .narrative-terminal.redesigned-studio .manuscript-metrics { flex-wrap:wrap; font-size:12px; }
+  :root[data-hosted] .narrative-terminal.redesigned-studio .manuscript-actions { flex-wrap:wrap; }
+  :root[data-hosted] .narrative-terminal.redesigned-studio .manuscript-paper { padding-inline:0; min-width:0; }
+}

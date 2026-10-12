@@ -1,11 +1,22 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, inject, watchEffect } from 'vue'
 import { ArrowDownRight, ArrowRight, BookOpen, FolderOpen, Plus, Trash2 } from '@lucide/vue'
 import type { ProjectSummary } from '../../../../contracts/index'
+import { dossierArrivalKey } from '../composables/dossier-arrival'
 import LibraryBookCover from './LibraryBookCover.vue'
 
-const props = defineProps<{ project?: ProjectSummary; projectCount: number; loading: boolean }>()
+const props = defineProps<{ project?: ProjectSummary; projectCount: number; loading: boolean; dossierOnly?: boolean }>()
 const emit = defineEmits<{ open: [project: ProjectSummary]; create: []; all: []; trash: []; 'import-project': []; 'continue-intent': [active:boolean] }>()
+const dossierElement = ref<HTMLElement | null>(null)
+const arrival = inject(dossierArrivalKey, null)
+watchEffect(() => {
+  if (!props.dossierOnly && arrival && dossierElement.value) {
+    arrival.target.value = { element: dossierElement.value, projectId: props.project?.id ?? null }
+  }
+})
+onBeforeUnmount(() => {
+  if (!props.dossierOnly && arrival?.target.value?.element === dossierElement.value) arrival.target.value = null
+})
 const previewingProject = ref(false)
 let previewTimer: ReturnType<typeof setTimeout> | undefined
 const wordCount = computed(() => {
@@ -21,7 +32,7 @@ const modified = computed(() => {
   return !value || Number.isNaN(date.getTime()) ? '暂无记录' : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
 })
 function previewOpen() {
-  if (!props.project || previewingProject.value) return
+  if (props.dossierOnly || !props.project || previewingProject.value || (arrival && performance.now() < arrival.feedbackAfter.value)) return
   previewingProject.value = true
   previewTimer = setTimeout(() => { previewingProject.value = false }, 650)
 }
@@ -29,8 +40,8 @@ onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer) })
 </script>
 
 <template>
-  <section class="archive-hero" aria-label="继续创作与作品操作">
-    <button v-if="project" class="continue-dossier" :class="{ 'is-previewing': previewingProject }" type="button" data-testid="library-continue-writing" @pointerenter="previewOpen(); emit('continue-intent',true)" @pointerleave="emit('continue-intent',false)" @focus="previewOpen(); emit('continue-intent',true)" @blur="emit('continue-intent',false)" @click="emit('open', project)">
+  <section class="archive-hero" :class="{ 'dossier-only': dossierOnly, 'arrival-concealed': !dossierOnly && arrival?.concealed.value }" aria-label="继续创作与作品操作">
+    <button v-if="project" ref="dossierElement" class="continue-dossier" :class="{ 'is-previewing': previewingProject }" type="button" :data-library-open-path="dossierOnly ? undefined : project.path" :data-library-open-title="dossierOnly ? undefined : project.title" :data-testid="dossierOnly ? 'boot-dossier' : 'library-continue-writing'" @pointerenter="previewOpen(); emit('continue-intent',true)" @pointerleave="emit('continue-intent',false)" @focus="previewOpen(); emit('continue-intent',true)" @blur="emit('continue-intent',false)" @click="emit('open', project)">
       <span class="dossier-texture dossier-aging" aria-hidden="true" />
       <span class="dossier-texture dossier-creases" aria-hidden="true" />
       <span class="dossier-dot-field" aria-hidden="true" />
@@ -53,8 +64,28 @@ onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer) })
         </div>
       </div>
     </button>
-    <section v-else class="continue-dossier empty-dossier"><span class="dossier-kicker">// YOUR NEXT WORLD</span><h2>{{ loading ? '正在整理作品档案' : '每一个世界，始于一页。' }}</h2><p>{{ loading ? '读取本机作品索引…' : '创建一部新作品，或从已有文稿接续。' }}</p><BookOpen :size="44" :stroke-width="1" /></section>
-    <nav class="archive-quick-actions" aria-label="作品管理">
+    <section v-else ref="dossierElement" class="continue-dossier empty-dossier" :aria-busy="loading" aria-label="作品档案">
+      <div class="empty-dossier-layout">
+        <span class="dossier-kicker">// YOUR NEXT WORLD</span>
+        <div class="empty-dossier-body">
+          <div class="empty-dossier-copy" aria-live="polite">
+            <h2 :class="{ 'empty-dossier-title': !loading }">{{ loading ? '正在整理作品档案' : '每一个世界，始于一页。' }}</h2>
+            <p>{{ loading ? '读取本机作品索引…' : '创建一部新作品，或从已有文稿接续。' }}</p>
+          </div>
+          <div class="empty-dossier-art" aria-hidden="true">
+            <i class="empty-dossier-sheet sheet-back" />
+            <i class="empty-dossier-sheet sheet-middle" />
+            <div class="empty-dossier-sheet sheet-front">
+              <span class="empty-dossier-bookmark" />
+              <BookOpen :size="43" :stroke-width="1" />
+              <span class="empty-dossier-lines"><i /><i /><i /></span>
+            </div>
+          </div>
+        </div>
+        <div class="empty-dossier-footer"><span>{{ loading ? '正在读取本机作品' : '故事，等你落笔。' }}</span><span aria-hidden="true">LANJIAN · ARCHIVE</span></div>
+      </div>
+    </section>
+    <nav v-if="!dossierOnly" class="archive-quick-actions" aria-label="作品管理">
       <button class="archive-action dark all-works-action" type="button" data-library-view="all" data-testid="library-all-works" @click="emit('all')"><BookOpen :size="24"/><span><strong>全部作品</strong><small>ALL WORKS</small></span><b>{{ projectCount.toString().padStart(2, '0') }}</b><ArrowRight :size="18"/></button>
       <button class="archive-action dark" type="button" data-testid="library-open-trash" @click="emit('trash')"><Trash2 :size="24"/><span><strong>回收站</strong><small>RECYCLE BIN</small></span><ArrowRight :size="18"/></button>
       <button class="archive-action light" type="button" data-testid="library-import-project" @click="emit('import-project')"><FolderOpen :size="24"/><span><strong>导入作品</strong><small>IMPORT</small></span><ArrowRight :size="18"/></button>
@@ -102,9 +133,6 @@ onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer) })
 .archive-action.orange>svg:first-child{background:#28332b;color:#f6f2e8;border-color:#354b3e}
 .archive-action.orange:after{content:'';position:absolute;inset-inline-end:0;inset-block-end:0;inline-size:2.375rem;block-size:.5rem;background:repeating-linear-gradient(130deg,#253029 0 .25rem,transparent .25rem .5rem)}
 .archive-action.orange:hover{background:#ffb760}
-.empty-dossier{cursor:default;display:flex;flex-direction:column;gap:1rem;justify-content:center;min-block-size:16rem}
-.empty-dossier h2{color:#f5f3eb;margin:0;font:600 clamp(1.5rem,3cqi,1.875rem)/1.4 var(--serif)}
-.empty-dossier p{color:#c4cec5;margin:0;font:.8125rem/1.7 var(--sans)}.empty-dossier>svg{color:#8bab9a}
 button:focus-visible{outline:.1875rem solid #d78627;outline-offset:.25rem}.continue-dossier:focus-visible{clip-path:none;outline-offset:.125rem}
 @container library-content (max-width:47rem){
   .archive-hero{grid-template-columns:minmax(0,1.9fr) minmax(0,1fr);gap:.75rem}
@@ -177,4 +205,72 @@ button:focus-visible{outline:.1875rem solid #d78627;outline-offset:.25rem}.conti
 @keyframes dossier-lock{0%{border-color:#69d8ae00;box-shadow:0 0 0 #5bc49d00}18%{border-color:#7aecC294;box-shadow:inset 0 0 1.125rem #5bc49d1f,0 0 .75rem #5bc49d1f}70%{border-color:#7aecC233}100%{border-color:#7aecC200;box-shadow:none}}
 @keyframes dossier-flash{0%{opacity:0}10%{opacity:1}72%{opacity:.72}100%{opacity:0}}
 @keyframes dossier-content-glitch{0%,100%{transform:translate(0,0)}14%{transform:translate(-1px,0)}18%{transform:translate(1px,0)}22%{transform:translate(0,0)}34%{transform:translate(.6px,-.3px)}38%{transform:translate(0,0)}}
+/* Shared cinematic face: the actual library and opening use this same card. */
+.archive-hero.dossier-only{display:block;inline-size:100%;block-size:100%;margin:0!important}
+.dossier-only .continue-dossier{inline-size:100%;block-size:100%;min-block-size:0;transform:none!important;animation:none!important;filter:none!important}
+.arrival-concealed>.continue-dossier{visibility:hidden}
+.continue-dossier{background:#19241f linear-gradient(125deg,#303d37,#19241f 64%,#354139);border-color:#9ba99c88;box-shadow:inset 0 0 0 1px #ffffff13,inset 0 0 4rem #070e0a33}
+.continue-dossier:before{background:linear-gradient(115deg,#f4f5dd0d,transparent 48%,#ffffff06);border-color:#cad5c333}
+@media(prefers-reduced-motion:reduce){.continue-dossier,.continue-dossier *{animation:none!important;transition:none!important}}
+
+/* Size the shared face from its own box, not the boot viewport's compact-height rules. */
+.continue-dossier{container:dossier / size;clip-path:none;border:1px solid #93cbb6;padding:.55rem;box-shadow:inset 0 0 0 3px #10231b,inset 0 0 0 4px #79a99588,inset 0 0 2rem #0d1b1433}
+.continue-dossier:before{inset:.75rem;clip-path:none;border-color:#aacabb55}
+.continue-dossier>header{flex:0 0 27%;padding:.5cqi 1.5cqi 1.3cqi;align-items:center}
+.continue-dossier .dossier-kicker{font-size:clamp(8px,1.55cqi,13px)}
+.continue-dossier header strong{font-size:clamp(23px,5.25cqi,46px);margin-top:.65cqi;line-height:1.05}
+.continue-dossier header strong:before{left:1.8cqi;height:7.5cqi;max-height:4rem;border-left-color:#eaa247}
+.continue-dossier .dossier-side-note{display:block;font-size:clamp(6px,1.03cqi,9px)}
+.continue-dossier .dossier-book{padding:1.5cqi 1.5cqi 1cqi;gap:2.5cqi;min-height:0}
+.continue-dossier .dossier-book :deep(.library-book-cover){width:20.5%;height:100%;aspect-ratio:auto;padding:2cqi 1cqi;flex:none}
+.continue-dossier .dossier-book :deep(.library-book-cover>span){font-size:clamp(10px,2.1cqi,19px);line-height:1.45;max-height:7em}
+.continue-dossier .dossier-copy h2{font-size:clamp(18px,4.1cqi,36px);line-height:1.15;margin:0 0 .55cqi}
+.continue-dossier .dossier-copy>p{font-size:clamp(9px,1.8cqi,15px);line-height:1.4}
+.continue-dossier .dossier-data-row{margin-top:auto;padding-top:1.1cqi}
+.continue-dossier .dossier-data-row>span{padding:.7cqi 0;gap:.5cqi 1cqi;flex-wrap:wrap}
+.continue-dossier .dossier-data-row b{font-size:clamp(17px,3.65cqi,32px);line-height:1.15}
+.continue-dossier .dossier-data-row small{display:block;font-size:clamp(8px,1.7cqi,14px)}
+.continue-dossier .dossier-progress{gap:.4cqi;padding-top:.4cqi}
+.continue-dossier .dossier-progress>div>span{display:block;font-size:clamp(6px,.98cqi,9px);letter-spacing:.07em}
+.continue-dossier .dossier-progress>div>b{font-size:clamp(10px,1.9cqi,16px)}
+.continue-dossier .dossier-progress>i{height:clamp(4px,1cqi,9px)}
+.continue-dossier .dossier-copy footer{display:flex;margin-top:1.25cqi;padding-top:1cqi;gap:1cqi;min-height:0;font-size:clamp(7px,1.4cqi,12px);line-height:1.35}
+.continue-dossier .dossier-copy footer>span:first-child{display:block;white-space:nowrap}
+.continue-dossier .dossier-copy footer>span:last-child{font-size:clamp(6px,1cqi,9px);text-align:right}
+
+/* The empty face shares the archive frame, but has no click or hover action. */
+.continue-dossier.empty-dossier{display:block;min-block-size:0;cursor:default;background:#1b2821 linear-gradient(120deg,#303d36,#1b2821 70%,#2b3a31)}
+.continue-dossier.empty-dossier:hover{transform:none;filter:none;box-shadow:inset 0 0 0 3px #10231b,inset 0 0 0 4px #79a99588,inset 0 0 2rem #0d1b1433}
+.empty-dossier:after{background-image:linear-gradient(#d9e1db06 1px,transparent 1px),linear-gradient(90deg,#d9e1db06 1px,transparent 1px);background-size:3rem 3rem}
+.empty-dossier-layout{display:grid;grid-template-rows:auto minmax(0,1fr) auto;block-size:100%;min-block-size:0;padding:clamp(.75rem,4cqb,1.5rem) clamp(1rem,4cqi,2rem);gap:clamp(.5rem,3cqb,1rem)}
+.empty-dossier-body{display:grid;grid-template-columns:minmax(0,1fr) 30%;align-items:center;gap:clamp(.75rem,3cqi,1.5rem);min-block-size:0}
+.empty-dossier-copy{min-inline-size:0;padding-inline-start:clamp(.75rem,2.7cqi,1.375rem);border-inline-start:3px solid #e9a34b}
+.empty-dossier-copy h2{margin:0 0 clamp(.5rem,2.5cqb,.75rem);color:#f5f3eb;font:600 clamp(1.25rem,5cqi,2.125rem)/1.5 var(--serif);letter-spacing:.025em;overflow-wrap:anywhere}
+.empty-dossier-title{max-inline-size:6.5em}
+.empty-dossier-copy p{margin:0;color:#bac7bd;font:clamp(.75rem,1.8cqi,.875rem)/1.8 var(--sans)}
+.empty-dossier-art{position:relative;display:grid;place-items:center;block-size:min(52cqb,12rem);min-inline-size:0;pointer-events:none}
+.empty-dossier-art:before{content:'';position:absolute;inset:0;border:1px solid #b1c1b51a;border-radius:50%}
+.empty-dossier-sheet{position:absolute;inline-size:66%;max-block-size:90%;aspect-ratio:124/166;border:1px solid #9bb4a85c;background:#24342b}
+.empty-dossier-sheet.sheet-back{transform:translate(-5%,1%) rotate(-9deg);background:#293b30;border-color:#9bb4a833}
+.empty-dossier-sheet.sheet-middle{transform:translate(12%,-5%) rotate(12deg)}
+.empty-dossier-sheet.sheet-front{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12%;transform:rotate(3deg);background:linear-gradient(135deg,#34483a,#293b30);border-color:#a8beaa77;box-shadow:.5rem .625rem 1.375rem #0c171544}
+.empty-dossier-sheet.sheet-front:before{content:'';position:absolute;inset:6%;border:1px solid #a8beaa22}
+.sheet-front>svg{inline-size:35%;block-size:auto;color:#c7d2b8}
+.empty-dossier-bookmark{position:absolute;inset-block-start:-1px;inset-inline-end:15%;inline-size:10%;block-size:18%;background:#e4a259;clip-path:polygon(0 0,100% 0,100% 100%,50% 80%,0 100%)}
+.empty-dossier-lines{display:grid;gap:.4375rem;inline-size:50%}
+.empty-dossier-lines i{block-size:1px;background:#a8beaa55}.empty-dossier-lines i:last-child{inline-size:65%}
+.empty-dossier-footer{display:flex;align-items:center;gap:.75rem;padding-block-start:clamp(.5rem,3cqb,1rem);border-block-start:1px solid #b4c3ba2b;color:#a5b6a9;font:.6875rem/1.4 var(--sans);letter-spacing:.09em}
+.empty-dossier-footer:before{content:'';flex:none;inline-size:1.0625rem;block-size:2px;background:#e9a34b}
+.empty-dossier-footer>span:last-child{margin-inline-start:auto;color:#8da294;font-size:.5625rem;letter-spacing:.2em}
+@container dossier (max-width:28rem){
+  .empty-dossier-body{grid-template-columns:minmax(0,1fr)}
+  .empty-dossier-art,.empty-dossier-footer>span:last-child{display:none}
+}
+@container dossier (max-height:14rem){
+  .empty-dossier-layout{padding-block:.625rem;gap:.5rem}
+  .empty-dossier-footer{display:none}
+  .empty-dossier-layout{grid-template-rows:auto minmax(0,1fr)}
+  .empty-dossier-copy h2{font-size:clamp(1.25rem,4.5cqi,1.625rem);line-height:1.35}
+}
+
 </style>

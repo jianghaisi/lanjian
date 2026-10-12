@@ -32,11 +32,12 @@ export class WorldMapService {
     return result.view
   }
 
-  async write(value: WorldMapWriteInput): Promise<WorldMapLayoutView> {
+  async write(value: WorldMapWriteInput, beforeWrite?: () => Promise<void>): Promise<WorldMapLayoutView> {
     const input = decodeWorldMapWriteInput(value)
     const context = await this.context()
     if (input.workItemId !== context.workItemId) throw conflict()
     return this.operations.run(context.root, async () => {
+      await beforeWrite?.()
       await this.assertCurrent(context)
       const current = await this.readAt(context)
       if (input.expectedRevision !== current.view.revision) throw conflict()
@@ -45,6 +46,7 @@ export class WorldMapService {
         const latest = await this.readAt(context)
         if (latest.view.revision !== input.expectedRevision || latest.formal !== current.formal) throw conflict()
         await this.assertCurrent(context)
+        await beforeWrite?.()
       }
       if (current.formal) {
         const receipt = await this.authority.saveWorldMapConfig(context.root, {
@@ -63,7 +65,7 @@ export class WorldMapService {
         // be overwritten just because the save waited behind another operation.
         await guard()
         await projectDirectory(context.root, target)
-        await atomicWriteText(target, `${JSON.stringify(input.document, null, 2)}\n`)
+        await atomicWriteText(target, `${JSON.stringify(input.document, null, 2)}\n`, guard)
       }
       const result = await this.readAt(context)
       await this.assertCurrent(context)

@@ -176,7 +176,9 @@ test('v34 migration preserves all historical evidence and decisions without inve
   try {
     assert.equal(upgraded.prepare('PRAGMA user_version').get()?.user_version, WORKSPACE_DATABASE_SCHEMA_VERSION)
     assert.deepEqual(upgraded.prepare('PRAGMA foreign_key_check').all(), [])
-    assert.deepEqual(upgraded.prepare('SELECT * FROM body_versions').all(), bodies)
+    const migratedBodies = upgraded.prepare('SELECT * FROM body_versions').all()
+    for (const row of migratedBodies) { assert.equal(row.review_application_id, null); delete row.review_application_id }
+    assert.deepEqual(migratedBodies, bodies)
     assert.deepEqual(upgraded.prepare('SELECT * FROM findings ORDER BY id').all().map(({ resulting_body_version_id, ...row }) => { assert.equal(resulting_body_version_id, null); return { ...row } }), beforeFindings.map(row => ({ ...row })))
     assert.deepEqual(upgraded.prepare('SELECT * FROM finding_decisions ORDER BY rowid').all().map(({ resulting_body_version_id, ...row }) => { assert.equal(resulting_body_version_id, null); return { ...row } }), beforeDecisions.map(row => ({ ...row })))
     assert.throws(() => upgraded.exec("UPDATE finding_decisions SET reason = '篡改历史'"), /append-only/)

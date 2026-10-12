@@ -311,7 +311,7 @@ test('strict selections, metadata and receipts reject unsafe or ambiguous input'
   }
   const connection = { ...metadata('global-one'), enabled: true, revision: 1 }
   const receipt = { operationId: 'reuse-fixture-operation-token-1', sourceIdentity: 'a'.repeat(64), sourceFingerprint: 'b'.repeat(64), connectionIds: ['global-one'] }
-  for (const reuseReceipts of [[receipt, receipt], [{ ...receipt, sourceIdentity: 'raw-path' }], [{ ...receipt, connectionIds: ['global-missing'] }], [{ ...receipt, apiKey: secret }], Array(1)]) {
+  for (const reuseReceipts of [[receipt, receipt], [{ ...receipt, sourceIdentity: 'raw-path' }], [{ ...receipt, apiKey: secret }], Array(1)]) {
     assert.throws(() => decodeGlobalConnectionDocument({ version: 1, revision: 1, connections: [connection], reuseReceipts }), code('VALIDATION_ERROR'))
   }
 })
@@ -407,4 +407,28 @@ test('a junction out of the selected book is rejected without following its cred
   const before = await readFile(join(external, 'ai-settings.json'))
   await assert.rejects(f.preview(), code('STORAGE_ERROR'))
   assert.deepEqual(await readFile(join(external, 'ai-settings.json')), before)
+})
+
+
+test('deleting a reused connection keeps historical receipts and retries never resurrect it', async t => {
+  const f = await fixture(t), preview = await f.preview(), receipt = await f.reuse.confirm(preview.token)
+  const before = await f.store.read(), bookBefore = await readFile(f.aiFile), keysBefore = await readFile(f.settingsFile)
+  const service = new ModelConnectionsService(f.store, f.secrets, () => 'global-fresh')
+  await service.remove({ expectedRevision: before.document.revision, id: receipt.connectionIds[0], connectionRevision: 1 })
+  const after = await new ModelConnectionsStore(f.app).read()
+  assert.deepEqual(after.document.connections, [])
+  assert.deepEqual(after.document.reuseReceipts, before.document.reuseReceipts)
+  // New dangling receipts and reuse of a deleted receipt identity remain forbidden.
+  const forgedReceipt = { ...after.document.reuseReceipts![0], operationId: 'reuse-forged-operation-token', connectionIds: ['global-absent'] }
+  await assert.rejects(f.store.commit(after, { ...after.document, revision: after.document.revision + 1,
+    reuseReceipts: [...after.document.reuseReceipts!, forgedReceipt] }), code('STORAGE_ERROR'))
+  await assert.rejects(f.store.commit(after, { ...after.document, revision: after.document.revision + 1,
+    connections: [before.document.connections[0]] }), code('STORAGE_ERROR'))
+  const decrypts = f.state.decrypts
+  assert.deepEqual(await f.reuse.confirm(preview.token), receipt)
+  assert.equal(f.state.decrypts, decrypts)
+  assert.deepEqual((await service.list()).connections, [])
+  assert.deepEqual(await readFile(f.aiFile), bookBefore); assert.deepEqual(await readFile(f.settingsFile), keysBefore)
+  await service.create({ expectedRevision: after.document.revision, name: 'next', baseUrl: endpoint, protocol: 'openai-compatible' })
+  assert.equal((await service.list()).connections[0].id, 'global-fresh')
 })

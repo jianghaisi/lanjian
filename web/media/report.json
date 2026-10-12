@@ -1,0 +1,367 @@
+[
+  {
+    "source": "desktop/src/renderer/assets/visuals/archive-companion.png",
+    "before": 2471651,
+    "after": 152240
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/archive-observatory.png",
+    "before": 2303845,
+    "after": 138870
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/background-industrial-city.png",
+    "before": 2321980,
+    "after": 159116
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/character-kanban-2_5d-final-v7.png",
+    "before": 1815653,
+    "after": 147880
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/character-kanban-2_5d-final-v7@2x.png",
+    "before": 6400702,
+    "after": 213372
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/character-q-actions.png",
+    "before": 2625768,
+    "after": 328854
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/character-q-current-blink.png",
+    "before": 1407873,
+    "after": 212934
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/character-q-current-speaking.png",
+    "before": 1420167,
+    "after": 215736
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/character-q-current.png",
+    "before": 1413679,
+    "after": 216108
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/character-q-pet-final-v2.png",
+    "before": 1623928,
+    "after": 164848
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/character-q-pet-final-v2@2x.png",
+    "before": 4680511,
+    "after": 253518
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/cover-eclipse-tower.png",
+    "before": 2583492,
+    "after": 150102
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/lanjian-quartet-master-v2.png",
+    "before": 3410562,
+    "after": 285550
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/lanjian-quartet-workbench-v2.png",
+    "before": 1966726,
+    "after": 31730
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/recent-fog-city.png",
+    "before": 2294029,
+    "after": 126154
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/recent-red-moon.png",
+    "before": 2271535,
+    "after": 130260
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/recent-sky-tower.png",
+    "before": 2364100,
+    "after": 154030
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/scene-satellite-city.png",
+    "before": 2537959,
+    "after": 181764
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/blink.png",
+    "before": 2648892,
+    "after": 346792
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/drag.png",
+    "before": 2911495,
+    "after": 457108
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/drinking-return.png",
+    "before": 2722916,
+    "after": 361156
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/drinking.png",
+    "before": 2797693,
+    "after": 393088
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/eating-return.png",
+    "before": 2693259,
+    "after": 355220
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/eating.png",
+    "before": 2702954,
+    "after": 360756
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/greet-return.png",
+    "before": 2720639,
+    "after": 355222
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/greet.png",
+    "before": 2690850,
+    "after": 356012
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/handshake-return.png",
+    "before": 2642327,
+    "after": 363918
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/handshake.png",
+    "before": 2630961,
+    "after": 363974
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/idle.png",
+    "before": 2310253,
+    "after": 471958
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/land.png",
+    "before": 2835245,
+    "after": 427966
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/listening.png",
+    "before": 2976514,
+    "after": 430864
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/pat-return.png",
+    "before": 2723159,
+    "after": 378500
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/pat.png",
+    "before": 2693865,
+    "after": 373848
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/playing-return.png",
+    "before": 2785425,
+    "after": 386326
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/playing.png",
+    "before": 2845980,
+    "after": 411696
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/sleeping.png",
+    "before": 2942113,
+    "after": 404322
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/speaking.png",
+    "before": 2925209,
+    "after": 419634
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/stretch-return.png",
+    "before": 2763418,
+    "after": 384048
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/stretch.png",
+    "before": 2798532,
+    "after": 394440
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/success.png",
+    "before": 2346294,
+    "after": 430338
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/thinking.png",
+    "before": 2988961,
+    "after": 435674
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/warning.png",
+    "before": 2262539,
+    "after": 414302
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-sequences/writing.png",
+    "before": 3013077,
+    "after": 462808
+  },
+  {
+    "source": "desktop/src/renderer/assets/visuals/pet-videos/poster.png",
+    "before": 528837,
+    "after": 76630
+  },
+  {
+    "source": "web/src/portal/assets/glass-arm-v1.webp",
+    "before": 237902,
+    "after": 185722
+  },
+  {
+    "source": "web/src/portal/assets/glass-entity-front.webp",
+    "before": 609192,
+    "after": 480396
+  },
+  {
+    "source": "web/src/login/assets/lanjian-capsule-avatar-v1.png",
+    "before": 1242671,
+    "after": 43646
+  },
+  {
+    "source": "B15-boot-prelude.wav",
+    "before": 3686444,
+    "after": 154270
+  },
+  {
+    "source": "B16-boot-wave-loop.wav",
+    "before": 2304044,
+    "after": 96906
+  },
+  {
+    "source": "B17-boot-resolve.wav",
+    "before": 3974444,
+    "after": 166496
+  },
+  {
+    "source": "B18-boot-idle-loop.wav",
+    "before": 2304044,
+    "after": 96906
+  },
+  {
+    "source": "B19-boot-exit.wav",
+    "before": 460844,
+    "after": 20106
+  },
+  {
+    "source": "L01-load-impact-start.wav",
+    "before": 247724,
+    "after": 11015
+  },
+  {
+    "source": "L02-load-wait-loop.wav",
+    "before": 1728044,
+    "after": 72768
+  },
+  {
+    "source": "L03-load-step.wav",
+    "before": 46124,
+    "after": 2865
+  },
+  {
+    "source": "L04-load-ready.wav",
+    "before": 207404,
+    "after": 9448
+  },
+  {
+    "source": "L05-load-reveal.wav",
+    "before": 146924,
+    "after": 6940
+  },
+  {
+    "source": "U01-ui-hover.wav",
+    "before": 23660,
+    "after": 1924
+  },
+  {
+    "source": "U02-ui-click.wav",
+    "before": 33164,
+    "after": 2238
+  },
+  {
+    "source": "U03-ui-confirm.wav",
+    "before": 66284,
+    "after": 3492
+  },
+  {
+    "source": "U04-ui-back.wav",
+    "before": 57644,
+    "after": 3178
+  },
+  {
+    "source": "U05-ui-navigate.wav",
+    "before": 64844,
+    "after": 3492
+  },
+  {
+    "source": "U06-ui-toggle-on.wav",
+    "before": 49004,
+    "after": 2865
+  },
+  {
+    "source": "U07-ui-toggle-off.wav",
+    "before": 49004,
+    "after": 2865
+  },
+  {
+    "source": "U08-ui-panel-open.wav",
+    "before": 92204,
+    "after": 4746
+  },
+  {
+    "source": "U09-ui-panel-close.wav",
+    "before": 77804,
+    "after": 4119
+  },
+  {
+    "source": "U10-ui-success.wav",
+    "before": 141164,
+    "after": 6626
+  },
+  {
+    "source": "U11-ui-warning.wav",
+    "before": 123884,
+    "after": 5999
+  },
+  {
+    "source": "U12-ui-error.wav",
+    "before": 123884,
+    "after": 5999
+  },
+  {
+    "source": "01 - Quiet Wonder - d7249f8a.mp3",
+    "before": 9121267,
+    "after": 3648826
+  },
+  {
+    "source": "02 - Quiet Wonder - 70e74505.mp3",
+    "before": 9394867,
+    "after": 3757914
+  },
+  {
+    "source": "03 - Suspended in Time - 7388a502.mp3",
+    "before": 8993592,
+    "after": 3597417
+  },
+  {
+    "source": "04 - Suspended in Time - 7ecd0a21.mp3",
+    "before": 8722872,
+    "after": 3489166
+  }
+]

@@ -1,5 +1,22 @@
+import { isSameManuscriptDraft } from '../../../../contracts/manuscript/manuscript-save-identity'
+
 // Explicit live ports preserve the existing book/request scope and draft ownership.
 export function createPlanningOutlinesActions(ports) {
+  async function saveDocument(key, request, operation, successNotice) {
+    ports.outlineStorageFeedback.beginSave?.(key)
+    let failure = '保存失败，编辑稿仍在当前窗口'
+    try {
+      const result = await ports.guard(async () => {
+        try { return await operation() }
+        catch (cause) { failure = cause?.message || failure; throw cause }
+      }, successNotice)
+      if (ports.workspaceRequests.isCurrent(request, ports.current.value)) ports.outlineStorageFeedback.finishSave?.(key, result ? '' : failure)
+      return result
+    } catch (cause) {
+      if (ports.workspaceRequests.isCurrent(request, ports.current.value)) ports.outlineStorageFeedback.finishSave?.(key, cause?.message || failure)
+      throw cause
+    }
+  }
   function invalidateOutlineRead() {
     ports.outlineNavigationGeneration += 1
     ports.outlineLoading.value = ''
@@ -86,6 +103,7 @@ export function createPlanningOutlinesActions(ports) {
     const isCurrent = () =>
       generation === ports.outlineNavigationGeneration &&
       ports.workspaceRequests.isCurrent(request, ports.current.value)
+    let isSourceCurrent = isCurrent
     ports.retryOutlineOpen = () => runOutlineNavigation(label, read)
     ports.outlineOpenError.value = ''
     try {
@@ -94,9 +112,23 @@ export function createPlanningOutlinesActions(ports) {
       if (ports.active.value === 'desk' && !(await ports.flushChapterSaveSafely())) return false
       if (!isCurrent()) return false
       const sourceDraft = outlineDraftSnapshot()
+      const sourceManuscript = ports.active.value === 'desk' ? {
+        title: ports.chapterTitle.value, content: ports.chapterContent.value,
+        chapterId: ports.selectedId.value, editor: ports.manuscriptEditor.value
+      } : null
+      isSourceCurrent = () => isCurrent() && (!sourceManuscript || (
+        ports.active.value === 'desk' && ports.selectedId.value === sourceManuscript.chapterId &&
+        ports.manuscriptEditor.value === sourceManuscript.editor
+      ))
       ports.outlineLoading.value = `正在打开${label}…`
       const commit = await read()
-      if (!isCurrent()) return false
+      if (!isSourceCurrent()) return false
+      if (sourceManuscript) {
+        await sourceManuscript.editor?.flush?.()
+        if (!isSourceCurrent()) return false
+        if (!isSameManuscriptDraft(sourceManuscript, { title: ports.chapterTitle.value, content: ports.chapterContent.value }))
+          throw new Error('当前正文有新修改，已保留输入，请重试打开。')
+      }
       if (sourceDraft !== outlineDraftSnapshot()) throw new Error('当前大纲有新修改，已保留草稿，请重试打开。')
       if (ports.active.value === 'timeline' && ports.timelineMode.value === 'map') ports.worldMapWorkspace.cancelRead()
       ports.editorFocusMode.value = false
@@ -105,7 +137,7 @@ export function createPlanningOutlinesActions(ports) {
       void ports.outlineStorageFeedback.refresh()
       return true
     } catch (error) {
-      if (isCurrent()) {
+      if (isSourceCurrent()) {
         ports.outlineOpenError.value = `${label}未打开：${error?.message || '读取失败，请重试。'}`
         ports.notice(ports.outlineOpenError.value)
       }
@@ -152,9 +184,14 @@ export function createPlanningOutlinesActions(ports) {
     if (!ports.current.value || ports.busy.value) return
     const request = ports.workspaceRequests.capture(ports.current.value),
       content = ports.totalOutline.value
-    const result = await ports.guard(() => ports.desktop.outlines.update('total', content))
+    const result = await saveDocument('total', request, async () => {
+      const reviewed = ports.outlineEditor?.value?.saveReviewedDraft ? await ports.outlineEditor.value.saveReviewedDraft({ content }) : null
+      return reviewed ? { success: true, volume: 'total', content: reviewed.snapshot.content } : ports.desktop.outlines.update('total', content)
+    })
     if (!result || !ports.workspaceRequests.isCurrent(request, ports.current.value)) return
-    ports.outlineStorageFeedback.record('total', result)
+    // Review receipts confirm content, not the ordinary save's storage fields.
+    if (result.storageMode) ports.outlineStorageFeedback.record('total', result)
+    else void ports.outlineStorageFeedback.refresh()
     ports.lastSavedTotalOutline.value = result.content
     ports.notice(ports.totalOutline.value === result.content ? '总纲已保存' : '已保存提交的总纲，后续输入仍待保存')
     await ports.refreshWorkflow()
@@ -227,20 +264,28 @@ export function createPlanningOutlinesActions(ports) {
       stage = ports.selectedStage.value
     const title = ports.stageTitle.value,
       content = ports.stageOutline.value
-    const result = await ports.guard(() => ports.desktop.outlines.updateStage(stage, title, content))
+    const stageDocument = ports.stageOutlines.value.find(item => item.stage === stage)
+    if (!stageDocument) return ports.notice('阶段已经变化，请重新选择。')
+    const result = await saveDocument(`stage:${stage}`, request, async () => {
+      const reviewed = ports.outlineEditor?.value?.saveReviewedDraft ? await ports.outlineEditor.value.saveReviewedDraft({ title, content }) : null
+      if (!reviewed) return ports.desktop.outlines.updateStage(stage, title, content)
+      return { success: true, stage: { ...stageDocument, title: reviewed.snapshot.title, content: reviewed.snapshot.content, mirrorStatus: undefined } }
+    })
     if (!result || !ports.workspaceRequests.isCurrent(request, ports.current.value)) return
-    ports.stageOutlines.value = ports.stageOutlines.value.map((item) => (item.stage === stage ? result.stage : item))
-    ports.outlineStorageFeedback.record(`stage:${stage}`, {
+    ports.stageOutlines.value = ports.stageOutlines.value.map(item => item.stage !== stage ? item : result.storageMode ? result.stage :
+      { ...item, title: result.stage.title, content: result.stage.content, mirrorStatus: undefined })
+    if (result.storageMode) ports.outlineStorageFeedback.record(`stage:${stage}`, {
       storageMode: result.storageMode,
       mirrorStatus: result.stage.mirrorStatus
     })
+    else void ports.outlineStorageFeedback.refresh()
     if (ports.selectedStage.value === stage) {
       ports.lastSavedStageTitle.value = result.stage.title
       ports.lastSavedStageOutline.value = result.stage.content
       if (ports.stageTitle.value === title) ports.stageTitle.value = result.stage.title
     }
     ports.notice(
-      result.stage.mirrorStatus === 'synced'
+      !result.storageMode ? '当前阶段纲已保存' : result.stage.mirrorStatus === 'synced'
         ? '当前阶段纲已保存，Markdown 已同步'
         : '当前阶段纲已存入 SQLite，Markdown 镜像待核对'
     )
@@ -252,9 +297,13 @@ export function createPlanningOutlinesActions(ports) {
     const request = ports.workspaceRequests.capture(ports.current.value),
       volume = ports.selectedVolume.value,
       content = ports.volumeOutline.value
-    const result = await ports.guard(() => ports.desktop.outlines.update(volume, content))
+    const result = await saveDocument(`volume:${volume}`, request, async () => {
+      const reviewed = ports.outlineEditor?.value?.saveReviewedDraft ? await ports.outlineEditor.value.saveReviewedDraft({ content }) : null
+      return reviewed ? { success: true, volume, content: reviewed.snapshot.content } : ports.desktop.outlines.update(volume, content)
+    })
     if (!result || !ports.workspaceRequests.isCurrent(request, ports.current.value)) return
-    ports.outlineStorageFeedback.record(`volume:${volume}`, result)
+    if (result.storageMode) ports.outlineStorageFeedback.record(`volume:${volume}`, result)
+    else void ports.outlineStorageFeedback.refresh()
     if (ports.selectedVolume.value === volume) ports.lastSavedVolumeOutline.value = result.content
     ports.notice(`第 ${volume} 卷卷纲已保存`)
     await ports.refreshWorkflow()
@@ -287,12 +336,17 @@ export function createPlanningOutlinesActions(ports) {
   async function saveChapterOutline() {
     if (ports.chapterOrderIssue.value) return ports.notice('章节顺序账本待核对，暂不能保存章节大纲')
     if (!ports.selectedId.value) return ports.notice('请先建立或选择一个章节')
+    if (!ports.current.value || ports.busy.value) return
     const chapterId = ports.selectedId.value
-    const projectPath = ports.current.value?.path
+    const request = ports.workspaceRequests.capture(ports.current.value)
     const content = ports.chapterOutline.value
-    const result = await ports.guard(() => ports.desktop.chapterOutlines.update(chapterId, content), '当前章纲已保存')
-    if (!result || ports.current.value?.path !== projectPath || ports.selectedId.value !== chapterId) return
-    ports.outlineStorageFeedback.record(`chapter:${chapterId}`, result)
+    const result = await saveDocument(`chapter:${chapterId}`, request, async () => {
+      const reviewed = ports.outlineEditor?.value?.saveReviewedDraft ? await ports.outlineEditor.value.saveReviewedDraft({ content }) : null
+      return reviewed ? { chapterId, content: reviewed.snapshot.content } : ports.desktop.chapterOutlines.update(chapterId, content)
+    }, '当前章纲已保存')
+    if (!result || !ports.workspaceRequests.isCurrent(request, ports.current.value) || ports.selectedId.value !== chapterId) return
+    if (result.storageMode) ports.outlineStorageFeedback.record(`chapter:${chapterId}`, result)
+    else void ports.outlineStorageFeedback.refresh()
     ports.lastSavedChapterOutline.value = result.content
     await ports.refreshWorkflow()
   }
@@ -445,12 +499,8 @@ export function createPlanningOutlinesActions(ports) {
   async function generateChapterOutline() {
     if (ports.chapterOrderIssue.value) return ports.notice('章节顺序账本待核对，暂不能生成章节大纲')
     if (!ports.selectedId.value) return ports.notice('请先建立或选择一个章节')
-    const volumeHint = ports.selectedChapterVolume.value
-      ? `本章属于第 ${ports.selectedChapterVolume.value} 卷，必须同时服从该卷卷纲。`
-      : '本章尚未归卷，不得自行假定故事阶段。'
-    const instruction = `依据全局总纲，为第 ${ports.selectedChapterPosition.value} 章《${ports.chapterTitle.value}》生成严格的章节大纲。${volumeHint}固定按以下顺序输出：进入状态；3—7 个按发生顺序排列的剧情节点；退出状态；允许扩写；禁止事项。进入状态写清开章时人物、地点与关键事实；每个节点写明目标、人物、地点、事件和结果；退出状态是最后节点完成后的精确停点；允许扩写只列不会改变后续因果的对白、动作、环境或情绪。只输出章纲，不写正文。`
     const result = await ports.guard(
-      () => ports.desktop.ai.complete(instruction, '', 'chapterOutline', ports.selectedId.value),
+      () => ports.desktop.planning.generateChapterStory(ports.selectedId.value),
       '章纲已生成，请确认后保存'
     )
     ports.chapterOutline.value = result.content

@@ -3,8 +3,10 @@ import { attachDesktopPet } from '../modules/companion/desktop-pet-window'
 import { join } from 'node:path'
 import { isAllowedAppNavigation, isAllowedExternalUrl } from './window-security'
 import type { DesktopRuntime } from './create-desktop-runtime'
+import { mainOutputDirectory } from '../platform/processes/main-output-directory'
 
 export function createMainWindow(runtime: DesktopRuntime): void {
+  const mainDirectory = mainOutputDirectory(__dirname)
   const { companionVoice, localModelRuntime, modelConnectionsRuntime } = runtime
   const window = new BrowserWindow({
     width: 1440,
@@ -14,7 +16,7 @@ export function createMainWindow(runtime: DesktopRuntime): void {
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: join(__dirname, '../preload/index.cjs'),
+      preload: join(mainDirectory, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true
@@ -24,8 +26,12 @@ export function createMainWindow(runtime: DesktopRuntime): void {
   companionVoice?.attach(window)
   localModelRuntime?.attach(window)
   modelConnectionsRuntime?.attach(window)
-  attachDesktopPet(window)
-  let closeRequested = false
+  window.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
+    if (isMainFrame) runtime.writingAgentPreviews.cancel()
+  })
+  window.webContents.once('destroyed', () => runtime.writingAgentPreviews.cancel())
+  attachDesktopPet(window, companionVoice)
+  let closeRequested = false, quitRequested = false
   const showSelectionAiMenu = (event: Electron.IpcMainEvent): void => {
     if (event.sender !== window.webContents || window.isDestroyed()) return
     if (process.env.LANJIAN_SMOKE === '1') {
@@ -52,6 +58,7 @@ export function createMainWindow(runtime: DesktopRuntime): void {
     if (event.sender !== window.webContents) return
     closeRequested = false
     if (!success) {
+      quitRequested = false
       if (!window.isDestroyed()) window.show()
       return
     }
@@ -60,16 +67,30 @@ export function createMainWindow(runtime: DesktopRuntime): void {
   }
   ipcMain.on('app:close-ready', closeReady)
   ipcMain.on('app:show-selection-ai-menu', showSelectionAiMenu)
+  const beforeQuit = (event: Electron.Event): void => {
+    if (event.defaultPrevented || window.isDestroyed()) return
+    // Let the existing save/unsaved-draft guards decide first. Electron must
+    // not close the pet independently and persist that as a user opt-out.
+    event.preventDefault()
+    quitRequested = true
+    window.close()
+  }
+  app.on('before-quit', beforeQuit)
+  window.webContents.on('will-prevent-unload', () => { quitRequested = false })
   window.on('close', (event) => {
-    if (closeAllowed) return
+    // A renderer beforeunload guard may still keep this window alive. Consume
+    // the permit now so any later close must run fresh save/draft checks.
+    if (closeAllowed) { closeAllowed = false; return }
     event.preventDefault()
     if (closeRequested || window.webContents.isDestroyed()) return
     closeRequested = true
     window.webContents.send('app:before-close')
   })
   window.on('closed', () => {
+    app.removeListener('before-quit', beforeQuit)
     ipcMain.removeListener('app:close-ready', closeReady)
     ipcMain.removeListener('app:show-selection-ai-menu', showSelectionAiMenu)
+    if (quitRequested) app.quit()
   })
   window.webContents.on('preload-error', () => {
     console.error('[desktop] preload failed')
@@ -116,7 +137,7 @@ export function createMainWindow(runtime: DesktopRuntime): void {
     void window.loadURL(rendererUrl.toString())
   } else
     void window.loadFile(
-      join(__dirname, '../renderer/index.html'),
+      join(mainDirectory, '../renderer/index.html'),
       process.env.LANJIAN_SMOKE === '1'
         ? { query: { smoke: '1', ...(process.env.LANJIAN_SMOKE_BOOT_VISIBILITY_ONLY === '1' ? { boot: '1' } : {}) } }
         : undefined

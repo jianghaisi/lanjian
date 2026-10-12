@@ -1,6 +1,8 @@
+import { isSameManuscriptDraft } from '../../../../contracts/manuscript/manuscript-save-identity'
+
 // Explicit live ports preserve the existing book/request scope and draft ownership.
 export function createManuscriptChapterCardsActions(ports) {
-  async function selectChapter(chapter, existingRequest = null, navigation = null) {
+  async function selectChapter(chapter, existingRequest = null, navigation = null, { deferWorkflow = false } = {}) {
     if (!ports.worldMapWorkspace.canLeave() || !ports.current.value) return false
     const request = existingRequest || ports.workspaceRequests.capture(ports.current.value)
     if (!navigation) ports.invalidateOutlineRead()
@@ -15,11 +17,20 @@ export function createManuscriptChapterCardsActions(ports) {
       return false
     if (!stillCurrent()) return false
     const sourceDraft = ports.outlineDraftSnapshot()
+    const sourceManuscript = { title: ports.chapterTitle.value, content: ports.chapterContent.value }
+    const sourceEditor = ports.manuscriptEditor.value
     const [selectedOutline, planning] = await Promise.all([
       ports.desktop.chapterOutlines.get(chapter.id),
       ports.desktop.chapters.getPlanning(chapter.id).catch(() => null)
     ])
     if (!stillCurrent()) return false
+    if (sourceEditor !== ports.manuscriptEditor.value) return false
+    await sourceEditor?.flush?.()
+    if (!stillCurrent() || sourceEditor !== ports.manuscriptEditor.value) return false
+    if (!isSameManuscriptDraft(sourceManuscript, { title: ports.chapterTitle.value, content: ports.chapterContent.value })) {
+      ports.notice('读取期间当前正文有新修改，已保留输入，请再次打开目标章节。')
+      return false
+    }
     if (sourceDraft !== ports.outlineDraftSnapshot()) {
       ports.notice('读取期间当前大纲有新修改，已保留草稿，请再次打开目标章节。')
       return false
@@ -55,10 +66,15 @@ export function createManuscriptChapterCardsActions(ports) {
     // Both projections are read-only and guarded by the same work-item and
     // chapter generations. Waiting for them together shortens first-open time
     // without allowing a stale reply to publish into a newer workspace.
-    await Promise.all([
-      ports.refreshWorkflow(request),
-      ports.loadWritingAgentTasks(chapter.id, request, selectionGeneration)
-    ])
+    try {
+      await Promise.all([
+        deferWorkflow ? undefined : ports.refreshWorkflow(request),
+        ports.loadWritingAgentTasks(chapter.id, request, selectionGeneration)
+      ])
+    } catch (error) {
+      if (!stillCurrent() || !isSameManuscriptDraft(chapter, { title: ports.chapterTitle.value, content: ports.chapterContent.value })) return false
+      throw error
+    }
     return stillCurrent() && ports.selectedId.value === chapter.id
   }
 
