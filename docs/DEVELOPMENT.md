@@ -2,6 +2,8 @@
 
 使用 Node.js 24 LTS 与 npm。根目录 README 的快速开始列出共享包安装顺序；不要省略共享包构建后直接运行 Electron。
 
+桌面集成测试会导入 `services/plugin-marketplace/dist`。即使不运行该服务，执行桌面类型检查或安装包构建前，也需要先在该目录运行 `npm ci` 和 `npm run build`。
+
 在仓库根目录运行 `node scripts/ci.mjs all` 可依次安装、测试与构建所有包；`install` 只安装并准备共享包，`check` 使用已有依赖执行检查。桌面测试默认最多 4 个文件并发，避免高核 Windows 主机的磁盘争用；可用 `npm run test:desktop -- --test-concurrency=2` 显式调整。
 
 ## 常用命令

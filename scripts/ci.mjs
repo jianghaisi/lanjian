@@ -22,6 +22,8 @@ if (mode !== 'check') {
   }
 }
 if (mode !== 'install') {
+  // Desktop integration tests import this service's generated JS/types.
+  npm('services/plugin-marketplace', 'run', 'build')
   npm('packages/hosted-contracts', 'test')
   npm('packages/writing-plugin-contracts', 'test')
   npm('packages/writing-plugin-package', 'run', 'build')

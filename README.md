@@ -107,6 +107,8 @@ npm --prefix packages/writing-plugin-contracts ci
 npm --prefix packages/writing-plugin-contracts run build
 npm --prefix packages/writing-plugin-package ci
 npm --prefix packages/writing-plugin-package run build
+npm --prefix services/plugin-marketplace ci
+npm --prefix services/plugin-marketplace run build
 npm --prefix desktop ci
 npm --prefix desktop run desktop:dev
 ~~~

@@ -41,7 +41,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Cannot verify existing releases' }
           if ($releases.tag_name -contains $env:RELEASE_TAG) { throw 'Release already exists; assets will not be overwritten' }
       - name: Install, test and build
-        run: node scripts/ci.mjs all
+        run: |
+          node scripts/ci.mjs install
+          npm --prefix services/plugin-marketplace run build
+          node scripts/ci.mjs check
       - name: Build Windows x64 installer
         working-directory: desktop
         run: npm exec electron-builder -- --win nsis --x64
