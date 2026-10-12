@@ -4,15 +4,13 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { LocalTextRuntime } from '../../../src/main/modules/models/adapters/local-models/text-runtime'
-import { resolvePortablePython } from '../../../src/main/platform/processes/portable-python-runtime'
+import { testPython } from '../../helpers/python'
 import { localPromptProfiles, type VerifiedModelAssets } from '../../../src/main/modules/models/domain/local-models'
 import type { LocalTextRequest } from '../../../src/main/modules/models/domain/model-provider'
 
 // Real production worker and framed IPC; the injected inference module contains no weights.
 test('production worker switches all six profiles, hides reasoning and budgets the complete output', async t => {
-  let python: string
-  try { python = (await resolvePortablePython(resolve('../../.local/companion-voice'), resolve('../../.local/companion-voice/venv'))).python }
-  catch { t.skip('existing isolated Python is unavailable'); return }
+  const python = testPython()
   const root = await mkdtemp(join(tmpdir(), 'lanjian-profile-worker-'))
   const sitePackages = join(root, 'packages'), modelPath = join(root, 'fixture.model')
   await mkdir(sitePackages); await writeFile(modelPath, 'not a model')

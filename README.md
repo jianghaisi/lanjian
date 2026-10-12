@@ -164,6 +164,8 @@ Get-FileHash .\Lanjian-0.1.0-Setup-x64.exe -Algorithm SHA256
 
 开发使用 **Node.js 24 LTS + npm**，Git 克隆后先构建共享包：
 
+完整测试还需要 **Python 3.10+**（CI 使用 3.12），只使用标准库，不需要下载模型。默认从 PATH 查找；多版本环境可把 `LANJIAN_TEST_PYTHON` 指向 Python 可执行文件。安装后的桌面应用不要求用户先装这些开发工具。
+
 ~~~powershell
 git clone https://github.com/jianghaisi/lanjian.git
 cd lanjian

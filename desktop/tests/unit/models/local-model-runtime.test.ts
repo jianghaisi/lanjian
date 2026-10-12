@@ -1,12 +1,12 @@
 import test, { type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { setImmediate } from 'node:timers/promises'
 import { Readable } from 'node:stream'
 import { LocalTextRuntime } from '../../../src/main/modules/models/adapters/local-models/text-runtime'
-import { resolvePortablePython } from '../../../src/main/platform/processes/portable-python-runtime'
+import { testPython } from '../../helpers/python'
 import type { LocalTextRequest } from '../../../src/main/modules/models/domain/model-provider'
 
 function deferred<T>() {
@@ -16,7 +16,7 @@ function deferred<T>() {
 }
 const request = (content: string): LocalTextRequest => ({ action: 'complete', messages: [{ role: 'user', content }], maxTokens: 128, temperature: .1, topP: .9 })
 async function deliveryFixture(t: TestContext) {
-  const { python } = await resolvePortablePython(resolve('../../.local/companion-voice'), resolve('../../.local/companion-voice/venv'))
+  const python = testPython()
   const root = await mkdtemp(join(tmpdir(), 'lanjian-model-delivery-')), worker = join(root, 'delivery.py')
   // A single pipe write contains both deltas and the terminal frame, so a
   // pending consumer outlives receipt of the worker's result deterministically.
@@ -162,9 +162,7 @@ test('successful delivery removes its deadline before another model begins', asy
 
 // Exercises actual pipes/process ownership; the fixture imports no inference package or weights.
 test('private worker reports truncation/crash, preserves deltas and kills its own cancelled PID',async t=>{
-  let python:string
-  try{python=(await resolvePortablePython(resolve('../../.local/companion-voice'),resolve('../../.local/companion-voice/venv'))).python}
-  catch{t.skip('existing isolated Python is unavailable');return}
+  const python = testPython()
   const root=await mkdtemp(join(tmpdir(),'lanjian-local-pipes-')),worker=join(root,'fixture.py')
   await writeFile(worker,`import sys,struct,json,time,os
 def emit(v):

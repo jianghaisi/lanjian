@@ -12,7 +12,11 @@ concurrency:
 jobs:
   verify:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -20,6 +24,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        id: python
+        with:
+          python-version: '3.12'
       - name: Scan public history for secrets
         shell: pwsh
         run: |
@@ -31,4 +39,6 @@ jobs:
           & (Join-Path $scanDir 'gitleaks.exe') git . --config .gitleaks.toml --redact --no-banner --log-opts=--all
           if ($LASTEXITCODE -ne 0) { throw 'Secret scan failed' }
       - name: Install, test and build all packages
-        run: node scripts/ci.mjs all
+        env:
+          LANJIAN_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: node scripts/ci.mjs all ${{ matrix.shard }}/4

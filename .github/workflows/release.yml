@@ -15,7 +15,7 @@ concurrency:
 jobs:
   package:
     runs-on: windows-latest
-    timeout-minutes: 50
+    timeout-minutes: 90
     env:
       RELEASE_TAG: ${{ inputs.tag }}
       GH_TOKEN: ${{ github.token }}
@@ -32,6 +32,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        id: python
+        with:
+          python-version: '3.12'
       - name: Check version and immutable release
         shell: pwsh
         run: |
@@ -41,6 +45,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Cannot verify existing releases' }
           if ($releases.tag_name -contains $env:RELEASE_TAG) { throw 'Release already exists; assets will not be overwritten' }
       - name: Install, test and build
+        env:
+          LANJIAN_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
         run: |
           node scripts/ci.mjs install
           npm --prefix services/plugin-marketplace run build

@@ -21,4 +21,6 @@ Lanjian brings manuscripts, notes, characters and outlines into one book workspa
 
 Use Node.js 24 LTS to develop. Build the shared packages before installing and starting desktop; exact commands are maintained in the Chinese README. End users do not need Node.js.
 
+The full test suite also requires Python 3.10+ (3.12 in CI), using only the standard library. Set `LANJIAN_TEST_PYTHON` to an interpreter path when needed; no model downloads are required for tests.
+
 Original source code is under [MIT](LICENSE). Third-party software and non-code assets retain their own terms; see [asset scope](ASSETS.md) and [third-party notices](desktop/licenses/THIRD-PARTY-NOTICES.md).

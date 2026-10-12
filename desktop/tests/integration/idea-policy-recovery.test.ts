@@ -106,11 +106,12 @@ async function fixture(t: TestContext) {
   }
 }
 async function until(predicate: () => boolean, message: string) {
-  const deadline = Date.now() + 10_000
+  // Package authorization does real disk I/O. This is a completion guard, not a latency assertion.
+  const deadline = Date.now() + 60_000
   while (!predicate()) { if (Date.now() >= deadline) assert.fail(message); await new Promise(r => setTimeout(r, 5)) }
 }
 async function done(f: Awaited<ReturnType<typeof fixture>>, id: string, status = 'succeeded') {
-  const deadline = Date.now() + 10_000
+  const deadline = Date.now() + 60_000
   while (Date.now() < deadline) { const task = await f.service().status(id); if (['succeeded', 'failed', 'cancelled', 'interrupted'].includes(task.status)) { assert.equal(task.status, status, task.error ?? 'unexpected state'); return task } await new Promise(r => setTimeout(r, 5)) }
   return assert.fail('idea task did not settle')
 }

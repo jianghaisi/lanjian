@@ -169,10 +169,14 @@ test('an older cancelled request cannot clear a newer owner using the same opera
   const f = await fixture(t), input = await f.input(), first = gate(), second = gate(), reached = gate(); f.track(first.release); f.track(second.release); let count = 0
   f.respond(async () => { if (++count === 1) { reached.release(); await first.pending } else await second.pending; return { data: [{ b64_json: image.toString('base64') }] } })
   const older = f.generation().generate(input), rejected = assert.rejects(older, error); await reached.pending
-  const newer = f.generation().generate(input), deadline = Date.now() + 30_000
+  // Observe rejection immediately so a failed arrival assertion cannot leak an unhandled promise.
+  const newer = f.generation().generate(input).then(value => ({ value }), error => ({ error }))
+  const deadline = Date.now() + 60_000
   while (f.requests.length < 2 && Date.now() < deadline) await new Promise(r => setTimeout(r, 10))
   assert.equal(f.requests.length, 2, 'the newer request must reach the actual image adapter')
-  first.release(); await rejected; second.release(); const candidate = await newer
+  first.release(); await rejected; second.release(); const result = await newer
+  assert.ok('value' in result, 'the newer request must complete normally')
+  const candidate = result.value
   await f.generation().adopt({ workItemId: f.project.id, expectedRevision: input.expectedRevision, candidateId: candidate.candidateId }); assert.equal(f.requests.length, 2); assert.deepEqual(await readFile(f.assetPath), image)
 })
 

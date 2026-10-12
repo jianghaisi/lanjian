@@ -4,7 +4,11 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const mode = process.argv[2] ?? 'all'
-if (!['install', 'check', 'all'].includes(mode)) throw new Error('Usage: node scripts/ci.mjs [install|check|all]')
+const shard = process.argv[3]
+if (!['install', 'check', 'all'].includes(mode) || process.argv.length > 4 ||
+    (shard && !/^[1-4]\/4$/.test(shard))) {
+  throw new Error('Usage: node scripts/ci.mjs [install|check|all] [1/4|2/4|3/4|4/4]')
+}
 const packages = ['packages/hosted-contracts', 'packages/writing-plugin-contracts', 'packages/writing-plugin-package', 'desktop', 'web', 'services/hosted-app', 'services/plugin-marketplace']
 function npm(directory, ...args) {
   console.log(`\n[ci] ${directory}: npm ${args.join(' ')}`)
@@ -29,7 +33,9 @@ if (mode !== 'install') {
   npm('packages/writing-plugin-package', 'run', 'build')
   npm('desktop', 'run', 'typecheck')
   npm('desktop', 'run', 'check:architecture')
-  npm('desktop', 'run', 'test:desktop')
+  // All four native Node shards cover the complete sorted file list. One file
+  // per Windows runner avoids disk contention and cold DPAPI process timeouts.
+  npm('desktop', 'run', 'test:desktop', '--', '--test-concurrency=1', ...(shard ? [`--test-shard=${shard}`] : []))
   for (const directory of ['web', 'services/hosted-app', 'services/plugin-marketplace']) {
     npm(directory, 'run', 'typecheck')
     npm(directory, 'test')
