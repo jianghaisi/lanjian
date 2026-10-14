@@ -132,7 +132,7 @@ const sourceLabels = { 'official-rule': '官方型号规则', 'endpoint-metadata
       <ArchiveFormField v-if="target.protocol !== 'local'" label="型号规则" help="中转或别名可明确选择参考规则；不会更改发送型号。选择后先预览，保存才生效。" v-slot="{ controlProps }">
         <select v-bind="controlProps" :value="binding ?? ''" :aria-label="`${label}型号规则`" :disabled="disabled" @change="bindRule(($event.target as HTMLSelectElement).value)"><option value="">自动核对接口与完整型号</option><option v-for="rule in rules" :key="rule.id" :value="rule.id">{{ rule.label }}</option></select>
       </ArchiveFormField>
-      <p v-if="target.protocol === 'openai-compatible'" class="parameter-note">Opus 5.5 的思考强度需 Anthropic Messages；GPT 6.1 等型号的工具调用需 OpenAI Responses。可在接口管理中新建相应协议连接。</p>
+      <p v-if="target.protocol === 'openai-compatible'" class="parameter-note">官方接口中，Opus 5.5 的思考强度需 Anthropic Messages，GPT 6.1 的工具调用需 OpenAI Responses；中转接口的工具兼容性以实际响应为准。可在接口管理中新建相应协议连接。</p>
       <p v-if="caps.source === 'unknown' && suggested.length" class="parameter-note">可参考：{{ suggested.map(r => r.label).join('、') }}。需要匹配规则所列协议；可在接口管理中新建连接。</p>
       <p v-if="caps.rule" class="parameter-note">规则 {{ caps.rule.id }} · 核对 {{ caps.checkedAt }} · <a :href="caps.sourceUrl" target="_blank" rel="noreferrer">查看官方依据</a></p>
       <p v-if="caps.temperature === 'fixed'" class="parameter-note">温度固定为 {{ caps.rule?.temperature.default }}；不发送无效的自定义值。</p>

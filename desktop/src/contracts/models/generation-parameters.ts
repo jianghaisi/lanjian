@@ -33,14 +33,16 @@ export function modelCapabilities(target: GenerationTarget): ModelCapabilities {
     maxOutputTokens: target.localLimits.maxOutputTokens, contextTokens: target.localLimits.contextTokens }
   const explicit = target.ruleId ? modelRule(target.ruleId) : undefined
   if (target.ruleId && !explicit) parameterError('所选型号规则不存在，请重新选择规则或解除绑定。')
-  const rule = explicit ?? officialModelRule(target.protocol, target.baseUrl, target.model)
+  const official = officialModelRule(target.protocol, target.baseUrl, target.model)
+  const rule = explicit ?? official
   if (rule) {
     if (target.protocol === 'local' || !rule.protocols.includes(target.protocol)) parameterError(`这条规则需要 ${rule.protocols.join(' / ')} 协议。请在接口管理中新建对应协议连接，再选择它；现有连接不会自动改变。`)
     const r = rule.reasoning
     Object.assign(c, { source: explicit ? 'author-binding' : 'official-rule', rule, sourceUrl: rule.sourceUrl, temperature: rule.temperature.status, topP: rule.topP.status,
       maxTemperature: rule.temperature.max ?? 2, maxOutputTokens: rule.outputTokens, contextTokens: rule.contextTokens,
       thinking: { status: r.wire === 'none' ? 'unknown' : 'supported', ...(r.efforts?.length ? { kind: 'effort', values: [...r.efforts] } : r.budget ? { kind: 'budget', ...r.budget } : {}) },
-      samplingRequiresNone: rule.samplingRequiresNone, tools: target.protocol === 'openai-compatible' ? rule.toolsChat : undefined })
+      // A parameter reference does not establish a gateway's protocol capabilities.
+      samplingRequiresNone: rule.samplingRequiresNone, tools: target.protocol === 'openai-compatible' ? official?.toolsChat : undefined })
     if (r.wire === 'none' && rule.vendor === 'OpenAI') c.thinking = { status: 'unsupported' }
     if (target.protocol === 'openai-compatible' && rule.outputField) c.outputField = rule.outputField
   }
@@ -95,9 +97,11 @@ export function compileGeneration(profile: ModelProfile, task: AiTask, target: G
       if (o.thinking.kind === 'budget' && o.thinking.tokens >= outputTokens) parameterError(`思考预算为 ${o.thinking.tokens} tokens，当前总输出上限为 ${outputTokens} tokens，需为正文保留空间。请降低思考预算或清空使用自动，也可在型号允许范围内提高最大输出。`)
     }
   }
-  if (operation === 'tools' && (capabilities.tools === 'unsupported' || (capabilities.tools === 'requires-none' && !(o.reasoning?.effort === 'none' || (o.thinking?.kind === 'effort' && o.thinking.value === 'none'))))) parameterError('该型号在当前协议或思考模式下不支持工具调用，请另选支持的型号。')
+  if (operation === 'tools' && capabilities.tools === 'unsupported') parameterError('该型号的官方接口需要使用 OpenAI Responses 协议调用工具。请在接口管理中新建对应协议连接并选择它。')
+  if (operation === 'tools' && capabilities.tools === 'requires-none' && !(o.reasoning?.effort === 'none' || (o.thinking?.kind === 'effort' && o.thinking.value === 'none'))) parameterError('该型号的官方 Chat 接口仅在关闭思考（none）时支持工具调用。请关闭思考，或新建 OpenAI Responses 协议连接。')
   validateReasoning(o, capabilities, outputTokens)
   if (capabilities.source === 'author-binding') notes.push('已按你选择的官方规则请求；当前中转是否执行这些字段仍需实际验证。')
+  if (target.protocol === 'openai-compatible' && capabilities.rule?.toolsChat && !capabilities.tools) notes.push('参考规则的官方工具限制不代表当前接口能力；工具调用将按所选协议请求，是否支持以接口实际响应为准。')
   if (capabilities.rule?.reasoning.defaultEffort) notes.push(`思考默认档位：${capabilities.rule.reasoning.defaultEffort}；留空由服务决定。`)
   if (capabilities.rule?.note) notes.push(capabilities.rule.note)
   if (policy?.version === 2 && knownBudget) notes.push('自动输出预算是应用的创作起点，不是官方最优参数；思考可能占用输出预算。')

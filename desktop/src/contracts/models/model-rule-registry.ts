@@ -1,6 +1,6 @@
 import type { RemoteModelProtocol } from './model-connections'
 
-export const MODEL_RULE_REVISION = '2026-10-05.1'
+export const MODEL_RULE_REVISION = '2026-10-14.1'
 export type ParameterStatus = 'supported' | 'fixed' | 'unsupported' | 'unknown'
 export type SamplingRule = { status: ParameterStatus; min?: number; max?: number; exclusiveMin?: boolean; exclusiveMax?: boolean; default?: number; reason?: string }
 export type ModelRule = {

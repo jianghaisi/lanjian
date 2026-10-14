@@ -2,7 +2,7 @@ import type { CompiledRemoteConfig } from '../domain/generation-config'
 import { generationDiagnostics, providerScope } from './provider-transport'
 import type { AiToolCall, AiToolStep } from '../../../../contracts/assistant/assistant-conversation-contracts'
 import { AppError } from '../../../core/errors/app-error'
-const invalid = (message = '模型回复未完整返回，已保留已显示的内容，请修改要求后重试。'): never => { throw new AppError('AI_RESPONSE_INVALID', message, { recoverable: true }) }
+const invalid = (message = '模型回复中断或格式不完整，已保留已显示的内容，未执行不完整的工具调用。请重试；如反复出现，请检查接口的流式回复和工具调用兼容性。'): never => { throw new AppError('AI_RESPONSE_INVALID', message, { recoverable: true }) }
 type Chunk = { error?: unknown; choices?: Array<{ finish_reason?: string; delta?: { content?: unknown; reasoning_content?: unknown; tool_calls?: Array<{ index: number; type?: string; id?: string; function?: { name?: string; arguments?: string } }> } }> }
 /** Assemble tool arguments before returning a step. Partial calls can never be dispatched. */
 export async function consumeToolStream(response: Response, signal: AbortSignal, onDelta: (content: string) => void, config?: CompiledRemoteConfig): Promise<AiToolStep> {

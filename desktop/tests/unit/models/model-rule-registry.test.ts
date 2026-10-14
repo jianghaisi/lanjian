@@ -35,7 +35,48 @@ test('GPT Responses nests effort; Chat tools restrictions and sampling are mode 
   assert.throws(() => compile('gpt-6.1-sol', { temperature: 0 }))
   const value = compile('gpt-6-sol', { temperature: 0, topP: 0, reasoning: { effort: 'none' } })
   assert.equal(value.parameters.temperature, 0); assert.equal(value.outputTokens, 16384)
-  assert.throws(() => compileGeneration({ connectionId: 'c', model: 'gpt-6.1-sol', parameterPolicy: { version: 2, ruleId: 'gpt-6.1-sol', mode: 'auto' } }, 'outline', { protocol: 'openai-compatible', model: 'gpt-6.1-sol' }, 'tools'))
+  assert.throws(() => compileGeneration({ connectionId: 'c', model: 'gpt-6.1-sol', parameterPolicy: { version: 2, ruleId: 'gpt-6.1-sol', mode: 'auto' } }, 'outline', { protocol: 'openai-compatible', baseUrl: 'https://api.openai.com/v1', model: 'gpt-6.1-sol' }, 'tools'), /OpenAI Responses/)
+})
+
+test('gateway parameter bindings do not assert official Chat tool restrictions or rewrite request intent', () => {
+  for (const ruleId of ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna']) {
+    for (const model of [ruleId, 'gateway-alias']) {
+      const p: ModelProfile = { connectionId: 'c', model, parameterPolicy: { version: 2, ruleId, mode: 'custom', overrides: { maxTokens: 2048, reasoning: { effort: 'high' } } } }
+      const before = JSON.stringify(p)
+      for (const baseUrl of ['https://gateway.invalid/v1', 'https://api.openai.com.gateway.invalid/v1', undefined]) {
+        const result = compileGeneration(p, 'prose', { protocol: 'openai-compatible', baseUrl, model }, 'tools')
+        assert.equal(result.capabilities.tools, undefined)
+        assert.equal(result.capabilities.source, 'author-binding')
+        assert.equal(result.model, model)
+        assert.deepEqual(result.parameters, { max_completion_tokens: 2048, reasoning_effort: 'high' })
+        assert.ok(result.notes.some(note => note.includes('以接口实际响应为准')))
+      }
+      assert.equal(JSON.stringify(p), before)
+    }
+  }
+  const unbound: ModelProfile = { connectionId: 'c', model: 'gpt-6.1-sol', parameterPolicy: { version: 2, mode: 'auto' } }
+  const result = compileGeneration(unbound, 'prose', { protocol: 'openai-compatible', baseUrl: 'https://gateway.invalid/v1', model: unbound.model }, 'tools')
+  assert.equal(result.capabilities.source, 'unknown')
+  assert.deepEqual(result.parameters, { max_tokens: 8192 })
+})
+
+test('exact official endpoints keep their tool restrictions even with an alternate parameter binding', () => {
+  const baseUrl = 'https://api.openai.com/v1/'
+  for (const model of ['gpt-6.1-sol', 'gpt-6-astra']) {
+    for (const ruleId of [undefined, model, 'gpt-5.6-sol']) {
+      const p: ModelProfile = { connectionId: 'c', model, parameterPolicy: { version: 2, mode: 'auto', ...(ruleId ? { ruleId } : {}) } }
+      assert.throws(() => compileGeneration(p, 'prose', { protocol: 'openai-compatible', baseUrl, model }, 'tools'), /官方接口.*OpenAI Responses/)
+      assert.doesNotThrow(() => compileGeneration(p, 'prose', { protocol: 'openai-responses', baseUrl, model }, 'tools'))
+    }
+  }
+  for (const model of ['gpt-6-sol', 'gpt-6-luna']) {
+    for (const effort of ['high', 'none']) {
+      const p: ModelProfile = { connectionId: 'c', model, parameterPolicy: { version: 2, ruleId: 'gpt-5.6-sol', mode: 'custom', overrides: { reasoning: { effort } } } }
+      const run = () => compileGeneration(p, 'prose', { protocol: 'openai-compatible', baseUrl, model }, 'tools')
+      if (effort === 'high') assert.throws(run, /关闭思考.*none/)
+      else assert.equal(run().parameters.reasoning_effort, 'none')
+    }
+  }
 })
 test('Gemini levels and token budgets stay separate and endpoint metadata narrows rule limits', () => {
   assert.deepEqual(compile('gemini-3.8-flash', { reasoning: { effort: 'medium' } }).parameters, { maxOutputTokens: 32768, thinkingConfig: { thinkingLevel: 'medium' } })
