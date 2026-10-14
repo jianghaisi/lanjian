@@ -1,0 +1,100 @@
+name: Windows Installer Validation
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing draft release tag, for example v0.1.2'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: installer-validation-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  verify-installer:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Validate tag
+        shell: pwsh
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Expected vMAJOR.MINOR.PATCH' }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Install test driver
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: npm --prefix desktop ci
+      - name: Download and verify actual release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $version = (Get-Content desktop/package.json -Raw | ConvertFrom-Json).version
+          if ($env:RELEASE_TAG -ne "v$version") { throw 'Tag/package version mismatch' }
+          $assets = Join-Path $env:RUNNER_TEMP 'release-assets'
+          New-Item -ItemType Directory -Path $assets | Out-Null
+          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern "Lanjian-$version-Setup-x64.exe" --pattern SHA256SUMS.txt --dir $assets
+          if ($LASTEXITCODE -ne 0) { throw 'Release asset download failed' }
+          $installer = Join-Path $assets "Lanjian-$version-Setup-x64.exe"
+          $expected = ((Get-Content (Join-Path $assets 'SHA256SUMS.txt')).Trim() -split '\s+')[0]
+          $actual = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($expected -notmatch '^[a-f0-9]{64}$' -or $actual -ne $expected) { throw 'Installer checksum mismatch' }
+          "Installer SHA256: $actual"
+      - name: Install, save, restart, upgrade and uninstall
+        shell: pwsh
+        run: |
+          $version = (Get-Content desktop/package.json -Raw | ConvertFrom-Json).version
+          $installer = Join-Path $env:RUNNER_TEMP "release-assets/Lanjian-$version-Setup-x64.exe"
+          $install = Join-Path $env:RUNNER_TEMP 'LanjianReleaseValidation'
+          $fixture = Join-Path $env:RUNNER_TEMP 'LanjianReleaseFixture'
+          $evidence = Join-Path $env:GITHUB_WORKSPACE 'installer-evidence'
+          New-Item -ItemType Directory -Path $evidence | Out-Null
+          function Install-Checked {
+            $process = Start-Process -FilePath $installer -ArgumentList @('/S', '/currentuser', "/D=$install") -WindowStyle Hidden -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "Installer exit $($process.ExitCode)" }
+          }
+          function Data-Hashes {
+            @((Get-ChildItem -LiteralPath $fixture -Recurse -File | Sort-Object FullName) | ForEach-Object {
+              "$($_.FullName.Substring($fixture.Length))=$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)"
+            })
+          }
+          Install-Checked
+          $exe = Join-Path $install '小说写作助手.exe'
+          node desktop/scripts/release-smoke.mjs $exe $fixture
+          if ($LASTEXITCODE -ne 0) { throw 'Installed application smoke failed' }
+          $before = Data-Hashes
+          Install-Checked
+          if (Compare-Object $before (Data-Hashes)) { throw 'Upgrade changed fixture data' }
+          node desktop/scripts/release-smoke.mjs $exe $fixture
+          if ($LASTEXITCODE -ne 0) { throw 'Upgraded application smoke failed' }
+          Copy-Item -LiteralPath (Join-Path $fixture 'installed-editor.png') -Destination $evidence
+          Copy-Item -LiteralPath (Join-Path $fixture 'verification.json') -Destination $evidence
+          $beforeUninstall = Data-Hashes
+          $uninstaller = @(Get-ChildItem -LiteralPath $install -Filter 'Uninstall*.exe')
+          if ($uninstaller.Count -ne 1) { throw 'Expected exactly one uninstaller' }
+          $process = Start-Process -FilePath $uninstaller[0].FullName -ArgumentList @('/S', '/currentuser', "_?=$install") -WindowStyle Hidden -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Uninstaller exit $($process.ExitCode)" }
+          if (Test-Path -LiteralPath $exe) { throw 'Application executable remains after uninstall' }
+          if (Compare-Object $beforeUninstall (Data-Hashes)) { throw 'Uninstall changed fixture data' }
+          @{ version=$version; upgradePreservedFiles=$before.Count; uninstallPreservedFiles=$beforeUninstall.Count; applicationRemoved=$true; dataUnchanged=$true } | ConvertTo-Json | Set-Content (Join-Path $evidence 'installation.json') -Encoding utf8NoBOM
+          Get-Content (Join-Path $evidence 'installation.json')
+      - name: Preserve verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: installer-validation-${{ inputs.tag }}
+          path: |
+            installer-evidence
+            ${{ runner.temp }}/LanjianReleaseFixture/failure.png
+            ${{ runner.temp }}/LanjianReleaseFixture/failure-dom.txt
+            ${{ runner.temp }}/LanjianReleaseFixture/verification.json
+          if-no-files-found: warn
+          retention-days: 14
