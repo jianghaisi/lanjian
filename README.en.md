@@ -4,10 +4,10 @@
 
 A local desktop workspace for long-form fiction: references, worldbuilding, event timelines, layered outlines and manuscripts.
 
-**Version 0.1.1 is a development preview**, not acceptance of every V3 capability.
+**Version 0.1.2 is a development preview**, not acceptance of every V3 capability.
 
 - [Try the hosted application](https://lanjian.jiangai.space/)
-- [Download the Windows x64 installer](https://github.com/jianghaisi/lanjian/releases/tag/v0.1.1)
+- [Download the Windows x64 installer](https://github.com/jianghaisi/lanjian/releases/tag/v0.1.2)
 - [Chinese installation and development guide](README.md#快速开始)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Contributing](CONTRIBUTING.md)

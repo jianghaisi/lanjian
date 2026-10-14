@@ -38,3 +38,12 @@
 修正：获取当前页面对应的 BrowserWindow，调用 close() 并等待进程正常退出。
 错误：全局忽略 runtime/，导致 src 下业务运行模块漏入发布树。
 修正：仅忽略 services/*/runtime 与明确的生成目录；用干净构建和测试验证发布清单。
+
+
+## 实际草稿安装包验收（2026-10-15）
+
+`Windows Installer Validation` 手动流程接收已有草稿标签，下载该 Release 的 EXE 与 SHA256SUMS，核对版本/摘要后在临时 Windows runner 执行现有 release-smoke。必须检查实际安装、手工保存、新进程恢复、覆盖安装与卸载前后合成数据的字节摘要；保存 installation.json、verification.json 与实际截图，查看截图后再发布。
+
+同一应用身份的 NSIS 即使指定临时 /D，也会查找并卸载已有安装；不能以此隔离作者本机安装。优先使用全新 runner，保持原安装和作者数据不变。草稿对只读令牌不可见，验收流程为此使用 contents: write，令牌只进入下载步骤，checkout 关闭凭据持久化；流程无发布/资产变更命令。API 重定向至下载主机时必须移除 Authorization。
+
+标签运行源码须与安装包和完整 CI 对齐；后续仅工作流或文档的提交可单独记录，不能借此绕过运行源码验证。
