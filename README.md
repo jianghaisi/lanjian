@@ -9,7 +9,7 @@
 <a href="https://github.com/jianghaisi/lanjian/actions/workflows/ci.yml"><img alt="Build" src="https://github.com/jianghaisi/lanjian/actions/workflows/ci.yml/badge.svg?branch=main"></a>
 <a href="https://lanjian.jiangai.space/"><img alt="在线试用" src="https://img.shields.io/badge/在线试用-立即打开-d89b38?style=flat-square"></a>
 </p>
-<p align="center"><a href="https://github.com/jianghaisi/lanjian/releases/tag/v0.1.0"><strong>下载 Windows 安装包 ↗</strong></a> · <a href="https://lanjian.jiangai.space/"><strong>在线试用 ↗</strong></a> · <a href="README.en.md">English</a></p>
+<p align="center"><a href="https://github.com/jianghaisi/lanjian/releases/tag/v0.1.1"><strong>下载 Windows 安装包 ↗</strong></a> · <a href="https://lanjian.jiangai.space/"><strong>在线试用 ↗</strong></a> · <a href="README.en.md">English</a></p>
 
 岚笺是一款本地小说写作工具。正文、资料、人物设定、大纲和故事事件，都放在同一部作品里。可以自己写，也可以接入模型，找助笔讨论一段情节，再决定哪些内容留下。
 
@@ -147,15 +147,15 @@ flowchart TB
 
 ### 下载安装
 
-1. 打开 [v0.1.0 Release](https://github.com/jianghaisi/lanjian/releases/tag/v0.1.0)，下载 **Lanjian-0.1.0-Setup-x64.exe**。
+1. 打开 [v0.1.1 Release](https://github.com/jianghaisi/lanjian/releases/tag/v0.1.1)，下载 **Lanjian-0.1.1-Setup-x64.exe**。
 2. 安装并启动应用；建立空白作品，选择自己的作品保存目录。
 3. 没有模型密钥也可以手工编辑。需要 AI 时，在应用内配置接口与模型。
 4. 本地语音、模型商店下载等为可选功能；不要求先准备这些组件才能使用基础编辑。
 
-首版针对 **Windows x64**。签名状态、验证范围与已知问题以 [发布说明](docs/releases/v0.1.0.md) 为准。SHA-256 可用 PowerShell 校验：
+当前安装包面向 **Windows x64**。签名状态、验证范围与已知问题以 [发布说明](docs/releases/0.1.1.md) 为准。SHA-256 可用 PowerShell 校验：
 
 ~~~powershell
-Get-FileHash .\Lanjian-0.1.0-Setup-x64.exe -Algorithm SHA256
+Get-FileHash .\Lanjian-0.1.1-Setup-x64.exe -Algorithm SHA256
 ~~~
 
 将输出与 Release 的 SHA256SUMS.txt 对照。安装包无需用户安装 Node.js；Python 与模型权重不随包分发。
@@ -231,7 +231,7 @@ npm --prefix desktop run desktop:dist
 | 模型 | 作者自行配置；可选本地模型 | 站长开放的模型与积分规则 |
 | 游客 | 可无密钥手工编辑 | 公开参考书只读体验 |
 | 原生能力 | 文件选择、桌宠和可选本地运行时 | 浏览器权限内的功能 |
-| 版本 | 本仓库 v0.1.0 安装包 | 独立上线，以实际站点为准 |
+| 版本 | 本仓库 v0.1.1 安装包 | 独立上线，以实际站点为准 |
 
 完整在线创作需要后端、身份配置与持久化存储，不能只上传静态文件到 GitHub Pages。可使用已有 Node.js 24 / Docker 自托管方案；详见 [部署指南](docs/DEPLOYMENT.md) 和 [托管运维说明](docs/HOSTED-DEPLOYMENT.md)。
 
