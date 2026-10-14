@@ -2568,7 +2568,10 @@ test('explains a model-group permission failure in Chinese after the real genera
     } as unknown as ProjectAiService
     const result = await new AiClient(fakeSettings).testConnection({ baseUrl: `http://127.0.0.1:${address.port}`, apiKey: 'group-limited-key', model: 'gemini-2.5-pro' })
     assert.equal(result.success, false)
-    assert.match(result.message, /模型分组.*权限/)
+    assert.match(result.message, /403/)
+    assert.match(result.message, /可能.*权限.*分组.*访问限制/)
+    assert.match(result.message, /服务商控制台核对.*再试/)
+    assert.doesNotMatch(result.message, /token has no permission|group-limited-key/)
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
   }
