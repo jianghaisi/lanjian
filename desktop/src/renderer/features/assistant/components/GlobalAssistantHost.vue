@@ -245,7 +245,7 @@ defineExpose({sendInstruction,compose})
               </div>
               <p v-if="runStatusError" class="field-assistant-error" role="alert">{{ runStatusError }} 已保留本轮文字，重新读取不会重发要求。</p>
               <p v-if="reviewText&&!busy" role="status">{{ reviewCurrent?'发送内容已准备好，核对后确认发送。':'要求或资料已变化，请更新核对后再发送。' }}</p>
-              <p v-if="error" class="field-assistant-error" role="alert">{{ error }}</p><button v-if="!busy&&!waiting&&!receiptPending&&!runStatusError&&(error||run?.status==='cancelled')" type="button" @click="retryRequest">修改原要求后重试</button>
+              <p v-if="error" class="field-assistant-error" role="alert">{{ error }}</p><p v-if="error" class="field-assistant-hint" data-testid="assistant-recovery-guidance">已完成的操作会保留。请先核对记录并按错误提示处理，再取回原要求；确认后重新发送。</p><button v-if="!busy&&!waiting&&!receiptPending&&!runStatusError&&(error||run?.status==='cancelled')" type="button" @click="retryRequest">取回原要求</button>
               <p v-if="copyError||quoteError" role="status">{{ copyError||quoteError }}</p>
               <p v-if="composeNotice" role="status" data-testid="assistant-compose-notice">{{ composeNotice }}</p>
             </div>

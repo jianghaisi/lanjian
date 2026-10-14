@@ -1,3 +1,4 @@
+import { modelHttpError, readModelError, rethrowModelTransport } from './model-service-errors'
 import { chatToolHistory } from './chat-tool-history'
 import { generationDiagnostics, providerScope, assertSuccessfulStop, consumeProviderResponse, readProviderJson } from './provider-transport'
 import type { GeneratedText } from '../../../../contracts/models/generation-diagnostics'
@@ -236,17 +237,12 @@ export class OpenAiCompatibleTextClient {
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs)
       })
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'TimeoutError') {
-        throw new AppError('FEATURE_UNAVAILABLE', `模型服务在 ${Math.ceil(timeoutMs / 1000)} 秒内没有开始返回结果；任务已安全停止，可以重试或缩小作品上下文。`, { recoverable: true, cause: error })
-      }
-      if (error instanceof TypeError) {
-        throw new AppError('FEATURE_UNAVAILABLE', '无法连接模型服务，请检查接口地址、网络和本机代理设置。', { recoverable: true, cause: error })
-      }
-      throw error
+      rethrowModelTransport(error, signal)
     }
     if (!response.ok) {
-      const detail = extractErrorMessage(await response.text())
-      throw new AppError('FEATURE_UNAVAILABLE', httpErrorMessage(response.status, detail), { recoverable: true })
+      const detail = await readModelError(response, signal)
+      if (signal?.aborted) rethrowModelTransport(signal.reason, signal)
+      throw new AppError('FEATURE_UNAVAILABLE', modelHttpError(response.status, detail), { recoverable: true })
     }
     return response
   }
@@ -283,38 +279,6 @@ export async function consumeOpenAiStream(
   }, 24 * 1024 * 1024, true)
   if (!finished) assertSuccessfulStop(undefined, [])
   return content
-}
-
-function extractErrorMessage(raw: string): string {
-  const clipped = raw.slice(0, 2_000)
-  try {
-    const value = JSON.parse(clipped) as { error?: { message?: unknown }; message?: unknown }
-    const message = value.error?.message ?? value.message
-    return typeof message === 'string' ? message.slice(0, 240) : ''
-  } catch {
-    return clipped.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240)
-  }
-}
-
-function httpErrorMessage(status: number, detail: string): string {
-  const safeDetail = sanitizeProviderDetail(detail)
-  const lower = safeDetail.toLowerCase()
-  if (status === 401) return '接口密钥无效或已经失效，请重新检查令牌。'
-  if (status === 403 || /group|分组|permission|forbidden|unauthorized/.test(lower)) {
-    return '令牌没有当前模型或模型分组的调用权限，请在服务控制台授权后重试。'
-  }
-  if (status === 404) return '接口地址或兼容路径不正确；请确认地址通常以 /v1 结尾。'
-  if (status === 429) return '接口当前限流、余额不足或配额已用完，请稍后重试或检查账户额度。'
-  if (status === 400 || status === 422) return '请求被服务拒绝，可能是型号、参数或接口协议不兼容。请核对型号；如设置了自定义参数，可恢复自动后主动重试。'
-  return safeDetail
-    ? `模型服务返回 ${status}：${safeDetail}`
-    : `模型服务返回 ${status}，请稍后重试。`
-}
-
-function sanitizeProviderDetail(detail: string): string {
-  return detail
-    .replace(/(authorization\s*:\s*bearer\s+)[^\s"'<>]+/gi, '$1[REDACTED]')
-    .replace(/\bsk-[a-z0-9_-]{8,}\b/gi, '[REDACTED]')
 }
 
 function friendlyError(error: unknown, fallback: string): string {

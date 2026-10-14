@@ -13,6 +13,44 @@ const json = (value: unknown) => new Response(JSON.stringify(value), { headers: 
 const sse = (...values: unknown[]) => new Response(values.map(value => `data: ${typeof value === 'string' ? value : JSON.stringify(value)}\r\n\r\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } })
 const parts = [{ text: '先核对字段。', thoughtSignature: 'signed-text' }, { functionCall: { name: 'read_field', args: { targetId: 'idea' }, id: 'provider/id:1' }, thoughtSignature: 'signed-call' }, { text: '', thoughtSignature: 'signed-tail' }]
 
+test('gateway rejects unsigned empty parts: replay removes only empty data and preserves signed history', async t => {
+  const requests: any[] = []
+  const original = [{ text: 'private thought', thought: true }, ...parts, { text: '' }, { text: '', thought: true }]
+  const server = createServer(async (req, res) => {
+    let raw = ''; for await (const chunk of req) raw += chunk
+    const body = JSON.parse(raw); requests.push(body)
+    const replay = body.contents.find((m: any) => m.role === 'model')
+    if (replay?.parts.some((p: any) => p.text === '' && !p.thoughtSignature && !p.functionCall)) {
+      res.statusCode = 400; res.end('required oneof data field'); return
+    }
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.end(`data: ${JSON.stringify(packet(requests.length === 1 ? original : [{ text: 'OK' }], 'STOP'))}\n\n`)
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) })
+  const c = { kind: 'gemini-native' as const, connectionId: 'gateway', connectionName: 'fixture', baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`, apiKey: 'synthetic-key', profile: { connectionId: 'gateway', model: 'gemini-fixture', parameterPolicy: { version: 2 as const, mode: 'auto' as const } } }
+  const prepared = await new AiClient({ resolve: async () => c, resolveConnection: async () => c }).prepareToolConversation('outline')
+  const messages: AiToolMessage[] = [{ role: 'user', content: 'synthetic ping' }]
+  const first = await prepared.step(messages, [tool], signal(), () => {})
+  const saved = JSON.stringify(first.geminiParts)
+  messages.push({ role: 'assistant', content: first.content, tool_calls: first.toolCalls, geminiParts: first.geminiParts }, { role: 'tool', tool_call_id: first.toolCalls[0].id, content: '{"ok":true}' })
+  const last = await prepared.step(messages, [tool], signal(), () => {})
+  assert.equal(last.content, 'OK'); assert.deepEqual(last.toolCalls, [])
+  assert.equal(requests.length, 2); assert.equal(JSON.stringify(first.geminiParts), saved)
+  const replay = requests[1].contents[1].parts
+  assert.deepEqual(replay, original.slice(0, -2))
+  assert.deepEqual(replay.at(-1), { text: '', thoughtSignature: 'signed-tail' })
+  assert.equal(requests[1].contents[2].parts[0].functionResponse.id, 'provider/id:1')
+})
+
+test('Gemini budget, refusal and malformed tools have distinct recovery instructions', async () => {
+  for (const [reason, expected] of [['MAX_TOKENS', /输出预算.*思考预算/], ['SAFETY', /调整要求.*增加输出预算不能/], ['MALFORMED_FUNCTION_CALL', /工具兼容性/]] as const) {
+    await assert.rejects(consumeGeminiToolResponse(json(packet(parts, reason)), signal()), e => {
+      assert.ok(e instanceof Error); assert.match(e.message, expected); return true
+    })
+  }
+})
+
 test('native HTTP keeps frozen route, JSON schemas, original signatures/IDs and grouped tool results', async t => {
   const requests: Array<{ url: string; body: any; key?: string }> = []
   const server = createServer(async (req, res) => {

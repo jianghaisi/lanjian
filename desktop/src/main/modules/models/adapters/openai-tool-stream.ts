@@ -1,5 +1,6 @@
 import type { CompiledRemoteConfig } from '../domain/generation-config'
-import { generationDiagnostics, providerScope } from './provider-transport'
+import { generationDiagnostics, providerScope, assertSuccessfulStop } from './provider-transport'
+import { rethrowModelTransport } from './model-service-errors'
 import type { AiToolCall, AiToolStep } from '../../../../contracts/assistant/assistant-conversation-contracts'
 import { AppError } from '../../../core/errors/app-error'
 const invalid = (message = '模型回复中断或格式不完整，已保留已显示的内容，未执行不完整的工具调用。请重试；如反复出现，请检查接口的流式回复和工具调用兼容性。'): never => { throw new AppError('AI_RESPONSE_INVALID', message, { recoverable: true }) }
@@ -16,12 +17,12 @@ export async function consumeToolStream(response: Response, signal: AbortSignal,
     if (!data) return
     if (data === '[DONE]') { if (!finished) invalid(); terminated = true; return }
     let payload: Chunk
-    try { payload = JSON.parse(data) } catch { return invalid('模型返回了无法解析的流式回复。') }
+    try { payload = JSON.parse(data) } catch { return invalid('模型返回了无法解析的流式回复。请重试；反复出现时请联系服务商检查回复格式。') }
     if (!payload || payload.error) return invalid()
     lastPayload = { ...lastPayload, ...payload }
     const choice = payload.choices?.[0]
     if (!choice) return
-    if (choice.finish_reason === 'length' || choice.finish_reason === 'content_filter') return invalid('回复未完整生成，已保留已显示的片段；请调整要求或输出预算后重试。')
+    if (choice.finish_reason) assertSuccessfulStop(choice.finish_reason, ['stop', 'tool_calls'])
     if (choice.finish_reason) lastReason = choice.finish_reason
     const delta = choice.delta
     if (delta?.reasoning_content !== undefined && delta.reasoning_content !== null) {
@@ -67,5 +68,6 @@ export async function consumeToolStream(response: Response, signal: AbortSignal,
     if (toolCalls.some(call => !call.id || !call.function.name || !call.function.arguments) || new Set(toolCalls.map(call => call.id)).size !== toolCalls.length) return invalid()
     for (const call of toolCalls) { try { JSON.parse(call.function.arguments) } catch { return invalid() } }
     return { content, toolCalls, ...(config ? { diagnostics: generationDiagnostics(config,lastPayload,lastReason) } : {}), ...(config?.generation.capabilities.rule?.preserveReasoning ? { providerContent: { version:1 as const, protocol:'openai-compatible' as const, scope:providerScope(config), reasoningContent:reasoning } } : {}) }
-  } finally { signal.removeEventListener('abort', abort); await reader.cancel().catch(() => {}); reader.releaseLock() }
+  } catch (error) { return rethrowModelTransport(error, signal) }
+  finally { signal.removeEventListener('abort', abort); await reader.cancel().catch(() => {}); reader.releaseLock() }
 }

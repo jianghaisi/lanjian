@@ -4,6 +4,8 @@
 
 ## Active contracts
 
+- [Model tool replay and error recovery](v3-model-tool-recovery.md)
+
 - [Gateway references and official tool capabilities](v3-gateway-tool-capabilities.md)
 
 - [公开发布与 Windows 安装验证](v3-public-release.md)

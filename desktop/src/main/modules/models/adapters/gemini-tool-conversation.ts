@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { rethrowModelTransport } from './model-service-errors'
+import { assertSuccessfulStop } from './provider-transport'
 import type { AiFunctionTool, AiToolMessage, AiToolStep } from '../../../../contracts/assistant/assistant-conversation-contracts'
 import { decodeGeminiParts, geminiRecord, geminiToolInvalid as invalid, geminiToolLimits as limits, geminiVisibleText, validatedGeminiMessage, type GeminiToolPart } from '../../../../contracts/models/gemini-tool-content'
 
@@ -23,10 +25,10 @@ export function geminiToolBody(messages: AiToolMessage[], tools: AiFunctionTool[
     }
     if (pending.size) return invalid()
     if (message.role === 'assistant' && message.tool_calls?.length) {
-      const parts = validatedGeminiMessage(message), calls = parts.flatMap(p => p.functionCall ? [p.functionCall] : [])
+      const parts = replayParts(message), calls = parts.flatMap(p => p.functionCall ? [p.functionCall] : [])
       message.tool_calls.forEach((call, i) => pending.set(call.id, calls[i]))
       contents.push({ role: 'model', parts })
-    } else contents.push({ role: message.role === 'assistant' ? 'model' : 'user', parts: message.geminiParts ? validatedGeminiMessage(message) : [{ text: message.content ?? '' }] })
+    } else contents.push({ role: message.role === 'assistant' ? 'model' : 'user', parts: message.geminiParts ? replayParts(message) : [{ text: message.content ?? '' }] })
   }
   if (pending.size || !contents.length) return invalid()
   return {
@@ -35,17 +37,25 @@ export function geminiToolBody(messages: AiToolMessage[], tools: AiFunctionTool[
   }
 }
 
+function replayParts(message: AiToolMessage): GeminiToolPart[] {
+  // Validate before filtering. A signed empty tail is meaningful provider history.
+  const parts = validatedGeminiMessage(message).filter(p => p.text !== '' || p.thoughtSignature !== undefined || p.functionCall !== undefined)
+  if (!parts.length) return invalid()
+  return parts
+}
+
 class GeminiToolReply {
   private parts: GeminiToolPart[] = []
   private finished = false
   constructor(private signal: AbortSignal, private onDelta?: (content: string) => void) {}
   accept(payload: unknown) {
-    if (!geminiRecord(payload) || payload.error || geminiRecord(payload.promptFeedback) && payload.promptFeedback.blockReason) return invalid()
+    if (!geminiRecord(payload) || payload.error) return invalid()
+    if (geminiRecord(payload.promptFeedback) && payload.promptFeedback.blockReason) assertSuccessfulStop('safety', [])
     if (payload.candidates === undefined || Array.isArray(payload.candidates) && !payload.candidates.length) return
     if (!Array.isArray(payload.candidates) || payload.candidates.length !== 1) return invalid()
     const candidate = payload.candidates[0]
     if (!geminiRecord(candidate) || candidate.index !== undefined && candidate.index !== 0) return invalid()
-    if (candidate.finishReason !== undefined && candidate.finishReason !== 'STOP') return invalid()
+    if (candidate.finishReason !== undefined) assertSuccessfulStop(candidate.finishReason, ['STOP'])
     const content = candidate.content
     if (content !== undefined && (!geminiRecord(content) || content.role !== undefined && content.role !== 'model' || !Array.isArray(content.parts))) return invalid()
     const incoming = content === undefined ? [] : decodeGeminiParts((content as Record<string, unknown>).parts)
@@ -105,5 +115,6 @@ export async function consumeGeminiToolResponse(response: Response, signal: Abor
     }
     if (!terminated && buffer.trim()) { if (streaming) event(buffer); else reply.accept(json(buffer)) }
     return reply.result()
-  } finally { signal.removeEventListener('abort', abort); await reader.cancel().catch(() => {}); reader.releaseLock() }
+  } catch (error) { return rethrowModelTransport(error, signal) }
+  finally { signal.removeEventListener('abort', abort); await reader.cancel().catch(() => {}); reader.releaseLock() }
 }

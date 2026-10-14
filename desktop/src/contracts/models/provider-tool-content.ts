@@ -10,7 +10,7 @@ export type ProviderToolContent = { version: 1; scope: string } & (
   { protocol: 'anthropic-native'; blocks: AnthropicBlock[] } | { protocol: 'openai-responses'; items: ResponseItem[] }
   | { protocol: 'openai-compatible'; reasoningContent: string })
 export const providerRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
-export function providerInvalid(message = '模型回复未完整返回或工具历史无效，未执行不完整的工具调用。'): never {
+export function providerInvalid(message = '模型回复未完整返回或工具历史无效，未执行不完整的工具调用。可重试；反复出现时请检查接口工具兼容性。若已更换型号或参数，请保留记录并开始新对话。'): never {
   throw new AppError('AI_RESPONSE_INVALID', message, { recoverable: true })
 }
 function record(v: unknown, keys: string[]): Record<string, unknown> {

@@ -7,7 +7,7 @@ export type GeminiToolPart = {
   functionCall?: { name: string; args?: Record<string, unknown>; id?: string }
 }
 export const geminiToolLimits = { text: 50000, args: 20000, signature: 65536, parts: 128, bytes: 200000, calls: 8 } as const
-export const geminiToolInvalid = (): never => { throw new AppError('AI_RESPONSE_INVALID', 'Gemini 助笔回复未完整返回或格式无效，请调整要求后重试；未执行不完整的工具调用。', { recoverable: true }) }
+export const geminiToolInvalid = (): never => { throw new AppError('AI_RESPONSE_INVALID', 'Gemini 回复中断、格式或工具历史无效，未执行不完整的工具调用。可重试；反复出现时请检查接口工具兼容性。若已更换型号或参数，请保留记录并开始新对话。', { recoverable: true }) }
 export const geminiRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const string = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max
 const identifier = (v: unknown): v is string => string(v, 200) && !!v && !/[\u0000-\u001f\u007f]/.test(v)

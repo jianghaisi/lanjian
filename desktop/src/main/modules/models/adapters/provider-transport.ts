@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { modelHttpError, readModelError, rethrowModelTransport } from './model-service-errors'
 import { AppError } from '../../../core/errors/app-error'
 import { providerInvalid, providerRecord } from '../../../../contracts/models/provider-tool-content'
 import type { GenerationDiagnostics } from '../../../../contracts/models/generation-diagnostics'
@@ -20,18 +21,13 @@ export async function providerRequest(c: RemoteModelConnection, path: string, bo
     c.requestGuard?.assertActive()
     response = await transport(`${base}${suffix}`, { method: body === undefined ? 'GET' : 'POST', headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal, redirect: 'error' })
   } catch (error) {
-    signal.throwIfAborted()
-    if (error instanceof AppError) throw error
-    throw new AppError('FEATURE_UNAVAILABLE', '无法连接模型服务，请检查地址、网络和协议；未自动切换接口。', { recoverable: true, cause: error })
+    rethrowModelTransport(error, signal)
   }
   signal.throwIfAborted(); c.requestGuard?.assertActive()
   if (!response.ok) {
-    await response.body?.cancel().catch(() => {})
-    const message = response.status === 401 ? '接口密钥无效或已失效，请检查令牌。' : response.status === 403 ? '令牌没有当前型号的调用权限。'
-      : response.status === 429 ? '接口当前限流、余额不足或配额用尽，请检查账户后重试。'
-        : response.status === 400 || response.status === 422 ? '服务拒绝了型号、参数或上下文；请核对协议、规则与输出预算后主动重试。'
-          : response.status === 404 ? '接口路径或型号不存在，请核对服务地址与所选协议。' : `模型服务返回 ${response.status}，请稍后重试。`
-    throw new AppError('FEATURE_UNAVAILABLE', message, { recoverable: true })
+    const detail = await readModelError(response, signal)
+    if (signal.aborted) rethrowModelTransport(signal.reason, signal)
+    throw new AppError('FEATURE_UNAVAILABLE', modelHttpError(response.status, detail), { recoverable: true })
   }
   return response
 }
@@ -48,7 +44,7 @@ export async function consumeProviderResponse(response: Response, signal: AbortS
     const data = streaming ? raw.split(/\r?\n/).filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n').trim() : raw
     if (!data || data === '[DONE]') return
     let value: unknown
-    try { value = JSON.parse(data) } catch { return providerInvalid('模型返回的数据无法解析，已停止接收。') }
+    try { value = JSON.parse(data) } catch { return providerInvalid('模型返回的数据无法解析，已停止接收。请重试；反复出现时请联系服务商检查回复格式。') }
     if (!providerRecord(value) || value.error) return providerInvalid()
     signal.throwIfAborted(); await accept(value)
   }
@@ -64,7 +60,8 @@ export async function consumeProviderResponse(response: Response, signal: AbortS
     }
     if (buffer.trim()) await parse(buffer)
     signal.throwIfAborted()
-  } finally { signal.removeEventListener('abort', abort); await reader.cancel().catch(() => {}); reader.releaseLock() }
+  } catch (error) { rethrowModelTransport(error, signal) }
+  finally { signal.removeEventListener('abort', abort); await reader.cancel().catch(() => {}); reader.releaseLock() }
 }
 export function generationDiagnostics(c: CompiledRemoteConfig, payload: Record<string, unknown>, reason?: string): GenerationDiagnostics {
   const u = providerRecord(payload.usage) ? payload.usage : {}, detail = providerRecord(u.output_tokens_details) ? u.output_tokens_details : providerRecord(u.completion_tokens_details) ? u.completion_tokens_details : {}
@@ -83,8 +80,10 @@ export async function readProviderJson(response: Response, signal?: AbortSignal)
 }
 export function assertSuccessfulStop(reason: unknown, allowed: string[]): asserts reason is string {
   if (typeof reason === 'string' && allowed.includes(reason)) return
-  if (['max_tokens', 'length', 'max_output_tokens'].includes(String(reason))) return providerInvalid('输出达到预算上限，内容未完整返回。请提高输出预算后重试。')
-  if (['model_context_window_exceeded', 'context_length_exceeded'].includes(String(reason))) return providerInvalid('输入与输出超出上下文容量，请缩小本次上下文后重试。')
-  if (['refusal', 'content_filter', 'safety'].includes(String(reason))) return providerInvalid('模型拒绝了本次请求，未生成完整正文。请调整要求后重试。')
-  return providerInvalid('模型回复缺少成功结束状态或已中断，已显示片段不能视为完整结果。')
+  const stop = typeof reason === 'string' ? reason.toLowerCase() : ''
+  if (['max_tokens', 'length', 'max_output_tokens'].includes(stop)) return providerInvalid('输出达到预算上限，内容未完整返回，未执行不完整的工具调用。请提高最大输出预算、降低思考预算或缩小请求范围后重试。')
+  if (['model_context_window_exceeded', 'context_length_exceeded'].includes(stop)) return providerInvalid('输入与输出超出上下文容量，请缩小本次上下文后重试。')
+  if (['refusal', 'content_filter', 'safety', 'recitation', 'blocklist', 'prohibited_content', 'spii', 'image_safety'].includes(stop)) return providerInvalid('模型拒绝了本次请求，未生成完整结果，也未执行不完整的工具调用。请调整要求后重试；增加输出预算不能解决此类拒绝。')
+  if (['malformed_function_call', 'unexpected_tool_call'].includes(stop)) return providerInvalid('模型返回的工具调用格式无效，未执行该调用。可重试；反复出现时请检查接口的工具兼容性或选择其他支持工具的型号。')
+  return providerInvalid('模型回复缺少成功结束状态或已中断，已显示片段不能视为完整结果。请重试；反复出现时请联系服务商检查流式回复兼容性。')
 }

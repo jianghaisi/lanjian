@@ -64,3 +64,8 @@ Correct: acknowledge the authoritative result, preserve mirror status, and repor
 ## Library model entry (2026-10-14)
 
 The library top bar omits the book/type search, static local-save badge and standalone model button. Keep persistence unchanged. Open the existing global model manager through settings navigation item 04, “模型设置”; writing plugins follow as 05 on desktop. Browser mode does not expose desktop model configuration. Retain the existing manager dialog, return-to-settings flow and dirty-input leave guard; do not fork model state for this entry.
+
+
+## 2026-10-15: probe evidence and recovery labels
+
+The model test panel labels a successful probe “文字测试通过”, explicitly stating that tools have not been verified. This is not a tool capability receipt or a reason to disable unknown tools. The assistant error action is “取回原要求”: it preserves any next-message draft, restores the old requirement into the composer, and sends no provider request until the author explicitly submits. Failure guidance reminds the author that completed operations remain and must be checked before resending. Preserve keyboard focus, drafts and existing navigation. Verify native error UI and text-test success using isolated profiles and loopback responses.

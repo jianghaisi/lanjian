@@ -12,7 +12,7 @@ const query = ref('')
 const batchOpen = ref(false)
 const visible = computed(() => rows.value.filter(row => row.model.toLowerCase().includes(query.value.trim().toLowerCase())))
 const finished = computed(() => rows.value.filter(row => ['passed', 'failed', 'cancelled'].includes(row.status)).length)
-const labels = { idle: '未测试', queued: '等待中', testing: '测试中', passed: '可用', failed: '失败', cancelled: '已停止' }
+const labels = { idle: '未测试', queued: '等待中', testing: '测试中', passed: '文字测试通过', failed: '失败', cancelled: '已停止' }
 watch(busy, value => emit('busy', value), { immediate: true })
 // Parent keys this panel by connection identity/revision; every entry is an explicit user action.
 void load(props.connection)
@@ -20,7 +20,7 @@ onBeforeUnmount(() => { dispose(); emit('busy', false) })
 </script>
 <template>
   <section class="model-tests" data-testid="model-test-panel" :aria-busy="busy">
-    <header><div><h4>选择一个模型试用</h4><p>测试会发送一条简短请求，可能产生费用；不会发送书稿。</p></div><ArchiveAction compact :disabled="busy || disabled" @click="load(connection)">重新获取模型</ArchiveAction></header>
+    <header><div><h4>选择一个模型试用</h4><p>仅测试文字回复，尚未验证工具调用。测试会发送一条简短请求，可能产生费用；不会发送书稿。</p></div><ArchiveAction compact :disabled="busy || disabled" @click="load(connection)">重新获取模型</ArchiveAction></header>
     <p>重新获取会保留当前接口同名型号的参数，并清除旧测试结果；刷新失败可重试，参数不会改成自动。</p>
     <p v-if="catalog">{{ connection.name }} · 已获取 {{ catalog.entries.length }} 个型号 · 可文本测试 {{ rows.length }} 个<span v-if="catalog.entries.length > rows.length"> · 已排除 {{ catalog.entries.length - rows.length }} 个非文本型号</span> · {{ new Date(catalog.fetchedAt).toLocaleString() }}</p>
     <p v-if="loading" role="status">正在获取模型列表…</p><p v-if="error" class="error" role="alert">{{ error }}</p>

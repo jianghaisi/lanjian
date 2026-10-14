@@ -1,3 +1,4 @@
+import { modelHttpError, readModelError, rethrowModelTransport } from './model-service-errors'
 import { consumeProviderResponse, generationDiagnostics, assertSuccessfulStop } from './provider-transport'
 import type { GeneratedText } from '../../../../contracts/models/generation-diagnostics'
 import type { AiFunctionTool, AiToolMessage } from '../../../../contracts/assistant/assistant-conversation-contracts'
@@ -220,17 +221,12 @@ export class GeminiNativeTextClient {
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs)
       })
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'TimeoutError') {
-        throw new AppError('FEATURE_UNAVAILABLE', `Gemini 服务在 ${Math.ceil(timeoutMs / 1000)} 秒内没有开始返回结果；任务已安全停止。`, { recoverable: true, cause: error })
-      }
-      if (error instanceof TypeError) {
-        throw new AppError('FEATURE_UNAVAILABLE', '无法连接 Gemini 原生服务，请检查服务根地址、网络和本机代理设置。', { recoverable: true, cause: error })
-      }
-      throw error
+      rethrowModelTransport(error, signal)
     }
     if (!response.ok) {
-      await discardBounded(response)
-      throw new AppError('FEATURE_UNAVAILABLE', nativeHttpErrorMessage(response.status, init.method === 'POST' && Boolean(config.generation.parameters.thinkingConfig)), { recoverable: true })
+      const detail = await readModelError(response, signal)
+      if (signal?.aborted) rethrowModelTransport(signal.reason, signal)
+      throw new AppError('FEATURE_UNAVAILABLE', modelHttpError(response.status, detail, 'Gemini 原生服务'), { recoverable: true })
     }
     return response
   }
@@ -293,7 +289,7 @@ export async function consumeGeminiStream(
     if (delta) await onDelta?.(delta, content)
     if (Array.isArray(payload.candidates) && payload.candidates[0]?.finishReason === 'STOP') finished = true
   }, 24 * 1024 * 1024, true)
-  if (!finished) throw invalidResponse('Gemini 回复中断，缺少完整结束状态。')
+  if (!finished) throw invalidResponse('Gemini 回复中断，缺少完整结束状态。请重试；反复出现时请检查接口流式回复兼容性。')
   return content
 }
 
@@ -305,7 +301,7 @@ function geminiDiagnostics(config: NativeConfig, payload: unknown) {
 
 function assertFinishReason(reason: unknown): void {
   if (reason === 'MAX_TOKENS') throw invalidResponse('Gemini 已耗尽输出预算（思考和正文共用），结果不完整。请提高最大输出 tokens 或手动降低思考强度后重试；未自动重试。')
-  if (typeof reason === 'string' && reason !== 'STOP') throw invalidResponse('Gemini 原生生成未正常完成，请调整内容或输出预算后重试。')
+  if (typeof reason === 'string') assertSuccessfulStop(reason, ['STOP'])
 }
 
 function extractStreamText(payload: unknown): string {
@@ -341,22 +337,9 @@ async function readBounded(response: Response): Promise<Uint8Array> {
   return result
 }
 
-async function discardBounded(response: Response): Promise<void> {
-  try { await readBounded(response) } catch { /* provider error bodies are deliberately discarded */ }
-}
-
-function nativeHttpErrorMessage(status: number, explicitThinking = false): string {
-  if ((status === 400 || status === 422) && explicitThinking) return 'Gemini 服务拒绝了请求，可能不支持所选思考强度或其他生成参数。请核对型号和参数，或手动选择“默认”后重试；未自动降级或重复请求。'
-  if (status === 401 || status === 403) return 'Gemini 原生接口密钥无效或没有当前模型权限，请检查令牌分组。'
-  if (status === 404) return 'Gemini 原生服务根地址或型号路径不正确；请填写服务根地址，不要附加 /v1。'
-  if (status === 429) return 'Gemini 原生接口当前限流、余额不足或配额已用完，请稍后重试。'
-  if (status === 400 || status === 422) return '请求被 Gemini 原生服务拒绝，请检查型号名称和连接协议。'
-  return `Gemini 原生服务返回 ${status}，请稍后重试。`
-}
-
 function canRetryAsStream(error: unknown): boolean {
   return error instanceof AppError && error.code === 'FEATURE_UNAVAILABLE'
-    && (/无法连接 Gemini 原生服务/.test(error.message) || /没有开始返回结果/.test(error.message))
+    && (/无法连接模型服务/.test(error.message) || /模型请求等待超时/.test(error.message))
 }
 
 function friendlyError(error: unknown, fallback: string): string {

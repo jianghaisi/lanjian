@@ -35,8 +35,12 @@ const env = { ...process.env, LANJIAN_USER_DATA_PATH: userData, LANJIAN_GLOBAL_M
 let app, page
 const manager = () => page.locator('[data-testid="global-model-settings"]')
 const settled = async () => { await page.waitForFunction(() => document.querySelector('[data-testid="global-model-settings"]')?.getAttribute('aria-busy') === 'false') }
+async function closeApp() {
+  const closed = app.waitForEvent('close'), owner = await app.browserWindow(page)
+  await owner.evaluate(win => win.close()); await closed; app = undefined
+}
 async function start() {
-  app = await _electron.launch({ executablePath: require('electron'), args: ['.'], env, timeout: 30000 })
+  app = await _electron.launch({ executablePath: require('electron'), args: process.env.LANJIAN_TEST_BUILD ? [resolve(process.env.LANJIAN_TEST_BUILD, 'main/index.js')] : ['.'], env, timeout: 30000 })
   await app.evaluate(({ session }, endpoint) => {
     session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (details, done) => done({ cancel: !details.url.startsWith(endpoint) }))
     const original = globalThis.fetch
@@ -341,7 +345,7 @@ try {
   console.log('task copy/undo/preview/save passed')
   const beforeFailure = await readBook('Adaptive-B')
   const requestsBeforeRestart = requests.length
-  await app.close(); app = undefined; await start()
+  await closeApp(); await start()
   await page.locator('.project-library').waitFor()
   await openBook('Adaptive-B'); await settings('routing')
   const unconfirmed = manager().locator('[data-testid="unconfirmed-parameters"]')
@@ -427,7 +431,7 @@ try {
   const globalBytes = await readFile(join(globalModelData, 'global-model-connections.json'))
   assert.doesNotMatch(globalBytes.toString(), /synthetic-ui-key/)
   assert.equal(JSON.parse(globalBytes).connections.length, 1)
-  console.log('manual fallback/theme passed'); await app.close(); app = undefined; await start()
+  console.log('manual fallback/theme passed'); await closeApp(); await start()
   await page.locator('.project-library').waitFor()
   await openBook('Adaptive-B'); await settings('routing')
   assert.equal(await manager().locator('[data-testid="routing-model-shared"]').getAttribute('data-model'), 'manual-unlisted')
@@ -472,6 +476,8 @@ try {
   await row.getByLabel('writer-beta最大输出', { exact: true }).fill('2048')
   await row.getByRole('button', { name: '测试', exact: true }).click()
   await row.locator('.result.passed').waitFor()
+  assert.equal(await row.locator('.result.passed').innerText(), '文字测试通过')
+  assert.match(await panel.innerText(), /仅测试文字回复，尚未验证工具调用/)
   assert.equal(await row.getByRole('button', { name: '设为新书默认', exact: true }).count(), 1)
   assert.deepEqual(requests.at(-1).body.generationConfig, { maxOutputTokens: 2048, temperature: 0 })
   await panel.getByRole('button', { name: '重新获取模型', exact: true }).click()
@@ -501,6 +507,8 @@ try {
   assert.equal(requests.length, beforePanel + 5, 'editing parameters never retests automatically')
   await row.getByRole('button', { name: '测试', exact: true }).click()
   await row.locator('.result.passed').waitFor()
+  assert.equal(await row.locator('.result.passed').innerText(), '文字测试通过')
+  assert.match(await panel.innerText(), /仅测试文字回复，尚未验证工具调用/)
   assert.deepEqual(requests.at(-1).body.generationConfig, { maxOutputTokens: 2048, temperature: .7 })
   await capture('09-tested-parameters-default', 1440, 1000, 1.25, 'tests')
   await row.getByRole('button', { name: '设为新书默认', exact: true }).click(); await settled(); await alertFree()
@@ -533,6 +541,6 @@ try {
   throw error
 } finally {
   releaseCatalog?.()
-  if (app) { await app.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) window.destroy() }).catch(() => {}); await app.close().catch(() => {}) }
+  if (app) await closeApp()
   await new Promise(done => server.close(done))
 }

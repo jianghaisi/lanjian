@@ -9,6 +9,7 @@ import { generationTimeoutMs } from './openai-compatible-text-client'
 import { consumeProviderResponse, providerRequest } from './provider-transport'
 import { nativeToolBody } from './native-tool-bodies'
 import { nativeProviderResponse } from './native-provider-response'
+import { rethrowModelTransport } from './model-service-errors'
 
 /** Explicit Messages / Responses transport; no protocol guessing or downgrade retries. */
 export class NativeMessagesTextClient {
@@ -67,11 +68,13 @@ export class NativeMessagesTextClient {
   private async send(c: CompiledRemoteConfig, messages: AiToolMessage[], tools: AiFunctionTool[], toolMode: boolean, signal?: AbortSignal, onDelta?: (content: string) => void | Promise<void>, timeout?: number) {
     const bound = AbortSignal.timeout(timeout ?? generationTimeoutMs(JSON.stringify(messages).length, c.generation.outputTokens))
     const bounded = signal ? AbortSignal.any([signal, bound]) : bound
-    const body = nativeToolBody(c, messages, tools, !!onDelta)
-    const response = await providerRequest(c, c.kind === 'anthropic-native' ? '/messages' : '/responses', body, bounded, this.transport)
-    const result = await nativeProviderResponse(response, c, bounded, toolMode, onDelta)
-    await c.requestGuard?.recheck(); bounded.throwIfAborted(); c.requestGuard?.assertActive()
-    return result
+    try {
+      const body = nativeToolBody(c, messages, tools, !!onDelta)
+      const response = await providerRequest(c, c.kind === 'anthropic-native' ? '/messages' : '/responses', body, bounded, this.transport)
+      const result = await nativeProviderResponse(response, c, bounded, toolMode, onDelta)
+      await c.requestGuard?.recheck(); bounded.throwIfAborted(); c.requestGuard?.assertActive()
+      return result
+    } catch (error) { return rethrowModelTransport(error, bounded) }
   }
   private messages(instruction: string, draft: string, system: string): TextCompletionInput['messages'] {
     return [{ role: 'system', content: system }, { role: 'user', content: instruction.trim() + (draft ? `\n\n当前正文：\n${draft}` : '') }]

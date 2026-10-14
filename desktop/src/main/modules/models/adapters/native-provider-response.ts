@@ -73,7 +73,7 @@ export async function nativeProviderResponse(response: Response, c: CompiledRemo
       final.content = [...blocks].sort(([a], [b]) => a - b).map(([, b]) => b); terminal = true
     } else if (p.type !== 'ping') return providerInvalid()
   }, maxBytes)
-  if (!terminal || !final) return providerInvalid('模型回复中断，缺少完整结束状态。')
+  if (!terminal || !final) return providerInvalid('模型回复中断，缺少完整结束状态。已显示的内容保留，请重试；反复出现时请检查接口流式回复兼容性。')
   let envelope: ProviderToolContent, reason: string
   if (anthropic) {
     assertSuccessfulStop(final.stop_reason, ['end_turn', 'stop_sequence', 'tool_use'])

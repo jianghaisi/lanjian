@@ -103,7 +103,7 @@ export function registerModelConnections(ipc: IpcMain, globalModelRoot: string, 
       assertActive()
       return { models: [] as string[], ...(completion.diagnostics && !JSON.stringify(completion.diagnostics).includes(apiKey) ? { diagnostics: completion.diagnostics } : {}), ...(parameterPolicy ? { parameterPolicy } : {}), parameterFingerprint: createHash('sha256').update(JSON.stringify({ id: input.id, revision: input.revision, model: input.model, effective })).digest('hex') }
     })
-    return { ...input, model: input.model ?? '', testedAt: new Date().toISOString(), success: true, message: catalogOnly ? '已获取接口提供的型号列表，未修改分配。' : '接口已完成测试生成，未发送书稿内容。', ...value }
+    return { ...input, model: input.model ?? '', testedAt: new Date().toISOString(), success: true, message: catalogOnly ? '已获取接口提供的型号列表，未修改分配。' : '文字测试通过，尚未验证工具调用；未发送书稿内容。', ...value }
   }
   const handlers = {
     list: async () => { const view = await globals.list(); for (const [id, cached] of modelCatalogs) if (!view.connections.some(c => c.id === id && c.revision === cached.revision && c.enabled)) modelCatalogs.delete(id); return view }, create: (input: unknown) => globals.create(input, windowGuard()), update: (input: unknown) => globals.update(input, windowGuard()),
