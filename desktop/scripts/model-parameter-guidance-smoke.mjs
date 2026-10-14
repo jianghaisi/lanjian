@@ -57,7 +57,8 @@ async function start() {
 }
 async function openLibraryManager() {
   await page.locator('.project-library').waitFor()
-  await page.locator('[data-testid="library-model-setup"]').click(); await settled()
+  await page.locator('.library-header-actions [aria-label="设置"]').click()
+  await page.getByTestId('library-global-models').click(); await settled()
 }
 async function closeLibraryManager() {
   await page.getByRole('dialog', { name: '全局模型接口与新书默认', exact: true }).getByRole('button', { name: '关闭', exact: true }).click()

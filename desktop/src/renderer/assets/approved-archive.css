@@ -444,13 +444,6 @@
 .book-tabs .title-actions .labeled-title-action:hover { background:var(--surface-muted); }
 .book-tabs .title-actions button:focus-visible { outline:2px solid var(--jade); outline-offset:-2px; }
 .book-tabs .title-actions>.archive-companion-badge { flex:none; height:36px; }
-.book-tabs .library-header-search { display:flex; align-items:center; gap:.5rem; width:clamp(9rem,16vw,16rem); min-width:0; height:34px; padding:0 .5rem; border-bottom:1px solid var(--line); }
-.book-tabs .library-header-search input { width:100%; min-width:0; border:0; padding:0; outline:0; background:transparent; color:var(--ink); font:.75rem var(--sans); }
-.book-tabs .library-header-search input::placeholder { color:var(--muted); }
-.book-tabs .library-header-search:focus-within { outline:2px solid var(--jade); outline-offset:-2px; }
-.book-tabs .library-local-status { display:flex; align-items:center; gap:.375rem; padding:0 .5rem; color:var(--muted); font:.6875rem var(--sans); white-space:nowrap; }
-.book-tabs .library-local-status i { width:6px; height:6px; border-radius:50%; background:var(--jade); }
-@media(max-width:70rem) { .book-tabs .library-local-status { display:none; } }
 @media(max-width:80rem) { .book-tabs .labeled-title-action span { display:none; } }
 @media(max-width:62rem) {
   .book-tabs .brand-wordmark,.book-tabs .workspace-guidance-trigger span { display:none; }

@@ -54,7 +54,8 @@ async function start() {
     sessionStorage.setItem('lanjian-opening-seen', 'true')
   })
   await page.reload(); await page.locator('[data-testid="app-boot-enter"]').click(); await page.locator('[data-testid="app-boot"]').waitFor({ state: 'hidden' })
-  await page.locator('[data-testid="library-model-setup"]').click(); await settled()
+  await page.locator('.library-header-actions [aria-label="设置"]').click()
+  await page.getByTestId('library-global-models').click(); await settled()
 }
 async function capture(theme) {
   await page.evaluate(theme => { localStorage.setItem('lanjian-theme', theme); window.dispatchEvent(new StorageEvent('storage', { key: 'lanjian-theme', newValue: theme })) }, theme)

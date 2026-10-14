@@ -180,7 +180,8 @@ async function launchFixture() {
 try {
   await launchFixture()
 
-  await page.getByTestId('library-model-setup').click()
+  await page.locator('.library-header-actions [aria-label="设置"]').click()
+  await page.getByTestId('library-global-models').click()
   await page.getByTestId('empty-add-connection').click()
   await page.getByTestId('global-connection-name').fill('双书验证接口')
   await page.getByTestId('global-connection-url').fill('https://multi-book.invalid/v1')
@@ -477,7 +478,8 @@ try {
     await api.create({ expectedRevision: catalog.revision, name: '保留接口', baseUrl: 'https://other.invalid/v1', protocol: 'openai-compatible' })
     return catalog.connections[0]
   })
-  await page.getByTestId('library-model-setup').click()
+  await page.locator('.library-header-actions [aria-label="设置"]').click()
+  await page.getByTestId('library-global-models').click()
   const card = page.locator(`[data-global-id="${connectionBefore.id}"]`)
   await card.getByRole('button').click()
   await page.getByText('停用或删除接口', { exact: true }).click()

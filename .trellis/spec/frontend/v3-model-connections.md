@@ -60,3 +60,7 @@ The smoke must create both an OpenAI-compatible synthetic connection and a Gemin
 Wrong: `await saveBook(); await refresh(); showSuccess()` makes refresh failure look like loss of the saved edit.
 
 Correct: acknowledge the authoritative result, preserve mirror status, and report refresh failure separately with a re-read action. Never regenerate or overwrite data to make the screen appear successful.
+
+## Library model entry (2026-10-14)
+
+The library top bar omits the book/type search, static local-save badge and standalone model button. Keep persistence unchanged. Open the existing global model manager through settings navigation item 04, “模型设置”; writing plugins follow as 05 on desktop. Browser mode does not expose desktop model configuration. Retain the existing manager dialog, return-to-settings flow and dirty-input leave guard; do not fork model state for this entry.

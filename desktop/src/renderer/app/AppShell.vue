@@ -81,7 +81,6 @@ async function inspirationShowWorks() { await showWorkspaceLibrary(); if (!curre
 async function closeInspiration() { inspirationOpen.value = false; if (inspirationOrigin.value.group && inspirationOrigin.value.path === current.value?.path) await openGroupChat() }
 async function inspirationGroup() { inspirationOpen.value = false; await openGroupChat() }
 async function selectCreationParent(id) { inspirationOpen.value = false; await selectWorkspaceParent(id) }
-const librarySearch = ref('')
 const settlementSourceComposing = ref(false)
 const petBootTransition = ref(false), petWorkspaceTransition = ref(false)
 
@@ -1374,9 +1373,6 @@ watch(() => [current.value?.path, activeWorkspaceLeaf.value?.id, selectedId.valu
         <button class="labeled-title-action" type="button" data-testid="open-inspiration-library" aria-label="知识库" title="知识库" :aria-pressed="inspirationOpen" @click="showInspiration"><StudioIcon name="book" :size="16"/><span>知识库</span></button>
         <HostedAccount v-if="desktop.app.hosted" :api="desktop.app.hosted" :library="!current"/>
         <div v-if="!current" class="title-actions library-header-actions">
-          <label class="library-header-search"><StudioIcon name="search" :size="16"/><input v-model="librarySearch" type="search" aria-label="搜索作品" placeholder="搜索书名、类型"></label>
-          <span class="library-local-status"><i />{{ desktop.app.platform === 'browser' ? '账户书库' : '已保存至本地' }}</span>
-          <button v-if="desktop.app.platform !== 'browser'" class="labeled-title-action" type="button" data-testid="library-model-setup" @click="openLibraryModels">模型</button>
           <button class="labeled-title-action" type="button" data-activity="settings" aria-label="设置" title="设置" @click="openAppearanceSettings"><StudioIcon name="settings" :size="19"/></button>
         </div>
         <div v-else-if="!(editorFocusMode && (active === 'desk' || active === 'outline'))" class="title-actions">
@@ -1394,7 +1390,7 @@ watch(() => [current.value?.path, activeWorkspaceLeaf.value?.id, selectedId.valu
     </div>
     <dialog v-if="!current" ref="localAppearanceDialog" class="local-appearance-dialog library-preferences-dialog" aria-label="外观设置" data-sound-dialog>
       <header><h2>作品库设置</h2><button class="control-button secondary" type="button" aria-label="关闭外观设置" @click="localAppearanceDialog.close()"><StudioIcon name="close" :size="18"/></button></header>
-      <LibrarySettingsSections>
+      <LibrarySettingsSections :models="desktop.app.platform !== 'browser'" @models="openLibraryModels">
         <template #appearance>
         <ThemeSelector :model-value="themeChoice" :error="themeError" @update:model-value="selectTheme" />
         <LibraryAppearanceSettings :background="libraryAppearance.background" :scene="libraryAppearance.scene" :character="libraryAppearance.character" :error="libraryAppearanceError" @background="updateLibraryAppearance({ background: $event })" @scene="updateLibraryAppearance({ scene: $event })" @character="updateLibraryAppearance({ character: $event })" />
@@ -1402,7 +1398,6 @@ watch(() => [current.value?.path, activeWorkspaceLeaf.value?.id, selectedId.valu
         <template #opening><LoaderPreferences :projects="projects" :continue-project-id="continueProjectId" /></template>
         <template #sound="{ active: soundActive }"><SoundPreferences :active="soundActive" /><CompanionVoiceSettings /><CompanionDialogueSettings /></template>
         <template v-if="desktop.app.platform !== 'browser'" #plugins="{ active: pluginsActive }"><WritingPluginSettings v-if="pluginsActive" :api="desktop.writingPlugins" :book-scope-key="null" /></template>
-        <template v-if="desktop.app.platform !== 'browser'" #models><button class="control-button secondary" type="button" data-testid="library-global-models" @click="openLibraryModels">模型接口与新书默认 →</button></template>
       </LibrarySettingsSections>
     </dialog>
     <dialog v-if="!current && libraryModelsOpen" ref="libraryModelsDialog" class="local-appearance-dialog global-models-dialog" aria-label="全局模型接口与新书默认" @cancel="closeLibraryModels">
@@ -1415,7 +1410,7 @@ watch(() => [current.value?.path, activeWorkspaceLeaf.value?.id, selectedId.valu
     </section>
 
     <section v-if="desktop" class="studio redesigned-studio narrative-terminal" :style="studioStyle" :data-page="inspirationOpen ? 'inspiration' : groupChatOpen ? 'group' : active" :data-destination="primaryDestination" :data-guide-style="editorGuideStyle" data-assistant-layout="sidebar" :data-assistant-open="!groupChatOpen && !inspirationOpen && current && assistantAvailable && assistantPresented ? 'true' : 'false'" :class="{ 'inspiration-mode': inspirationOpen, 'group-mode': groupChatOpen, 'assistant-collapsed': groupChatOpen || inspirationOpen || !current || !assistantAvailable || !assistantPresented, 'library-mode': !current, 'archive-workspace': Boolean(current) && !groupChatOpen && !inspirationOpen, 'writing-focus': !groupChatOpen && !inspirationOpen && editorFocusMode && (active === 'desk' || active === 'outline'), 'editor-guides-hidden': editorGuideStyle === 'off' }" @input="noteCompanionTyping" @compositionstart="companionComposing = true" @compositionend="companionComposing = false; noteCompanionTyping()">
-      <ProjectLibrary v-if="!current" v-show="!inspirationOpen" :presented="!opening && !workspaceOpening" :search="librarySearch" :projects="projects" :continue-project-id="continueProjectId" :loading="loading" :loaded="projectsLoaded" :recently-trashed-project="recentlyTrashedProject" :background-artwork="libraryBackgroundArtwork" :scene-artwork="librarySceneArtwork" :character-placement="libraryAppearance.character" @open="openProject" @open-chapter="openLibraryChapter" @create="openCreateProject" @import-project="importProject" @forget="forgetProject" @trash="requestTrashProject" @open-trash="openSystemTrash" @settings="openAppearanceSettings" @dismiss-trash="recentlyTrashedProject = null" />
+      <ProjectLibrary v-if="!current" v-show="!inspirationOpen" :presented="!opening && !workspaceOpening" :projects="projects" :continue-project-id="continueProjectId" :loading="loading" :loaded="projectsLoaded" :recently-trashed-project="recentlyTrashedProject" :background-artwork="libraryBackgroundArtwork" :scene-artwork="librarySceneArtwork" :character-placement="libraryAppearance.character" @open="openProject" @open-chapter="openLibraryChapter" @create="openCreateProject" @import-project="importProject" @forget="forgetProject" @trash="requestTrashProject" @open-trash="openSystemTrash" @settings="openAppearanceSettings" @dismiss-trash="recentlyTrashedProject = null" />
       <QuickChapterOpen v-if="current" :key="current.path" ref="quickChapterOpen" :chapters="quickChapterItems" :selected-id="selectedId" :open-chapter="openQuickChapter" />
       <WorkspaceGuidancePopover v-if="current" ref="guidancePopover" :workflow="workflowStatus" :overview="consistencyOverview" :busy="busy" :scope="`${current.id}:${active}:${editorFocusMode}`" @navigate="goToWorkflowStep" @select-item="openConsistencyItem" @write="returnToManuscript" @refresh="refreshWorkflow()" />
 

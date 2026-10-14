@@ -60,7 +60,8 @@ const defaults = () => page.evaluate(() => window.novelDesktop.modelConnections.
 const idle = () => page.waitForFunction(() => document.querySelector('[data-testid="model-test-panel"]')?.getAttribute('aria-busy') === 'false')
 try {
   await launch()
-  await page.getByTestId('library-model-setup').click()
+  await page.locator('.library-header-actions [aria-label="设置"]').click()
+  await page.getByTestId('library-global-models').click()
   await page.getByTestId('quick-name').fill('思考强度验收')
   await page.getByTestId('quick-protocol').selectOption('gemini-native')
   await page.getByTestId('quick-url').fill('https://thinking.invalid')
@@ -131,7 +132,8 @@ try {
   await app.close(); app = undefined
   await launch()
   assert.equal((await defaults()).template.shared.thinkingLevel, 'medium')
-  await page.getByTestId('library-model-setup').click()
+  await page.locator('.library-header-actions [aria-label="设置"]').click()
+  await page.getByTestId('library-global-models').click()
   await page.locator('.advanced-connections > summary').click()
   await page.locator('.model-defaults > summary').click()
   assert.equal(await page.getByLabel('统一模型思考强度', { exact: true }).inputValue(), 'medium')

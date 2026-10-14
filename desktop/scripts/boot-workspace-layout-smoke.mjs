@@ -66,7 +66,7 @@ try {
     await page.waitForTimeout(300)
     const geometry=await page.evaluate(() => {
       const bar=document.querySelector('.book-tabs'),rect=bar.getBoundingClientRect()
-      const controls=['.workspace-brand-actions','.book-library','[data-book-tab]','.library-header-search','[data-testid="library-model-setup"]','.library-header-actions [aria-label="设置"]','[data-testid="background-tasks-toggle"]']
+      const controls=['.workspace-brand-actions','.book-library','[data-book-tab]','.library-header-actions [aria-label="设置"]','[data-testid="background-tasks-toggle"]']
       return {height:rect.height,secondHeader:!!document.querySelector('.library-topbar'),overflow:bar.scrollWidth>bar.clientWidth+1,contentTop:document.querySelector('.library-content').getBoundingClientRect().top,barBottom:rect.bottom,
         controls:controls.map(selector=>{const el=document.querySelector(selector),r=el.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {selector,usable:el===hit||el.contains(hit),within:r.top>=rect.top&&r.bottom<=rect.bottom}})}
     })
@@ -76,7 +76,8 @@ try {
     assert.ok(Math.abs(geometry.contentTop-geometry.barBottom)<2,JSON.stringify(geometry))
     assert.ok(geometry.controls.every(item=>item.usable&&item.within),JSON.stringify(geometry))
     await capture(`library-${width}-${zoom}-${theme}`)
-    await page.getByTestId('library-model-setup').click()
+    await page.locator('.library-header-actions [aria-label="设置"]').click()
+  await page.getByTestId('library-global-models').click()
     await page.locator('.global-models-dialog[open]').waitFor()
     await page.locator('.global-models-dialog').getByRole('button',{name:'关闭',exact:true}).click()
     await page.locator('.library-header-actions [aria-label="设置"]').click()
@@ -85,12 +86,9 @@ try {
     checks.push({name:`library-single-row-${width}-${zoom}-${theme}`,geometry})
   }
   await page.locator('[data-library-view="all"]').click()
-  await page.getByRole('searchbox',{name:'搜索作品'}).fill('双书乙')
-  assert.equal(await page.locator('.work-item-open').count(),1)
-  assert.ok((await page.locator('.work-item-open').textContent()).includes('双书乙'))
-  await page.getByRole('searchbox',{name:'搜索作品'}).fill('')
+  assert.equal(await page.locator('.library-header-search,.library-local-status,[data-testid="library-model-setup"]').count(),0)
   assert.equal(await page.locator('.work-item-open').count(),3)
-  checks.push('library-header-search-filters-and-restores-books')
+  checks.push('library-topbar-simplified-and-all-books-accessible')
   await page.locator('[data-book-tab]').first().click()
   await page.getByTestId('workspace-loading').waitFor({state:'hidden'})
   await page.locator('[data-nav-parent="planning"]').click()
