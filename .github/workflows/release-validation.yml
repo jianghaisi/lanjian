@@ -7,7 +7,9 @@ on:
         required: true
         type: string
 permissions:
-  contents: read
+  # GitHub hides draft releases from read-only tokens. The token is exposed
+  # only to the download step; this workflow never publishes or edits assets.
+  contents: write
 concurrency:
   group: installer-validation-${{ inputs.tag }}
   cancel-in-progress: false
@@ -25,6 +27,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ inputs.tag }}
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
