@@ -2,6 +2,7 @@
 import { onMounted, ref, nextTick } from 'vue'
 import { record, siteLinks, type SiteLinks } from '@lanjian/hosted-contracts'
 import BrandLogo from '../../../desktop/src/renderer/ui/BrandLogo.vue'
+import SponsorCard from '../../../desktop/src/renderer/features/sponsors/SponsorCard.vue'
 import { http, messageOf } from '../api/http'
 import './product.css'
 import ProductGlass from './ProductGlass.vue'
@@ -13,6 +14,7 @@ const preview = ref<'editor' | 'library'>('editor')
 const links = ref<SiteLinks>({ project: '', download: '', guide: '' })
 const loading = ref(true), error = ref(''), step = ref(0), scene = ref(0)
 const paused = ref(false)
+const sponsorDialog = ref<HTMLDialogElement>()
 const chapters = ['关于岚笺', '创作流程', '完整参考书', '桌面版本']
 const stages = [
   { title: '先把故事想清楚', label: '定书 · 人物 · 世界', text: '记下核心冲突，写清人物想要什么。把境界、能力边界和系统提示框整理成固定设定，后面的创作有据可依。', excerpt: '沈禾想带着祖父留下的六盏铜灯离乡，却发现旧账里少了一页。', note: '核心创意' },
@@ -43,6 +45,23 @@ onMounted(() => { void load(); music.setScene('reveal') })
         <div v-else class="structure-line" aria-label="创作结构"><span>设定</span><i>→</i><span>总纲</span><i>→</i><span>章纲</span><i>→</i><span>正文</span><span class="structure-caption">同一部作品，完整的创作链路。</span></div>
       </section>
     </main>
-    <footer class="product-footer"><span>记录人类的想象。</span><div><button class="product-sound" :data-state="music.state.value" :aria-pressed="music.enabled.value" @click="music.toggle">{{music.label.value}}</button><button :aria-pressed="paused" @click="paused=!paused">{{paused?'播放界面动效':'暂停界面动效'}}</button></div><span>LANJIAN · FROM IDEA TO MANUSCRIPT</span></footer>
+    <footer class="product-footer"><span>记录人类的想象。</span><div><button class="product-sound" :data-state="music.state.value" :aria-pressed="music.enabled.value" @click="music.toggle">{{music.label.value}}</button><button :aria-pressed="paused" @click="paused=!paused">{{paused?'播放界面动效':'暂停界面动效'}}</button></div><button class="sponsor-entry" type="button" aria-haspopup="dialog" @click="sponsorDialog?.showModal()">赞助商 · FastAIToken ↗</button></footer>
+    <dialog ref="sponsorDialog" class="sponsor-dialog" aria-labelledby="sponsor-heading">
+      <header><h2 id="sponsor-heading">支持岚笺的伙伴</h2><button type="button" aria-label="关闭赞助介绍" autofocus @click="sponsorDialog?.close()">关闭 ×</button></header>
+      <SponsorCard />
+    </dialog>
   </div>
 </template>
+
+<style scoped>
+.product-footer { flex-wrap:wrap; row-gap:8px; }
+.product-footer .sponsor-entry { pointer-events:auto; border:0; border-bottom:1px solid #69766d; background:none; color:inherit; font:inherit; min-height:38px; padding:4px 0; cursor:pointer; }
+.sponsor-entry:focus-visible { outline:2px solid #e8a768; outline-offset:4px; }
+.sponsor-dialog { --surface:#faf9f3; --surface-muted:#edf0e8; --ink:#213d2e; --muted:#526154; --line:#b6c2b3; --jade:#356653; width:min(700px, calc(100vw - 32px)); max-height:calc(100svh - 32px); padding:24px; box-sizing:border-box; border:1px solid var(--line); background:var(--surface); color:var(--ink); overflow:auto; }
+.sponsor-dialog::backdrop { background:rgb(0 0 0 / .72); }
+.sponsor-dialog header { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:20px; }
+.sponsor-dialog h2 { font:600 20px/1.5 var(--sans, sans-serif); margin:0; }
+.sponsor-dialog header button { min-height:38px; padding:6px 10px; background:transparent; border:1px solid var(--line); color:var(--ink); cursor:pointer; white-space:nowrap; }
+.sponsor-dialog header button:focus-visible { outline:2px solid var(--jade); outline-offset:3px; }
+@media(max-width:600px) { .sponsor-dialog { padding:16px; }.product-footer .sponsor-entry { font-size:12px; } }
+</style>

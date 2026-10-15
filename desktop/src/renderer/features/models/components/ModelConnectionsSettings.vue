@@ -7,6 +7,7 @@ import type { GlobalConnectionsView, GlobalConnectionView, RemoteModelProtocol }
 import type { LegacyReusePreview } from '../../../../contracts/models/legacy-connection-reuse'
 import { routingDraft, compileRouting, selectModel, modelTaskLabels, type ModelSlot } from '../services/model-connections-state'
 import ArchiveAction from '../../../ui/ArchiveAction.vue'
+import SponsorCard from '../../sponsors/SponsorCard.vue'
 import ArchiveFormField from '../../../ui/ArchiveFormField.vue'
 import ModelRoutingForm from './ModelRoutingForm.vue'
 import { saveTestedModelDefault } from '../services/model-quick-setup'
@@ -255,6 +256,7 @@ defineExpose({ dirty, reload: load })
     <div v-if="message" class="model-notice" role="status">{{ message }}</div>
     <p v-if="pending" role="status">正在处理，请稍候…</p>
     <template v-if="page === 'connection'">
+      <SponsorCard compact />
       <div class="connection-workspace">
         <nav class="connection-index" aria-label="已保存的 API 接口">
           <div class="connection-index-heading"><div><span class="archive-kicker">API INDEX / 接口索引</span><b>我的接口 <small>{{ availableConnections.length }}</small></b></div><ArchiveAction compact :disabled="dirty || (showForm && !selected)" data-testid="global-add-connection" @click="editConnection()">添加</ArchiveAction></div>

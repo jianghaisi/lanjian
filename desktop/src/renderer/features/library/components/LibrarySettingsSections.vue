@@ -5,7 +5,7 @@ const emit = defineEmits<{ models: [] }>()
 const selected = ref('appearance')
 const content = ref<HTMLElement>()
 const slots = useSlots()
-const tabs = computed(() => [{ id: 'appearance', label: '外观与画面', number: '01' }, { id: 'opening', label: '开场与加载', number: '02' }, { id: 'sound', label: '声音与对话', number: '03' }, ...(props.models ? [{ id: 'models', label: '模型设置', number: '04' }] : []), ...(slots.plugins ? [{ id: 'plugins', label: '写作插件', number: props.models ? '05' : '04' }] : [])])
+const tabs = computed(() => [{ id: 'appearance', label: '外观与画面', number: '01' }, { id: 'opening', label: '开场与加载', number: '02' }, { id: 'sound', label: '声音与对话', number: '03' }, ...(props.models ? [{ id: 'models', label: '模型设置', number: '04' }] : []), ...(slots.plugins ? [{ id: 'plugins', label: '写作插件', number: props.models ? '05' : '04' }] : []), ...(slots.sponsors ? [{ id: 'sponsors', label: '赞助商', number: String(4 + Number(Boolean(props.models)) + Number(Boolean(slots.plugins))).padStart(2, '0') }] : [])])
 const positions = new Map<string, number>()
 let navigation = 0
 async function select(id: string) {

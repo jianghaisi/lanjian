@@ -12,6 +12,14 @@ A local desktop workspace for long-form fiction: references, worldbuilding, even
 - [Deployment](docs/DEPLOYMENT.md)
 - [Contributing](CONTRIBUTING.md)
 
+## Sponsors
+
+| Partner | Introduction |
+| --- | --- |
+| [<img src="desktop/src/renderer/assets/sponsors/fastaitoken.png" width="48" height="48" alt="FastAIToken Logo">](https://www.fastaitoken.com/register?aff=YD326MA7UYAU)<br>**[FastAIToken](https://www.fastaitoken.com/register?aff=YD326MA7UYAU)**<br>AI API platform | Thank you to FastAIToken for supporting Lanjian! FastAIToken offers aggregated AI API access for developers, including OpenAI, Claude and Gemini models. **[Register through Lanjian’s referral link ↗](https://www.fastaitoken.com/register?aff=YD326MA7UYAU)** |
+
+*Sponsored placement · Available models, channels and prices are determined by the provider. Third-party purchases do not add credits to Lanjian.*
+
 ![Installed desktop 0.1.0 — library with demonstration books](docs/assets/desktop-library.png)
 ![Installed desktop 0.1.0 — manuscript editor and writing assistant](docs/assets/desktop-editor.png)
 

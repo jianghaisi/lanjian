@@ -1,5 +1,6 @@
 <script setup>
 import ArchivePageHeader from '../../ui/ArchivePageHeader.vue'
+import SponsorCard from '../../features/sponsors/SponsorCard.vue'
 import WorldbookEntryEditor from '../../features/characters/components/WorldbookEntryEditor.vue'
 import WritingPluginSettings from '../../features/writing-plugins/components/WritingPluginSettings.vue'
 import LocalModelStore from '../../features/models/components/LocalModelStore.vue'
@@ -1425,6 +1426,7 @@ const visibleWorldbookEntities = computed(() => storyEntities.value.filter(item 
           <p>版本 {{ appVersion || '读取中…' }} · 单机单用户 MVP</p>
         </div>
       </header>
+      <SponsorCard />
       <div class="about-principles">
         <article>
           <i>主</i>

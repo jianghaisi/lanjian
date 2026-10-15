@@ -15,6 +15,14 @@
 
 目前发布 **0.1 开发预览版**，提供 Windows x64 安装包。还有不少细节需要打磨，欢迎带着实际写作中的问题来试用和反馈。重要作品请保留备份。
 
+## 赞助商
+
+| 合作伙伴 | 介绍 |
+| --- | --- |
+| [<img src="desktop/src/renderer/assets/sponsors/fastaitoken.png" width="48" height="48" alt="FastAIToken Logo">](https://www.fastaitoken.com/register?aff=YD326MA7UYAU)<br>**[FastAIToken](https://www.fastaitoken.com/register?aff=YD326MA7UYAU)**<br>AI API 聚合平台 | 感谢 FastAIToken 对岚笺的支持！面向开发者提供 AI API 聚合服务，可用于接入 OpenAI、Claude、Gemini 等模型。**[通过岚笺邀请链接注册 ↗](https://www.fastaitoken.com/register?aff=YD326MA7UYAU)** |
+
+*赞助推广 · 模型、渠道与价格以平台说明为准；第三方充值不计入岚笺站内积分。*
+
 ## 为什么做岚笺
 
 写长篇时，敲字之外还有很多琐碎的事：查一个人物之前说过什么，找回几天前记下的灵感，核对两件事的先后，把改过的设定同步到大纲。材料一多，文档、笔记和聊天记录之间的来回翻找，很容易打断思路。

@@ -23,6 +23,7 @@ import LibraryDialogTransition from '../features/library/components/LibraryDialo
 import DialogTransition from '../ui/DialogTransition.vue'
 import LibraryAppearanceSettings from '../features/library/components/LibraryAppearanceSettings.vue'
 import LibrarySettingsSections from '../features/library/components/LibrarySettingsSections.vue'
+import SponsorCard from '../features/sponsors/SponsorCard.vue'
 import WritingPluginSettings from '../features/writing-plugins/components/WritingPluginSettings.vue'
 import CompanionVoiceSettings from '../features/companion/components/CompanionVoiceSettings.vue'
 import CompanionDialogueSettings from '../features/companion/components/CompanionDialogueSettings.vue'
@@ -1391,6 +1392,7 @@ watch(() => [current.value?.path, activeWorkspaceLeaf.value?.id, selectedId.valu
     <dialog v-if="!current" ref="localAppearanceDialog" class="local-appearance-dialog library-preferences-dialog" aria-label="外观设置" data-sound-dialog>
       <header><h2>作品库设置</h2><button class="control-button secondary" type="button" aria-label="关闭外观设置" @click="localAppearanceDialog.close()"><StudioIcon name="close" :size="18"/></button></header>
       <LibrarySettingsSections :models="desktop.app.platform !== 'browser'" @models="openLibraryModels">
+        <template #sponsors><SponsorCard /></template>
         <template #appearance>
         <ThemeSelector :model-value="themeChoice" :error="themeError" @update:model-value="selectTheme" />
         <LibraryAppearanceSettings :background="libraryAppearance.background" :scene="libraryAppearance.scene" :character="libraryAppearance.character" :error="libraryAppearanceError" @background="updateLibraryAppearance({ background: $event })" @scene="updateLibraryAppearance({ scene: $event })" @character="updateLibraryAppearance({ character: $event })" />
