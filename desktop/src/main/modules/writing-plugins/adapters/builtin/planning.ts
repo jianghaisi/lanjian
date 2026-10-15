@@ -27,12 +27,21 @@ export function planningTools(ports: Pick<WritingDomainPorts, 'projects' | 'plan
         })
         return { kind: 'completed', trace: '启动自动谋篇候选', evidence: [], value: { taskId: task.id, status: task.status, notice: '仅已启动候选任务；请在创作筹备核对结果，未保存为正式大纲。', workspaceId: 'preparation' } }
       }, book),
-    builtinTool('read_planning_outline', '读取当前作品真实父级大纲及版本，作为逐层拆解依据。key 为 total、volume-N 或 stage-N。', 'read', ['planning.read'], objectSchema({ key: textSchema(100, 1) }), objectSchema({ key: textSchema(100), kind: textSchema(100), content: textSchema(200000), revision: textSchema(200) }),
+    builtinTool('read_planning_outline', '读取本书已保存且非空的总纲、卷纲或阶段纲及版本，作为拆解依据。key 为 total、volume-N 或 stage-N；卷号和阶段号必须来自本书目录，不要猜测。没有总纲时先引导到谋篇→全书总纲，AI 候选须作者在创作筹备逐项采用后才成为正式大纲。', 'read', ['planning.read'], objectSchema({ key: textSchema(100, 1) }), objectSchema({ key: textSchema(100), kind: textSchema(100), content: textSchema(200000), revision: textSchema(200) }),
       async (args, host) => {
         const key = String(args.key)
         if (!/^(total|volume-[1-9]\d*|stage-[1-9]\d*)$/.test(key)) throw new AppError('VALIDATION_ERROR', '大纲标识无效。', { recoverable: true })
         const source = await host.hostCall(() => ports.workspace.planningOutline(key))
-        if (!source || source.key !== key) throw new AppError('NOT_FOUND', '当前作品没有这个正式父级大纲。', { recoverable: true })
+        if (!source || source.key !== key || !source.content.trim()) {
+          reads.delete(key)
+          const label = key === 'total' ? '全书总纲' : key.startsWith('volume-') ? `第 ${key.slice(7)} 卷卷纲` : `第 ${key.slice(6)} 个阶段纲`
+          const next = key === 'total'
+            ? '请打开“谋篇 → 全书总纲”，手写并保存，或点击“AI 生成总纲”。已有 AI 候选请到“创作筹备”，依次核对人物、世界、力量和特殊优势，再“预览影响并采用总纲”。'
+            : key.startsWith('volume-')
+              ? '请到“谋篇”核对本书卷目录，打开对应卷纲并保存内容；需要生成时，从“全书总纲 → 拆分卷纲”生成候选并预览采用，或继续采用“创作筹备”中的卷纲候选。'
+              : '请到“谋篇”核对本书阶段目录，打开对应阶段纲并保存内容；尚未建立阶段时，从所属卷纲的“细化本卷大纲”生成阶段候选并预览采用。'
+          throw new AppError('NOT_FOUND', `${label}${source?.key === key ? '尚未保存非空内容' : '尚未建立'}。${next}完成后再继续原请求；直接重试不会补齐大纲。保存或采用不等于作者确认。`, { recoverable: true })
+        }
         reads.set(key, source.revision)
         return { kind: 'completed', trace: '读取父级大纲', evidence: [{ kind: 'planning-outline', id: key, revision: source.revision }], value: { key, kind: source.kind, content: source.content, revision: source.revision } }
       }, book),

@@ -1477,10 +1477,14 @@ watch(() => [current.value?.path, activeWorkspaceLeaf.value?.id, selectedId.valu
               <button v-if="expansionParentKey" class="control-button secondary compact" type="button" data-testid="open-outline-expansion" :aria-expanded="expansionOpen" :disabled="outlineDocumentLocked || busy || expansionBusy" @click="openOutlineExpansion">{{ expansionOpen ? '返回编辑' : outlineMode === 'total' ? '拆分卷纲' : outlineMode === 'volume' ? '细化本卷大纲' : '拆分章节' }}</button>
               <button class="control-button secondary compact" type="button" data-testid="outline-inspector-toggle" :aria-expanded="outlineInspectorOpen" :disabled="Boolean(outlinePlanningIssue || chapterOrderIssue)" @click="outlineInspectorOpen = !outlineInspectorOpen"><StudioIcon name="panel" :size="15"/>{{ outlineMode === 'chapter' ? '归卷与检查' : '结构与检查' }}</button>
               <button v-if="outlineMode === 'chapter' && selectedId" class="control-button secondary compact" type="button" data-testid="planning-write-chapter" @click="selectWorkspaceLeaf('chapters')">写这一章正文</button>
-              <button v-if="outlineMode === 'total'" class="control-button secondary compact" type="button" data-testid="generate-total-outline-ai" :disabled="Boolean(outlinePlanningIssue) || busy || planningRunning" @click="handleTotalOutlineAi"><StudioIcon name="spark" :size="15"/>{{ planningRunning ? `正在${planningStageLabel}` : planningDraft ? '查看 AI 总纲候选' : 'AI 生成总纲' }}</button>
+              <button v-if="outlineMode === 'total'" class="control-button secondary compact" type="button" data-testid="generate-total-outline-ai" :disabled="Boolean(outlinePlanningIssue) || busy" @click="handleTotalOutlineAi"><StudioIcon name="spark" :size="15"/>{{ planningRunning ? `查看生成进度 · ${planningStageLabel}` : planningDraft ? '查看 AI 总纲候选' : 'AI 生成总纲' }}</button>
               <button v-else-if="outlineMode === 'chapter'" class="control-button secondary compact" type="button" :disabled="outlineDocumentLocked || !selectedId || !foundationReady || busy" @click="generateChapterOutline"><StudioIcon name="spark" :size="15"/>AI 生成章纲</button>
             </div>
           </header>
+
+          <p v-if="outlineMode === 'total' && !outlinePlanningIssue && !totalOutline.trim()" class="workspace-action-hint" data-testid="total-outline-start-guide">
+            <span>还没有全书总纲。可以在下方手写并保存，或点击“{{ planningRunning ? '查看生成进度' : planningDraft ? '查看 AI 总纲候选' : 'AI 生成总纲' }}”。AI 生成的是候选，需要到“创作筹备”逐项核对采用后，才成为可供拆解的正式总纲。</span>
+          </p>
 
           <div v-if="outlinePlanningIssue" class="material-source-locked outline-ledger-locked" data-testid="outline-planning-ledger-locked"><i>锁</i><div><b>谋篇版本与确认暂时锁定</b><p>总纲、卷纲、章纲原文仍可查看，但在版本账本核对完成前不能保存谋篇、分卷、确认契约或调用 AI 写作。</p><small>原文件没有被改动；请定位 `.webnovel/planning/outline-state.json` 后人工恢复。</small></div></div>
 

@@ -719,6 +719,151 @@ const {
           >
         </li>
       </ol>
+      <div class="workspace-action-hint planning-formal-outline-guide" data-testid="planning-formal-outline-guide">
+        <div>
+          <p v-if="!planningDraft.adoption?.totalOutline">下面的总纲仍是候选。先依次核对四项设定，再预览采用总纲；每一步都会展示本次要写入的内容。</p>
+          <p v-else>总纲已采用到“谋篇 → 全书总纲”。采用与作者确认是两步，请继续复核当前版本。</p>
+          <p v-if="!planningFoundationReady" aria-label="总纲前置采用进度">
+            <span v-for="step in [{ key: 'characterSeeds', label: '人物' }, { key: 'worldSeed', label: '世界' }, { key: 'powerSystem', label: '力量体系' }, { key: 'cheatSystem', label: '特殊优势' }]" :key="step.key">{{ step.label }}：{{ planningDraft.adoption?.[step.key] ? '已核对采用' : '待核对' }}　</span>
+          </p>
+          <small>没有力量体系或特殊优势时，可以核对空候选并记录“不设置”；无需为通过流程虚构设定。保存或采用不会自动确认大纲，也不会生成正文。</small>
+        </div>
+      </div>
+      <footer data-testid="planning-next-step" aria-label="候选采用下一步">
+        <button class="text-action compact" type="button" @click="discardPlanningProposal">放弃候选</button
+        ><small><b>下一步：</b>{{ planningAdoptionGuidance }}</small
+        ><button
+          v-if="!planningDraft.adoption?.characterSeeds"
+          class="ink-action compact-search"
+          type="button"
+          data-testid="preview-character-seed-adoption"
+          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
+          @click="openPlanningCharacterSeedAdoption"
+        >
+          核对并建立人物锚点</button
+        ><button
+          v-else-if="!planningDraft.adoption?.worldSeed"
+          class="ink-action compact-search"
+          type="button"
+          data-testid="preview-world-seed-adoption"
+          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
+          @click="openPlanningWorldSeedAdoption"
+        >
+          核对并采用世界种子</button
+        ><button
+          v-else-if="!planningDraft.adoption?.powerSystem"
+          class="ink-action compact-search"
+          type="button"
+          data-testid="preview-power-system-adoption"
+          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
+          @click="openPlanningPowerSystemAdoption"
+        >
+          核对并采用力量体系</button
+        ><button
+          v-else-if="!planningDraft.adoption?.cheatSystem"
+          class="ink-action compact-search"
+          type="button"
+          data-testid="preview-cheat-system-adoption"
+          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
+          @click="openPlanningCheatSystemAdoption"
+        >
+          核对并采用特殊优势</button
+        ><button
+          v-else-if="!planningDraft.adoption?.totalOutline"
+          class="ink-action compact-search"
+          type="button"
+          data-testid="preview-total-adoption"
+          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
+          @click="openPlanningTotalAdoption"
+        >
+          预览影响并采用总纲</button
+        ><button
+          v-else-if="!planningDraft.adoption?.volumeStructure"
+          class="ink-action compact-search"
+          type="button"
+          data-testid="preview-volume-structure"
+          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
+          @click="openPlanningVolumeStructure"
+        >
+          预览并建立篇卷目录</button
+        ><button
+          v-else-if="!planningTotalConfirmed"
+          class="text-action compact"
+          type="button"
+          data-testid="review-total-after-volume-init"
+          @click="openTotalOutlineReview"
+        >
+          前往总纲复核</button
+        ><button
+          v-else-if="nextPlanningVolumeCandidate"
+          class="ink-action compact-search"
+          type="button"
+          data-testid="preview-volume-outline-adoption"
+          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
+          @click="openPlanningVolumeOutlineAdoption(nextPlanningVolumeCandidate.order)"
+        >
+          预览采用第 {{ nextPlanningVolumeCandidate.order }} 卷</button
+        ><button
+          v-else-if="!planningVolumesConfirmed"
+          class="text-action compact"
+          type="button"
+          data-testid="review-adopted-volume-outlines"
+          @click="
+            openVolumeOutlineReview(
+              planningDraft.volumes.find(
+                (volume) =>
+                  outlinePlanning.volumes.find((item) => item.volume === volume.order)?.approval?.status !== 'confirmed'
+              )?.order || 1
+            )
+          "
+        >
+          前往卷纲复核</button
+        ><button
+          v-else-if="planningSkeletonRunning"
+          class="ink-action compact-search is-stopping"
+          type="button"
+          data-testid="cancel-chapter-skeleton"
+          @click="cancelPlanningChapterSkeleton"
+        >
+          <span>停止生成 · 不保留半套</span></button
+        ><button
+          v-else-if="!planningDraft.chapterSkeleton || planningSkeletonStatus.stale"
+          class="ink-action compact-search"
+          type="button"
+          data-testid="start-chapter-skeleton"
+          :disabled="planningDraftSaveState === 'error'"
+          @click="startPlanningChapterSkeleton"
+        >
+          {{ planningDraft.chapterSkeleton ? '重新生成全书章节安排' : '生成全书章节安排' }}</button
+        ><button
+          v-else-if="planningDetailRunning"
+          class="ink-action compact-search is-stopping"
+          type="button"
+          data-testid="cancel-chapter-detail"
+          @click="cancelPlanningChapterDetail"
+        >
+          停止第 {{ planningDetailJob.volume }} 卷生成</button
+        ><button
+          v-else-if="nextPlanningDetailVolume"
+          class="ink-action compact-search"
+          type="button"
+          data-testid="start-chapter-detail"
+          :disabled="planningDraftSaveState === 'error'"
+          @click="startPlanningChapterDetail(nextPlanningDetailVolume.order)"
+        >
+          生成第 {{ nextPlanningDetailVolume.order }} 卷详细章纲</button
+        ><button
+          v-else-if="nextPlanningChapterDetailCandidate"
+          class="ink-action compact-search"
+          type="button"
+          data-testid="preview-chapter-detail-adoption"
+          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
+          @click="openPlanningChapterDetailAdoption(nextPlanningChapterDetailCandidate.chapter)"
+        >
+          预览采用第 {{ nextPlanningChapterDetailCandidate.chapter }} 章章纲</button
+        ><span v-else class="planning-completion-note">详细章纲已逐章写入正式编辑区；请复核确认后再生成正文。</span>
+      </footer>
+
       <section class="planning-blueprint">
         <div>
           <b>核心命题</b>
@@ -1179,140 +1324,13 @@ const {
           </ol>
         </details>
       </section>
-      <footer>
-        <button class="text-action compact" type="button" @click="discardPlanningProposal">放弃候选</button
-        ><small>{{ planningAdoptionGuidance }}</small
-        ><button
-          v-if="!planningDraft.adoption?.characterSeeds"
-          class="ink-action compact-search"
-          type="button"
-          data-testid="preview-character-seed-adoption"
-          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
-          @click="openPlanningCharacterSeedAdoption"
-        >
-          核对并建立人物锚点</button
-        ><button
-          v-else-if="!planningDraft.adoption?.worldSeed"
-          class="ink-action compact-search"
-          type="button"
-          data-testid="preview-world-seed-adoption"
-          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
-          @click="openPlanningWorldSeedAdoption"
-        >
-          核对并采用世界种子</button
-        ><button
-          v-else-if="!planningDraft.adoption?.powerSystem"
-          class="ink-action compact-search"
-          type="button"
-          data-testid="preview-power-system-adoption"
-          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
-          @click="openPlanningPowerSystemAdoption"
-        >
-          核对并采用力量体系</button
-        ><button
-          v-else-if="!planningDraft.adoption?.cheatSystem"
-          class="ink-action compact-search"
-          type="button"
-          data-testid="preview-cheat-system-adoption"
-          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
-          @click="openPlanningCheatSystemAdoption"
-        >
-          核对并采用特殊优势</button
-        ><button
-          v-else-if="!planningDraft.adoption?.totalOutline"
-          class="ink-action compact-search"
-          type="button"
-          data-testid="preview-total-adoption"
-          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
-          @click="openPlanningTotalAdoption"
-        >
-          预览影响并采用总纲</button
-        ><button
-          v-else-if="!planningDraft.adoption?.volumeStructure"
-          class="ink-action compact-search"
-          type="button"
-          data-testid="preview-volume-structure"
-          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
-          @click="openPlanningVolumeStructure"
-        >
-          预览并建立篇卷目录</button
-        ><button
-          v-else-if="!planningTotalConfirmed"
-          class="text-action compact"
-          type="button"
-          data-testid="review-total-after-volume-init"
-          @click="openTotalOutlineReview"
-        >
-          前往总纲复核</button
-        ><button
-          v-else-if="nextPlanningVolumeCandidate"
-          class="ink-action compact-search"
-          type="button"
-          data-testid="preview-volume-outline-adoption"
-          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
-          @click="openPlanningVolumeOutlineAdoption(nextPlanningVolumeCandidate.order)"
-        >
-          预览采用第 {{ nextPlanningVolumeCandidate.order }} 卷</button
-        ><button
-          v-else-if="!planningVolumesConfirmed"
-          class="text-action compact"
-          type="button"
-          data-testid="review-adopted-volume-outlines"
-          @click="
-            openVolumeOutlineReview(
-              planningDraft.volumes.find(
-                (volume) =>
-                  outlinePlanning.volumes.find((item) => item.volume === volume.order)?.approval?.status !== 'confirmed'
-              )?.order || 1
-            )
-          "
-        >
-          前往卷纲复核</button
-        ><button
-          v-else-if="planningSkeletonRunning"
-          class="ink-action compact-search is-stopping"
-          type="button"
-          data-testid="cancel-chapter-skeleton"
-          @click="cancelPlanningChapterSkeleton"
-        >
-          <span>停止生成 · 不保留半套</span></button
-        ><button
-          v-else-if="!planningDraft.chapterSkeleton || planningSkeletonStatus.stale"
-          class="ink-action compact-search"
-          type="button"
-          data-testid="start-chapter-skeleton"
-          :disabled="planningDraftSaveState === 'error'"
-          @click="startPlanningChapterSkeleton"
-        >
-          {{ planningDraft.chapterSkeleton ? '重新生成全书章节安排' : '生成全书章节安排' }}</button
-        ><button
-          v-else-if="planningDetailRunning"
-          class="ink-action compact-search is-stopping"
-          type="button"
-          data-testid="cancel-chapter-detail"
-          @click="cancelPlanningChapterDetail"
-        >
-          停止第 {{ planningDetailJob.volume }} 卷生成</button
-        ><button
-          v-else-if="nextPlanningDetailVolume"
-          class="ink-action compact-search"
-          type="button"
-          data-testid="start-chapter-detail"
-          :disabled="planningDraftSaveState === 'error'"
-          @click="startPlanningChapterDetail(nextPlanningDetailVolume.order)"
-        >
-          生成第 {{ nextPlanningDetailVolume.order }} 卷详细章纲</button
-        ><button
-          v-else-if="nextPlanningChapterDetailCandidate"
-          class="ink-action compact-search"
-          type="button"
-          data-testid="preview-chapter-detail-adoption"
-          :disabled="planningAdoptionBusy || planningDraftSaveState === 'error'"
-          @click="openPlanningChapterDetailAdoption(nextPlanningChapterDetailCandidate.chapter)"
-        >
-          预览采用第 {{ nextPlanningChapterDetailCandidate.chapter }} 章章纲</button
-        ><span v-else class="planning-completion-note">详细章纲已逐章写入正式编辑区；请复核确认后再生成正文。</span>
-      </footer>
+
     </article>
   </div>
 </template>
+
+<style scoped>
+.planning-proposal > .planning-formal-outline-guide { margin: 0; padding: 12px 18px; border-top: 0; }
+.planning-formal-outline-guide p { margin: 0 0 8px; }
+.planning-proposal > footer { flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+</style>

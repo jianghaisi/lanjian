@@ -28,11 +28,14 @@ export function createPlanningGenerationActions(ports) {
   }
 
   async function handleTotalOutlineAi() {
-    if (ports.planningRunning.value) return
+    if (!ports.current.value) return
+    // Saving before leaving refreshes workflow state without changing the book.
+    const request = ports.workspaceRequests.capture(ports.current.value)
+    await ports.selectWorkspaceLeaf('preparation')
+    if (!ports.workspaceRequests.isCurrent(request, ports.current.value) || ports.active.value !== 'preparation') return
+    if (ports.planningRunning.value) return ports.notice('已打开生成进度；完成后请在这里核对并逐项采用候选')
     if (ports.planningDraft.value) {
-      ports.active.value = 'preparation'
-      ports.preparationMode.value = 'automatic'
-      return ports.notice('已经打开总纲候选，请核对后再逐项采用')
+      return ports.notice('已打开已有总纲候选，请按顶部“下一步”核对并逐项采用；不会重新生成')
     }
     await startAutomaticPlanning()
   }
@@ -52,7 +55,7 @@ export function createPlanningGenerationActions(ports) {
           if (!isCurrent()) return
           ports.planningDraft.value = result2
           ports.planningDraftSaveState.value = 'saved'
-          ports.notice('蓝图、总纲和卷纲候选已经完成，请审阅')
+          ports.notice('蓝图、总纲和卷纲候选已完成。请在“谋篇 → 创作筹备”按“下一步”逐项核对采用；候选尚未成为正式大纲。')
         }
         if (ports.planningJob.value.status === 'failed')
           ports.notice(ports.planningJob.value.error?.message || '自动谋篇未完成')

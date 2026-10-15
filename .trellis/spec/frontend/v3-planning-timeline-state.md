@@ -6,6 +6,13 @@
 
 Apply when presenting versioned events, outline dependency status, migration, adoption impacts or prose settlement. Reuse the four state classes from `v3-state-authority.md`.
 
+## Missing outline recovery (2026-10-15)
+
+- `read_planning_outline` rejects both absent and whitespace-only sources, names the total/volume/stage target and supplies the actual preparation/save/adoption path. Failed reads clear the adapter's prior read revision; they never issue evidence or trigger generation. Invalid keys and changed revisions retain their existing validation/conflict semantics. Retrying alone cannot create an upstream outline.
+- The total-outline empty state explains manual save and AI candidates. `handleTotalOutlineAi` calls protected `selectWorkspaceLeaf('preparation')`, verifies captured book/request identity and the destination, then either displays a running task/existing candidate or starts the existing generator. A rejected draft departure makes no model request. Completion points to preparation and explicit adoption; it does not navigate away from the author's later activity.
+- Candidate preparation places its existing next-step action before long editable content, shows the four foundation adoption states, and explains how total-outline adoption becomes available. Empty power/advantage candidates may be explicitly reviewed as absent; this is not an instruction to invent a system. Preview/adoption order, freshness checks and author outline confirmation remain unchanged.
+- Required regressions: absent/empty total, volume and stage; valid evidence and failed re-read; cancelled navigation, switched book, late reply, existing candidate and running job. Native isolation verifies save-before-leave, candidate adoption steps, persisted formal text and unchanged author-confirmation/prose boundaries. Source tests are `outline-entry-recovery.test.ts`, `writing-plugin-domains.test.ts` and `outline-entry-recovery-smoke.mjs`.
+
 ## 2. Signatures and display boundary
 
 The later named/decoded bridge returns book/target identity, exact source revision summaries, event approval/phase/granularity, preview freshness and impact findings. Version lists and evidence are bounded; never expose SQLite queries, filesystem paths or a generic source resolver. Concrete bridge signatures are owned by their implementation slice.

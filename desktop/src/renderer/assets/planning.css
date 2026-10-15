@@ -81,3 +81,6 @@
 .planning-document-workspace:has(.is-focus-mode) > .outline-writing-toolbar,
 .planning-document-workspace:has(.is-focus-mode) > .planning-writing-help { display:none; }
 .outline-storage-warning { display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding:.5rem .75rem; color:var(--cinnabar); font-size:.75rem; }
+
+.planning-document-workspace > .workspace-action-hint { flex: none; margin: 0 .75rem .5rem; padding-top: .5rem; border-top: 0; max-height: 110px; overflow: auto; }
+.planning-document-workspace:has(.is-focus-mode) > .workspace-action-hint { display: none; }

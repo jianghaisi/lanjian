@@ -48,7 +48,9 @@ export function createPlanningExpansionActions(ports) {
       if (generation !== ports.expansionGeneration || !ports.workspaceRequests.isCurrent(request, ports.current.value))
         return
       ports.expansionTasks.value = tasks.filter((task) => task.request.parentKey === key)
-      ports.expansionError.value = source ? '' : '请先保存非空的父级大纲，再拆解下一层。'
+      ports.expansionError.value = source?.content.trim() ? '' : key === 'total'
+        ? '全书总纲还没有已保存的内容。请返回编辑，手写并保存或点击“AI 生成总纲”；已有候选请在“创作筹备”逐项采用总纲后，再拆分卷纲。'
+        : '当前卷纲或阶段纲还没有已保存的内容。请返回编辑并保存；如已生成候选，请先预览采用，再拆解下一层。'
       if (
         ports.expansionTasks.value.some((task) => ['queued', 'preparing', 'running', 'streaming'].includes(task.status))
       )

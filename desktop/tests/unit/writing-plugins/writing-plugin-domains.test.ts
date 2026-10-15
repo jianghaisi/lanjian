@@ -106,3 +106,37 @@ test('real planning generator produces a non-canon package through the candidate
   assert.deepEqual(await f.documents.chapters(), [])
   assert.deepEqual(await hashes(f.project.path), before)
 })
+
+for (const [key, label, destination] of [['total', '全书总纲', 'AI 生成总纲'], ['volume-2', '第 2 卷卷纲', '拆分卷纲'], ['stage-3', '第 3 个阶段纲', '细化本卷大纲']]) {
+  for (const empty of [false, true]) test(`missing planning source ${key}, empty=${empty} names the recovery path without issuing evidence or starting work`, async t => {
+    const f = await fixture(t)
+    const dispatcher = f.dispatcher(planningTools({ ...f,
+      workspace: { async planningOutline() { return empty ? { projectFingerprint: 'a'.repeat(64), key, kind: 'summary' as const, title: label, content: '  ', revision: 'b'.repeat(64) } : null } },
+      planning: { start() { assert.fail('must not generate') }, status() { assert.fail() }, cancel() { assert.fail() } },
+      expansion: { async start() { assert.fail('must not expand') }, async status() { assert.fail() }, async cancel() { assert.fail() } }
+    }, f.request))
+    await assert.rejects(() => invoke(dispatcher, 'read_planning_outline', { key }), (error: Error & { code?: string }) => {
+      assert.equal(error.code, 'NOT_FOUND'); assert.ok(error.message.includes(label)); assert.ok(error.message.includes(destination))
+      assert.match(error.message, empty ? /尚未保存非空内容/ : /尚未建立/)
+      assert.match(error.message, /直接重试不会补齐大纲/); return true
+    })
+    await assert.rejects(() => invoke(dispatcher, 'expand_outline', { parentKey: key, expectedRevision: 'b'.repeat(64), count: 1, instruction: '' }), { code: 'CONFLICT' })
+  })
+}
+
+test('valid planning reads keep exact evidence; a later missing read revokes the expansion permission', async t => {
+  const f = await fixture(t)
+  let missing = false
+  const source = { projectFingerprint: 'a'.repeat(64), key: 'total', kind: 'summary' as const, title: '总纲', content: '已有总纲', revision: 'b'.repeat(64) }
+  const dispatcher = f.dispatcher(planningTools({ ...f,
+    workspace: { async planningOutline() { return missing ? null : source } },
+    planning: { start() { assert.fail() }, status() { assert.fail() }, cancel() { assert.fail() } },
+    expansion: { async start() { assert.fail() }, async status() { assert.fail() }, async cancel() { assert.fail() } }
+  }, f.request))
+  const result = await invoke(dispatcher, 'read_planning_outline', { key: 'total' })
+  assert.equal(result.kind, 'completed')
+  if (result.kind === 'completed') assert.deepEqual(result.evidence, [{ kind: 'planning-outline', id: 'total', revision: source.revision }])
+  missing = true
+  await assert.rejects(() => invoke(dispatcher, 'read_planning_outline', { key: 'total' }), { code: 'NOT_FOUND' })
+  await assert.rejects(() => invoke(dispatcher, 'expand_outline', { parentKey: 'total', expectedRevision: source.revision, count: 1, instruction: '' }), { code: 'CONFLICT' })
+})

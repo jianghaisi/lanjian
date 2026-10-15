@@ -3665,6 +3665,8 @@ export function useWorkspaceController() {
     markPlanningCheatSystemEdited
   } = createPlanningGenerationActions({
     get current() { return current },
+    get workspaceRequests() { return workspaceRequests },
+    get selectWorkspaceLeaf() { return selectWorkspaceLeaf },
     get workspaceRefreshGeneration() { return workspaceRefreshGeneration },
     get planningPollTimer() {
       return planningPollTimer
