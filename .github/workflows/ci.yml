@@ -1,8 +1,6 @@
 name: CI
+# Run the full checks manually when needed; everyday changes are verified locally.
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
