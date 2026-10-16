@@ -661,6 +661,7 @@ export type PlanningCheatSystemResult = {
 }
 
 export type PlanningJob = {
+  recovery?: { saved: boolean; action: 'review' | 'stage' | 'save' | 'none' }
   rawResult?: string
   id: string
   workItemId: string

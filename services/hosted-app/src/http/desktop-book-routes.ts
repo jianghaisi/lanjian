@@ -47,6 +47,7 @@ export const desktopBookCommands = [
 ] as const
 
 const reads = new Set<string>([
+  'planning:recent', 'planning:details',
   'workspace:bootstrap', 'workspace:recheck-load-issues', 'projects:sqlite-storage-status', 'projects:status', 'projects:migration-preview',
   'workspace:get-chapter-projection', 'workspace:get-workflow-status', 'projects:auto-backup-get',
   'chapters:list', 'chapters:get', 'chapters:get-planning', 'chapters:autosave-recoveries', 'chapters:trash-list', 'chapters:stats', 'chapters:revisions',

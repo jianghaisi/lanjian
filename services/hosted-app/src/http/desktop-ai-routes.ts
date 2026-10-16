@@ -13,6 +13,7 @@ const asyncCommands: Record<string, [string, string]> = {
   'ai:resume-writing-agent-task': ['ai:writing-agent-task', 'ai:cancel-writing-agent-task'],
   'ai:retry-writing-agent-task': ['ai:writing-agent-task', 'ai:cancel-writing-agent-task'],
   'planning:start': ['planning:job', 'planning:cancel'],
+  'planning:retry': ['planning:job', 'planning:cancel'],
   'planning:start-chapter-skeleton': ['planning:chapter-skeleton-job', 'planning:cancel-chapter-skeleton'],
   'planning:start-chapter-detail': ['planning:chapter-detail-job', 'planning:cancel-chapter-detail'],
   'workspace:start-idea-generation': ['workspace:idea-generation', 'workspace:cancel-idea-generation'],
@@ -40,7 +41,7 @@ export function registerDesktopAiRoutes(ctx: WritingRouteContext, runtimes: Book
     if (!Array.isArray(input.args)) fail('invalid-request')
     const raw = input.args, first = raw[0], semantic = first && typeof first === 'object' && 'operationId' in first ? first.operationId
       : first && typeof first === 'object' && 'answerSubmissionId' in first ? first.answerSubmissionId
-      : channel.includes('retry-') || channel === 'ai:resume-writing-agent-task' ? raw[1] : undefined
+      : channel.includes('retry-') || channel === 'planning:retry' || channel === 'ai:resume-writing-agent-task' ? raw[1] : undefined
     const key = operation(semantic ?? input.operation)
     ctx.rate(`desktop-ai:${owner}`, 60)
     return jobs.desktop(owner, id, channel, raw, key, async (r, scope) => {

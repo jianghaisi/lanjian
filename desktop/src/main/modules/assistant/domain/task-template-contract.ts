@@ -73,6 +73,12 @@ function definitionFor(taskType: string, variant: string): TaskContractDefinitio
     type: 'object', additionalProperties: true,
     description: 'A candidate Artifact only; it cannot directly mutate formal project data.'
   }
+  if (taskType === 'automatic_planning') return {
+    templateId: 'builtin:automatic-planning', templateVersion: 1,
+    templateSource: 'automatic-planning/v1: frozen inputs -> blueprint -> total -> volumes; exact-source review; explicit recovery',
+    inputSchema: commonInput, outputSchema: proposalEnvelope,
+    allowedOperations: ['read:context', 'write:candidate', 'write:checkpoint'], forbiddenOperations: [...neverFormalWrites]
+  }
   if (taskType === 'writing_agent') return {
     templateId: `builtin:writing-agent:${variant}`,
     templateVersion: 1,

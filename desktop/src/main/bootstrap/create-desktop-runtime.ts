@@ -1,3 +1,4 @@
+import { PlanningRecoveryStore } from '../modules/planning/application/planning-recovery-store'
 import { InspirationStore } from '../modules/inspiration/adapters/inspiration-store'
 import { InspirationService } from '../modules/inspiration/application/inspiration-service'
 import { createLibraryCreativePolicyProvider } from '../modules/writing-plugins/runtime/library-policy-provider'
@@ -387,10 +388,8 @@ export async function createDesktopRuntime() {
     chapterDetails,
     async () => (await projects.currentSummary()).id
   )
-  const planningJobs = new PlanningJobService({
-    generate: async (workItemId, signal, onProgress) =>
-      planningPackages.save(await planningDrafts.generate(workItemId, signal, onProgress))
-  })
+  const planningJobs = new PlanningJobService(planningDrafts, undefined, undefined,
+    new PlanningRecoveryStore(projects, databases, workspaceWrites), planningPackages)
   const chapterDrafts = new ChapterDraftService(ai, documents, workspace, creativePolicy)
   const writingAgent = new WritingAgentService(ai, projects, documents, workspace, chapterDrafts, undefined, contributionContext, creativePolicy)
   const writingAgentPreviews = new WritingAgentPreviewService(projects, writingAgent)

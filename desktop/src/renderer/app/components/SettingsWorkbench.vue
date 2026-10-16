@@ -323,7 +323,7 @@ const visibleWorldbookEntities = computed(() => storyEntities.value.filter(item 
             <option :value="1">自动修复 1 次 · 起始建议</option>
             <option :value="2">自动修复 2 次</option>
             <option :value="3">自动修复 3 次</option></select
-          ><small>只在 JSON 或字段校验失败时重试；网络错误不会重复请求。</small></label
+          ><small>JSON、字段或复核引用不符时，额外尝试 0–3 次（默认 1 次）。复核重试保留原候选；网络、权限和额度错误不会自动重试。</small></label
         ><label
           ><span>事实审批门槛</span
           ><select

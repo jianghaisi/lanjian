@@ -890,6 +890,14 @@ export function useWorkspaceController() {
     async restoreBookJobs(path) {
       const generation = workspaceRefreshGeneration
       const valid = () => current.value?.path === path && workspaceRefreshGeneration === generation
+      try {
+        const recent = await desktop.planning.recent()
+        if (!valid()) return
+        planningJob.value = recent[0] || null
+        if (planningJob.value?.status === 'running') pollAutomaticPlanning()
+      } catch (error) {
+        if (valid()) notice(error?.message || '谋篇恢复记录读取失败，原记录已保留')
+      }
       const tasks = await desktop.ai.backgroundTasks().catch(() => [])
       if (!valid()) return
       for (const [kind, field, read, poll] of [
@@ -3628,6 +3636,10 @@ export function useWorkspaceController() {
   const {
     clearPlanningPoll,
     startAutomaticPlanning,
+  resumeAutomaticPlanning,
+  inspectPlanningResult,
+  listPlanningHistory,
+  selectPlanningHistory,
     handleTotalOutlineAi,
     pollAutomaticPlanning,
     cancelAutomaticPlanning,
@@ -6566,6 +6578,10 @@ export function useWorkspaceController() {
     stageOutlines,
     stageTitle,
     startAutomaticPlanning,
+  resumeAutomaticPlanning,
+  inspectPlanningResult,
+  listPlanningHistory,
+  selectPlanningHistory,
     startConsistencyEvaluation,
     startIdea,
     startIdeaGeneration,

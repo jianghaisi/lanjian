@@ -1,3 +1,4 @@
+import { PlanningRecoveryStore } from '../../../../desktop/src/main/modules/planning/application/planning-recovery-store'
 import { ChapterStoryContractService } from '../../../../desktop/src/main/modules/planning/application/chapter-story-contract-service'
 import { join } from 'node:path'
 import { mkdir } from 'node:fs/promises'
@@ -72,7 +73,7 @@ export async function desktopServices(r: BookRuntime, jobs: HostedJobs, models: 
   registerValidatedIpc(ipc, 'projects:auto-backup-get', decodeNoArgs, () => backups.autoBackupStatus())
   registerValidatedIpc(ipc, 'projects:auto-backup-run', decodeAutoBackupRunArgs, force => backups.runAutomaticBackup(force))
   const repairs = async () => (await workspace.contextBudgetPreferences()).structuredRepairAttempts
-  const planningJobs = new PlanningJobService({ generate: async (root, signal, progress) => s.packages.save(await s.planning.generate(root, signal, progress)) })
+  const planningJobs = new PlanningJobService(s.planning, undefined, undefined, new PlanningRecoveryStore(projects, databases, writes), s.packages)
   const chapterSkeletonJobs = new ChapterSkeletonJobService(s.skeletons, async () => (await projects.currentSummary()).id)
   const chapterDetailJobs = new ChapterDetailJobService(s.details, async () => (await projects.currentSummary()).id)
   const continuationAnalysis = new ContinuationAnalysisService(ai, projects, r.imports, workspace, r.characters, r.planning, r.events)

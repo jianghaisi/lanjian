@@ -13,11 +13,13 @@ import type {
   ContextBudgetPreferences
 } from '../../../../contracts/index'
 import type { OutlineExpansionInput, OutlineExpansionProposal, PlanningOutlineSource } from '../../../../contracts/index'
-import { completeStoryOutline } from './story-outline-review'
+import { completeStoryOutline, type StoryReviewState } from './story-outline-review'
 import { creativePolicyRun, type CaptureCreativePolicy } from '../../writing-plugins/domain/creative-policy'
+import { restoreCreativePolicy, type CreativePolicySnapshot } from '../../writing-plugins/domain/creative-policy-snapshot'
 import { policyRecords } from '@lanjian/writing-plugin-contracts'
 
 type TextGenerator = {
+  completionIdentity?: (task: AiTask) => Promise<string>
   captureRun?: (tasks: AiTask[]) => Promise<TextGenerator>
   complete: (instruction: string, draft?: string, systemContext?: string, task?: AiTask, signal?: AbortSignal, model?: string) => Promise<{ content: string }>
 }
@@ -33,6 +35,9 @@ type PlanningSource = {
 }
 
 export type PlanningProgress = (stage: PlanningStage, completed: number, message: string) => void
+
+export type PlanningRecovery = { version: 1; sourceHash?: string; inputHash?: string; modelIdentity?: string; policy?: CreativePolicySnapshot; repairAttempts?: number; stages: Partial<Record<PlanningStage, StoryReviewState>>; proposal?: PlanningPackageProposal }
+export type PlanningRecoveryPort = { state: PlanningRecovery; save: () => Promise<void> }
 
 export class PlanningDraftService {
   constructor(
@@ -103,7 +108,8 @@ export class PlanningDraftService {
       sourceStale: !latest || latest.revision !== frozen.revision || latest.kind !== frozen.kind }
   }
 
-  async generate(workItemId: string, signal?: AbortSignal, onProgress?: PlanningProgress): Promise<PlanningPackageProposal> {
+  async generate(workItemId: string, signal?: AbortSignal, onProgress?: PlanningProgress, recovery?: PlanningRecoveryPort): Promise<PlanningPackageProposal> {
+    const initialSourceHash = await this.sourceHash()
     const ai = this.ai.captureRun ? await this.ai.captureRun(['outline']) : this.ai
     const [profile, foundation, effectivePrompt, unifiedMaterials] = await Promise.all([
       this.workspace.bookProfile(), this.workspace.foundation(), this.workspace.authorPrompt?.('outline') ?? this.workspace.effectivePrompt?.('outline') ?? Promise.resolve(''),
@@ -113,7 +119,7 @@ export class PlanningDraftService {
     if (!profile.genre.trim()) throw validation('请先选择小说类别，再开始自动谋篇。', 'genre')
     if (!materials) throw validation('请先在“素材”中保存至少一段资料或创作设想，再开始自动谋篇。', 'sourceNotes')
 
-    const policy = await this.capturePolicy()
+    const policy = recovery?.state.policy ? await restoreCreativePolicy(this.capturePolicy, recovery.state.policy) : await this.capturePolicy()
     const methods = { blueprint: policy.resolve('blueprint'), total: policy.resolve('total-outline'), volume: policy.resolve('volume-outline'), review: policy.resolve('outline-review'), genre: policy.resolve('genre-guidance', { genre: profile.genre, subgenre: profile.subgenre ?? '' }) }
     const sources = Object.values(methods).flat()
     const prompt = effectivePrompt.trim()
@@ -134,6 +140,28 @@ export class PlanningDraftService {
     ].join('\n')
     const materialBlock = planningMaterial(profile, materials)
     const repairAttempts = await this.repairAttempts()
+    const modelIdentity = ai.completionIdentity ? await ai.completionIdentity('outline') : 'unavailable'
+    const sourceHash = await this.sourceHash()
+    const recoveryHash = fingerprint({ input, systemContext, repairAttempts })
+    const conflict = () => new AppError('CONFLICT', '原谋篇任务的素材、设置或模型已经变化，请保留旧结果并重新发起。', { recoverable: true })
+    if (initialSourceHash !== sourceHash) throw conflict()
+    if (recovery?.state.inputHash && (recovery.state.inputHash !== recoveryHash || recovery.state.modelIdentity !== modelIdentity)) throw conflict()
+    if (recovery) {
+      Object.assign(recovery.state, { sourceHash, inputHash: recoveryHash, modelIdentity, policy: policy.snapshot?.(), repairAttempts })
+      await recovery.save()
+    }
+    const guardedAi: TextGenerator = { complete: async (...args) => {
+      signal?.throwIfAborted()
+      if (await this.sourceHash() !== sourceHash || (this.ai.completionIdentity && await this.ai.completionIdentity('outline') !== modelIdentity)) throw conflict()
+      const result = await ai.complete(...args)
+      signal?.throwIfAborted(); await policy.assertAuthorized?.()
+      if (await this.sourceHash() !== sourceHash || (this.ai.completionIdentity && await this.ai.completionIdentity('outline') !== modelIdentity)) throw conflict()
+      return result
+    } }
+    const stageRecovery = (stage: PlanningStage) => recovery ? { state: recovery.state.stages[stage], save: async (value: StoryReviewState) => {
+      recovery.state.stages[stage] = value; await recovery.save()
+    } } : undefined
+    if (recovery?.state.proposal) return recovery.state.proposal
 
     onProgress?.('blueprint', 0, '正在整理创作蓝图')
     const blueprintInstruction = [
@@ -142,7 +170,7 @@ export class PlanningDraftService {
       '{"premise":"一句核心命题","worldView":"开放式世界种子与核心边界","characters":[{"name":"人物名","role":"故事职责","arcSeed":"初始欲望、矛盾与变化方向"}],"powerSystem":"力量或职业成长体系；不适用可为空","cheatSystem":"金手指或特殊优势；不适用可为空","rationale":"设计如何服务题材与素材"}',
       materialBlock
     ].join('\n\n')
-    const blueprint = await completeStoryOutline({ ai, policy, instruction: blueprintInstruction, systemContext, task: 'outline', signal,
+    const blueprint = await completeStoryOutline({ ai: guardedAi, recovery: stageRecovery('blueprint'), policy, instruction: blueprintInstruction, systemContext, task: 'outline', signal,
       repairAttempts, parse: parsePlanningBlueprint, parent: materialBlock })
     const blueprintFingerprint = fingerprint(blueprint)
 
@@ -154,7 +182,7 @@ export class PlanningDraftService {
       `创作蓝图：${JSON.stringify(blueprint)}`,
       materialBlock
     ].join('\n\n')
-    const totalOutline = await completeStoryOutline({ ai, policy, instruction: totalOutlineInstruction, systemContext, task: 'outline', signal, repairAttempts, parse: parsePlanningTotalOutline, parent: `${materialBlock}\n${JSON.stringify(blueprint)}` })
+    const totalOutline = await completeStoryOutline({ ai: guardedAi, recovery: stageRecovery('totalOutline'), policy, instruction: totalOutlineInstruction, systemContext, task: 'outline', signal, repairAttempts, parse: parsePlanningTotalOutline, parent: `${materialBlock}\n${JSON.stringify(blueprint)}` })
     const totalOutlineFingerprint = fingerprint(totalOutline)
 
     onProgress?.('volumePlan', 2, '总纲完成，正在拆分卷纲')
@@ -167,11 +195,11 @@ export class PlanningDraftService {
       `总纲：${JSON.stringify(totalOutline)}`,
       materialBlock
     ].join('\n\n')
-    const volumes = await completeStoryOutline({ ai, policy, instruction: volumeInstruction, systemContext, task: 'outline', signal, repairAttempts, parse: content => parsePlanningVolumes(content, profile.plannedVolumes, true), parent: `${JSON.stringify(totalOutline)}\n${materialBlock}` })
+    const volumes = await completeStoryOutline({ ai: guardedAi, recovery: stageRecovery('volumePlan'), policy, instruction: volumeInstruction, systemContext, task: 'outline', signal, repairAttempts, parse: content => parsePlanningVolumes(content, profile.plannedVolumes, true), parent: `${JSON.stringify(totalOutline)}\n${materialBlock}` })
 
     onProgress?.('volumePlan', 3, '自动谋篇候选已经完成')
     await policy.assertAuthorized?.()
-    return {
+    const proposal: PlanningPackageProposal = {
       id: this.id(),
       workItemId,
       createdAt: this.now().toISOString(),
@@ -181,6 +209,20 @@ export class PlanningDraftService {
       totalOutline,
       volumes
     }
+    if (recovery) { recovery.state.proposal = proposal; await recovery.save() }
+    return proposal
+  }
+
+  async validateRecovery(state: PlanningRecovery): Promise<void> {
+    if (!state.sourceHash || state.sourceHash !== await this.sourceHash()) throw new AppError('CONFLICT', '原谋篇任务的素材或设置已经变化，请保留旧结果并重新发起。', { recoverable: true })
+    const policy = state.policy ? await restoreCreativePolicy(this.capturePolicy, state.policy) : await this.capturePolicy()
+    await policy.assertAuthorized?.()
+  }
+
+  private async sourceHash(): Promise<string> {
+    return fingerprint(await Promise.all([this.workspace.bookProfile(), this.workspace.foundation(),
+      this.workspace.authorPrompt?.('outline') ?? this.workspace.effectivePrompt?.('outline') ?? Promise.resolve(''),
+      this.workspace.planningMaterials?.() ?? Promise.resolve(''), this.pluginContext(), this.repairAttempts()]))
   }
 
   private async repairAttempts(): Promise<number> {

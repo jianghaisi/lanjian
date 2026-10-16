@@ -5,7 +5,7 @@ export const desktopWorkspaceCommands = [
   'outlines:place-chapter-in-stage', 'outlines:place-event', 'outlines:place-event-in-chapter',
   'outlines:place-chapter', 'outlines:review-chapter', 'outlines:confirm-chapter',
   'chapter-outlines:preview-external-mirror', 'chapter-outlines:adopt-external-mirror',
-  'planning:adopt-chapter-story-contract', 'planning:job', 'planning:cancel', 'planning:save-draft', 'planning:discard-draft', 'planning:recover-damaged-draft',
+  'planning:adopt-chapter-story-contract', 'planning:job', 'planning:cancel', 'planning:recent', 'planning:details', 'planning:retry-save', 'planning:save-draft', 'planning:discard-draft', 'planning:recover-damaged-draft',
   'planning:preview-total-adoption', 'planning:adopt-total', 'planning:preview-volume-structure', 'planning:initialize-volume-structure',
   'planning:preview-volume-outline-adoption', 'planning:adopt-volume-outline', 'planning:preview-chapter-detail-adoption', 'planning:adopt-chapter-detail',
   'planning:preview-chapter-events', 'planning:preview-chapter-event-adoption', 'planning:adopt-chapter-event', 'planning:recover-chapter-event',

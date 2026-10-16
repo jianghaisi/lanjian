@@ -27,6 +27,47 @@ export function createPlanningGenerationActions(ports) {
     }
   }
 
+  let recoveryRequest = null
+  const recoveryOperations = new Map()
+  async function resumeAutomaticPlanning() {
+    if (recoveryRequest || !ports.planningJob.value?.recovery?.saved) return
+    const isCurrent = captureBook(), job = ports.planningJob.value
+    const key = `${job.id}:${job.recovery.action}`
+    if (!recoveryOperations.has(key)) recoveryOperations.set(key, crypto.randomUUID())
+    recoveryRequest = key
+    try {
+      const call = job.recovery.action === 'save' ? ports.desktop.planning.retrySave : ports.desktop.planning.retry
+      const value = await ports.guard(() => call(job.id, recoveryOperations.get(key)))
+      if (!isCurrent()) return
+      ports.planningJob.value = value
+      pollAutomaticPlanning()
+    } finally { recoveryRequest = null }
+  }
+  async function listPlanningHistory() { return ports.guard(() => ports.desktop.planning.recent()) }
+  async function selectPlanningHistory(id) {
+    if (ports.planningRunning.value) return ports.notice('请先停止或等待当前谋篇完成')
+    const isCurrent = captureBook()
+    const result = await ports.guard(() => ports.desktop.planning.details(id))
+    if (isCurrent()) ports.planningJob.value = result
+  }
+  async function inspectPlanningResult(mode = 'view') {
+    const isCurrent = captureBook(), id = ports.planningJob.value?.id
+    if (!id) return
+    const result = await ports.guard(() => ports.desktop.planning.details(id))
+    if (!isCurrent() || ports.planningJob.value?.id !== id) return
+    ports.planningJob.value = result
+    const content = result.rawResult || '暂无已返回的结果'
+    if (mode === 'copy') {
+      try { await navigator.clipboard.writeText(content); ports.notice('候选与复核详情已复制') }
+      catch { ports.notice('复制失败，请展开详情手动复制，或导出文件') }
+    }
+    if (mode === 'export') {
+      const url = URL.createObjectURL(new Blob([content], { type: 'application/json;charset=utf-8' }))
+      const link = document.createElement('a'); link.href = url; link.download = `谋篇恢复-${id}.json`; link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    }
+  }
+
   async function handleTotalOutlineAi() {
     if (!ports.current.value) return
     // Saving before leaving refreshes workflow state without changing the book.
@@ -497,6 +538,10 @@ export function createPlanningGenerationActions(ports) {
   return {
     clearPlanningPoll,
     startAutomaticPlanning,
+    resumeAutomaticPlanning,
+    inspectPlanningResult,
+    listPlanningHistory,
+    selectPlanningHistory,
     handleTotalOutlineAi,
     pollAutomaticPlanning,
     cancelAutomaticPlanning,

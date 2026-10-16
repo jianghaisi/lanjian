@@ -4,11 +4,12 @@ import { decodeCreativePolicyRecords } from '../writing-plugins/creative-policy'
 import { uuid as validUuid } from '../core/validation'
 import { decodeChapterEventAdoptionArgs, MAX_CHAPTER_ADOPTION_EVENTS } from './chapter-event-contracts'
 
-const jobChannels = ['planning:start', 'planning:job', 'planning:cancel']
+const jobChannels = ['planning:start', 'planning:job', 'planning:cancel', 'planning:details', 'planning:retry', 'planning:retry-save']
 const skeletonJobChannels = ['planning:start-chapter-skeleton', 'planning:chapter-skeleton-job', 'planning:cancel-chapter-skeleton']
 const detailJobChannels = ['planning:start-chapter-detail', 'planning:chapter-detail-job', 'planning:cancel-chapter-detail']
 
 export const planningIpcValueDecoders: Readonly<Record<string, IpcValueDecoder>> = {
+  'planning:recent': (value, path) => { if (!Array.isArray(value) || value.length > 50) invalid(path); (value as unknown[]).forEach((job, index) => planningJob(job, `${path}[${index}]`)); return value },
   ...Object.fromEntries(jobChannels.map((channel) => [channel, planningJob])),
   ...Object.fromEntries(skeletonJobChannels.map((channel) => [channel, skeletonJob])),
   ...Object.fromEntries(detailJobChannels.map((channel) => [channel, detailJob])),
@@ -184,7 +185,12 @@ function receipt(value: unknown, path: string, fingerprintFields: readonly strin
 
 function planningJob(value: unknown, path: string): unknown {
   const result = baseJob(value, path)
-  if (result.rawResult !== undefined) text(result.rawResult, `${path}.rawResult`, 3_000_000)
+  if (result.recovery !== undefined) {
+    const recovery = object(result.recovery, `${path}.recovery`)
+    if (typeof recovery.saved !== 'boolean') invalid(`${path}.recovery.saved`)
+    oneOf(recovery.action, ['review', 'stage', 'save', 'none'], `${path}.recovery.action`)
+  }
+  if (result.rawResult !== undefined) text(result.rawResult, `${path}.rawResult`, 8_000_000)
   oneOf(result.stage, ['blueprint', 'totalOutline', 'volumePlan'], `${path}.stage`)
   const progress = object(result.progress, `${path}.progress`)
   count(progress.completed, `${path}.progress.completed`)

@@ -5,7 +5,7 @@ import BookDefinitionForm from './BookDefinitionForm.vue'
 import StudioIcon from '../../../ui/StudioIcon.vue'
 import FormalSkeletonAdoption from '../../planning/components/FormalSkeletonAdoption.vue'
 import ChapterEventPreview from '../../planning/components/ChapterEventPreview.vue'
-import { toRefs } from 'vue'
+import { toRefs, ref, watch } from 'vue'
 
 const props = defineProps({ scope: { type: Object, required: true } })
 const emit = defineEmits(['import-project'])
@@ -104,14 +104,32 @@ const {
   saveContinuationAnalysis,
   selectWorkspaceLeaf,
   startAutomaticPlanning,
+  resumeAutomaticPlanning,
+  inspectPlanningResult,
+  listPlanningHistory,
+  selectPlanningHistory,
   startPlanningChapterDetail,
   startPlanningChapterSkeleton,
   updatePlanningChapterDetailList,
   updateSkeletonCharacters
 } = toRefs(props.scope)
+const recoveryHistory = ref([])
+watch(() => planningJob.value?.workItemId, () => { recoveryHistory.value = [] })
+async function openRecoveryHistory(event) {
+  if (!event.target.open) return
+  const owner = planningJob.value?.workItemId
+  const records = await listPlanningHistory.value()
+  if (planningJob.value?.workItemId === owner) recoveryHistory.value = records
+}
 </script>
 
 <style scoped>
+.planning-progress { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.planning-progress > button { justify-self: start; max-width: 100%; }
+.planning-progress details { min-width: 0; max-width: 100%; }
+.planning-progress pre { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--sans); }
+.planning-recovery-history { padding-left: 18px; max-height: 180px; overflow: auto; }
+
 .profile-editor .planning-chapter-skeleton { color: var(--color-ink); background: var(--color-surface); }
 .profile-editor .planning-chapter-skeleton > header,
 .profile-editor .skeleton-volume > summary { color: var(--color-ink); background: var(--color-paper); border-color: var(--color-line); }
@@ -576,7 +594,7 @@ const {
           :disabled="busy || !planningMaterialsReady || !(ai.modelConfigured ?? ai.apiKeyConfigured)"
           @click="startAutomaticPlanning"
         >
-          <StudioIcon name="spark" :size="16" />自动谋篇
+          <StudioIcon name="spark" :size="16" />{{ planningJob ? '重新生成' : '自动谋篇' }}
         </button>
         <button
           v-else
@@ -609,7 +627,25 @@ const {
         </div>
         <progress :value="planningJob.progress.completed" :max="planningJob.progress.total"></progress>
         <small>{{ planningJob.progress.message }}</small>
-        <p v-if="planningJob.error">{{ planningJob.error.message }}</p><details v-if="planningJob.rawResult"><summary>查看未通过的候选与复核</summary><pre>{{ planningJob.rawResult }}</pre></details>
+        <p v-if="planningJob.error">{{ planningJob.error.message }}</p>
+        <template v-if="planningJob.status === 'failed' || planningJob.status === 'cancelled'">
+          <p v-if="planningJob.recovery">{{ planningJob.recovery.saved ? '阶段结果已保存，重启后仍可查看。' : '结果尚未可靠保存，请先复制或导出再退出。' }}</p>
+          <button v-if="planningJob.recovery?.saved && planningJob.recovery.action !== 'none'" class="control-button primary compact" type="button" :disabled="busy" data-testid="resume-planning" @click="resumeAutomaticPlanning">
+            {{ { review: '重新复核并继续', stage: '从本阶段重试', save: '重试保存' }[planningJob.recovery.action] }}
+          </button>
+          <small v-if="planningJob.recovery?.action === 'review' || planningJob.recovery?.action === 'stage'">继续会调用模型并产生相应费用；已通过的阶段和原结果会保留。</small>
+          <small v-if="planningJob.recovery?.action === 'save'">仅保存已完成的候选，不调用模型。</small>
+          <button class="text-action compact" type="button" @click="inspectPlanningResult()">查看候选与复核详情</button>
+          <button class="text-action compact" type="button" @click="inspectPlanningResult('copy')">复制结果</button>
+          <button class="text-action compact" type="button" @click="inspectPlanningResult('export')">导出结果</button>
+        </template>
+        <details v-if="planningJob.recovery && !planningRunning" @toggle="openRecoveryHistory">
+          <summary>查看本书谋篇记录</summary>
+          <ul class="planning-recovery-history"><li v-for="entry in recoveryHistory" :key="entry.id">
+            <button class="text-action compact" type="button" @click="selectPlanningHistory(entry.id)">{{ new Date(entry.startedAt).toLocaleString() }} · {{ { blueprint: '创作蓝图', totalOutline: '总纲', volumePlan: '卷纲' }[entry.stage] }} · {{ { failed: '未完成', cancelled: '已停止', completed: '已完成', running: '进行中' }[entry.status] }}</button>
+          </li></ul>
+        </details>
+        <details v-if="planningJob.rawResult" open><summary>候选与复核详情</summary><pre>{{ planningJob.rawResult }}</pre></details>
       </div>
     </section>
     <article
@@ -1330,6 +1366,12 @@ const {
 </template>
 
 <style scoped>
+.planning-progress { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.planning-progress > button { justify-self: start; max-width: 100%; }
+.planning-progress details { min-width: 0; max-width: 100%; }
+.planning-progress pre { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--sans); }
+.planning-recovery-history { padding-left: 18px; max-height: 180px; overflow: auto; }
+
 .planning-proposal > .planning-formal-outline-guide { margin: 0; padding: 12px 18px; border-top: 0; }
 .planning-formal-outline-guide p { margin: 0 0 8px; }
 .planning-proposal > footer { flex-wrap: wrap; border-bottom: 1px solid var(--line); }

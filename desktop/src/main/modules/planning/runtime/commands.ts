@@ -184,8 +184,14 @@ export function registerPlanningIpc(ipcMain: IpcRegistrar, dependencies: Depende
   registerValidatedIpc(ipcMain, 'planning:start', decodeNoArgs, () =>
     projects.runBookTask('自动谋篇', async () => planningJobs.start((await projects.currentSummary()).id), id => planningJobs.status(id))
   )
-  registerValidatedIpc(ipcMain, 'planning:job', decodeJobIdArgs, (jobId) => ownedJob(() => planningJobs.status(jobId), job => job))
-  registerValidatedIpc(ipcMain, 'planning:cancel', decodeJobIdArgs, (jobId) => ownedJob(() => planningJobs.status(jobId), () => planningJobs.cancel(jobId)))
+  registerValidatedIpc(ipcMain, 'planning:job', decodeJobIdArgs, jobId => projects.runInCurrentBook(async () => planningJobs.read(jobId, (await projects.currentSummary()).id)))
+  registerValidatedIpc(ipcMain, 'planning:details', decodeJobIdArgs, jobId => projects.runInCurrentBook(async () => planningJobs.read(jobId, (await projects.currentSummary()).id, true)))
+  registerValidatedIpc(ipcMain, 'planning:recent', decodeNoArgs, () => projects.runInCurrentBook(async () => planningJobs.recent((await projects.currentSummary()).id)))
+  registerValidatedIpc(ipcMain, 'planning:cancel', decodeJobIdArgs, jobId => projects.runInCurrentBook(async () => planningJobs.cancelSaved(jobId, (await projects.currentSummary()).id)))
+  for (const [channel, saveOnly] of [['planning:retry', false], ['planning:retry-save', true]] as const) {
+    registerValidatedIpc(ipcMain, channel, decodeWritingAgentRetryArgs, (jobId, operationId) =>
+      projects.runBookTask('自动谋篇', async () => planningJobs.retry(jobId, operationId, (await projects.currentSummary()).id, saveOnly), id => planningJobs.status(id)))
+  }
   registerValidatedIpc(ipcMain, 'planning:draft', decodeNoArgs, () => planningPackages.get())
   registerValidatedIpc(ipcMain, 'planning:save-draft', decodePlanningPackageArgs, (proposal) =>
     planningPackages.save(proposal)

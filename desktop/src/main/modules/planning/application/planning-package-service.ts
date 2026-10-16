@@ -135,7 +135,7 @@ export class PlanningPackageService {
     })
   }
 
-  save(input: PlanningPackageProposal): Promise<PlanningPackageProposal> {
+  save(input: PlanningPackageProposal, guard?: (existing: PlanningPackageProposal | null) => Promise<void>): Promise<PlanningPackageProposal> {
     return this.serialize(async () => {
       const [proposal] = decodePlanningPackageArgs([input])
       await this.assertOwner(proposal)
@@ -193,7 +193,8 @@ export class PlanningPackageService {
         throw new AppError('CONFLICT', '金手指或特殊优势采用状态只能由正式采用事务更新，已阻止候选伪造状态。', { recoverable: true })
       }
       const stored: StoredPlanningDraft = { version: 1, proposal, updatedAt: this.now().toISOString() }
-      await writeJson(await this.path(), stored)
+      await guard?.(existing)
+      await writeJson(await this.path(), stored, guard ? async () => guard(await this.readStored()) : undefined)
       return structuredClone(proposal)
     })
   }

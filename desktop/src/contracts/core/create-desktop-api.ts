@@ -257,6 +257,10 @@ return {
     settleWritingAgent: (turnId) => invokeValidated('ai:settle-writing-agent', turnId)
   },
   planning: {
+    recent: () => invokeValidated('planning:recent'),
+    details: (jobId) => invokeValidated('planning:details', jobId),
+    retry: (jobId, operationId) => invokeValidated('planning:retry', jobId, operationId),
+    retrySave: (jobId, operationId) => invokeValidated('planning:retry-save', jobId, operationId),
     start: () => invokeValidated('planning:start'),
     job: (jobId) => invokeValidated('planning:job', jobId),
     cancel: (jobId) => invokeValidated('planning:cancel', jobId),
