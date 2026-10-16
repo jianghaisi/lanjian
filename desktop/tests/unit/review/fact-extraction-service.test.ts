@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { FactExtractionService } from '../../../src/main/modules/review/application/fact-extraction-service'
+import { StructuredResponseFailure } from '../../../src/main/modules/assistant/application/structured-response-repair'
 
 const chapter = {
   id: 1, position: 1, title: '雨夜', content: '沈砚在临江酒馆门前发现半枚铜符。', word_count: 16, summary: '', bodyVersionId: 'body-1', revision: 'revision-1'
@@ -20,7 +21,16 @@ test('creates fact candidates only when every extracted change is backed by the 
 test('rejects malformed model output before any fact batch can be created', async () => {
   let calls = 0
   const service = new FactExtractionService({ complete: async () => { calls += 1; return { content: '不是 JSON' } } } as never)
-  await assert.rejects(service.extract(chapter), (error: { code?: string; message?: string }) => error.code === 'AI_RESPONSE_INVALID' && /原始结果已保留/.test(error.message || ''))
+  await assert.rejects(service.extract(chapter), (error: unknown) => {
+    assert.ok(error instanceof StructuredResponseFailure)
+    assert.equal(error.code, 'AI_RESPONSE_INVALID')
+    assert.equal(error.originalContent, '不是 JSON')
+    assert.equal(error.lastContent, '不是 JSON')
+    assert.equal(error.repairAttempts, 1)
+    assert.match(error.message, /已尝试自动修复 1 次，仍未通过/)
+    assert.doesNotMatch(error.message, /已自动修复/)
+    return true
+  })
   assert.equal(calls, 2)
 })
 

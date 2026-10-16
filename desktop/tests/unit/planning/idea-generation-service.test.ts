@@ -877,7 +877,8 @@ test('idea generation retains its first malformed response after configured repa
   assert.equal(calls, 2)
   assert.equal(result.status, 'failed')
   assert.equal(result.rawResult, original)
-  assert.match(result.error || '', /原始结果已保留/)
+  assert.match(result.error || '', /已尝试自动修复 1 次，仍未通过/)
+  assert.doesNotMatch(result.error || '', /已自动修复/)
   const database = (await databases.openExisting(project.path))!
   try {
     const artifact = database.generationArtifactForTask(result.id, 'idea_generation')!
