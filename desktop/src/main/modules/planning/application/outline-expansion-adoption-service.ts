@@ -61,10 +61,13 @@ export class OutlineExpansionAdoptionService {
       if (!task || task.taskType !== 'outline_expansion' || task.status !== 'succeeded' || !artifact?.schemaValid || artifact.status !== 'complete') {
         throw this.conflict('这条候选不可采用或已经采用，请重新读取。')
       }
-      const checkpoint = JSON.parse(task.checkpointJson) as { methodVersion?: 'story-v1'; request: OutlineExpansionTaskInput; source: PlanningOutlineSource }
+      const checkpoint = JSON.parse(task.checkpointJson) as { methodVersion?: 'story-v1' | 'story-v2-direct-chapter';
+        request: OutlineExpansionTaskInput; source: PlanningOutlineSource }
       decodeOutlineExpansionArgs([checkpoint.request])
       const proposal = JSON.parse(artifact.content) as OutlineExpansionProposal
-      const children = parseOutlineExpansion(JSON.stringify({ children: proposal.children }), checkpoint.request.count, checkpoint.methodVersion === 'story-v1' && proposal.methodVersion === 'story-v1')
+      if (proposal.methodVersion !== checkpoint.methodVersion) throw this.conflict('候选方法版本与任务记录不一致。')
+      const children = parseOutlineExpansion(JSON.stringify({ children: proposal.children }), checkpoint.request.count,
+        Boolean(checkpoint.methodVersion && proposal.methodVersion === checkpoint.methodVersion))
       if (hash(proposal.source) !== hash(checkpoint.source) || checkpoint.request.parentKey !== checkpoint.source.key
         || checkpoint.request.expectedRevision !== checkpoint.source.revision) throw this.conflict('候选来源不一致，未执行采用。')
       return { artifact, proposal: { ...proposal, children }, checkpoint }
@@ -75,8 +78,20 @@ export class OutlineExpansionAdoptionService {
       const nodes = db.formalOutlines()
       const parent = nodes.find(node => node.legacyKey === current.key)
       if (!parent || parent.revision !== current.revision) throw this.conflict('父稿已经变化，请重新预览。')
-      const kind = parent.nodeType === 'summary' ? 'volume' : parent.nodeType === 'volume' ? 'stage' : parent.nodeType === 'stage' ? 'chapter' : null
-      if (!kind || record.proposal.childType !== kind) throw this.conflict('候选层级与父稿不一致。')
+      const kind = record.proposal.childType
+      const validLayer = parent.nodeType === 'summary' && kind === 'volume'
+        || parent.nodeType === 'stage' && kind === 'chapter'
+        || parent.nodeType === 'volume' && ((record.proposal.methodVersion === 'story-v2-direct-chapter' && kind === 'chapter')
+          || (record.proposal.methodVersion !== 'story-v2-direct-chapter' && kind === 'stage'))
+      if (!validLayer) throw this.conflict('候选层级与父稿不一致。')
+      if (parent.nodeType === 'volume' && record.proposal.methodVersion === 'story-v2-direct-chapter') {
+        const siblings = nodes.filter(node => node.parentLegacyKey === parent.legacyKey)
+        const currentSiblings = siblings
+          .map(node => ({ key: node.legacyKey, revision: node.revision })).sort((a, b) => a.key.localeCompare(b.key))
+        const frozenSiblings = record.proposal.siblingRevisions?.slice().sort((a, b) => a.key.localeCompare(b.key))
+        if (!frozenSiblings || siblings.some(node => node.nodeType === 'stage')
+          || JSON.stringify(currentSiblings) !== JSON.stringify(frozenSiblings)) throw this.conflict('本卷章节目录已经变化，请基于当前卷纲重新拆解。')
+      }
       const reserved = db.reservedOutlineKeys().filter(key => key.startsWith(`${kind}-`)).map(key => Number(key.split('-')[1]))
       // A future chapter outline must not silently attach itself to an existing manuscript identity.
       if (kind === 'chapter') reserved.push(...db.formalChapterIds())

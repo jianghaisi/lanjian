@@ -1925,8 +1925,8 @@ export function runDesktopScenarios(window: BrowserWindow, runtime: DesktopRunti
               volumeSubmit.click()
               for (let index = 0; index < 30 && !document.querySelector('.volume-strip article'); index += 1) await wait(100)
               document.querySelector('.volume-strip article')?.click()
-              for (let index = 0; index < 30 && !document.querySelector('[data-testid="create-outline-stage"]'); index += 1) await wait(100)
-              if (!document.querySelector('[data-testid="create-outline-stage"]')) return { ok: false, step: 'volume-mode' }
+              for (let index = 0; index < 30 && !document.querySelector('.outline-editor > .plain-text-editor .cm-content'); index += 1) await wait(100)
+              if (document.querySelector('[data-testid="create-outline-stage"]')) return { ok: false, step: 'obsolete-stage-create-entry' }
               const volumeOutline = document.querySelector('.outline-editor > .plain-text-editor .cm-content')
               if (!volumeOutline) return { ok: false, step: 'volume-editor' }
               setValue(volumeOutline, '本卷目标：沈砚确认异世录音的来历，并决定重新登台。')
@@ -1935,32 +1935,12 @@ export function runDesktopScenarios(window: BrowserWindow, runtime: DesktopRunti
               saveVolume?.click()
               for (let index = 0; index < 40 && !(await window.novelDesktop.outlines.list()).volumes.some((item) => item.volume === 1); index += 1) await wait(100)
               if (!(await window.novelDesktop.outlines.list()).volumes.some((item) => item.volume === 1)) return { ok: false, step: 'volume-formal-save' }
-              const stageInput = document.querySelector('[aria-label="新阶段名称"]')
-              if (!stageInput) return { ok: false, step: 'stage-input', inspector: document.querySelector('[data-testid="outline-inspector"]')?.textContent || '' }
-              setValue(stageInput, '旧城追索')
-              const createStage = document.querySelector('[data-testid="create-outline-stage"]')
-              for (let index = 0; index < 30 && createStage?.disabled; index += 1) await wait(100)
-              if (!createStage || createStage.disabled) return { ok: false, step: 'stage-submit-disabled' }
-              createStage.click()
-              for (let index = 0; index < 30 && !document.querySelector('[data-testid^="open-stage-"]'); index += 1) await wait(100)
-              const stageButton = document.querySelector('[data-testid^="open-stage-"]')
-              if (!stageButton || !stageButton.textContent?.includes('旧城追索')) return { ok: false, step: 'stage-tree', text: stageButton?.textContent || '' }
-              const stageId = Number(stageButton.getAttribute('data-testid')?.replace('open-stage-', ''))
-              stageButton.click()
-              for (let index = 0; index < 20 && !document.querySelector('[data-testid="stage-outline-editor"]'); index += 1) await wait(100)
-              const editor = document.querySelector('[data-testid="stage-outline-editor"]')
-              const stageContent = editor?.querySelector('.cm-content')
-              if (!editor || !stageContent) return { ok: false, step: 'stage-editor' }
-              setValue(stageContent, '沈砚验证旧录音来源，并在阶段末决定重新登台。')
-              await wait(100)
-              document.querySelector('[data-testid="save-outline-document"]')?.click()
-              let listed = await window.novelDesktop.outlines.list()
-              for (let index = 0; index < 40 && !listed.stages?.find((item) => item.stage === stageId)?.content.includes('阶段末决定重新登台'); index += 1) {
-                await wait(100)
-                listed = await window.novelDesktop.outlines.list()
-              }
-              const stage = listed.stages?.find((item) => item.stage === stageId)
-              return { ok: Boolean(stage?.content.includes('阶段末决定重新登台') && stage.chapterIds.length === 0 && document.querySelector('[data-testid^="open-stage-"]')?.textContent?.includes('0 章')), step: 'stage-editor', stage }
+              const created = await window.novelDesktop.outlines.createStage(1, '旧城追索')
+              const stageId = created.stage.stage
+              await window.novelDesktop.outlines.updateStage(stageId, '旧城追索', '沈砚验证旧录音来源，并在阶段末决定重新登台。')
+              const stage = (await window.novelDesktop.outlines.list()).stages?.find((item) => item.stage === stageId)
+              return { ok: Boolean(stage?.content.includes('阶段末决定重新登台') && stage.chapterIds.length === 0
+                && !document.querySelector('[data-testid="create-outline-stage"]')), step: 'legacy-stage-preserved', stage }
             })()`)
             if (!stageOutlinePassed.ok) {
               console.error(`[desktop smoke] stage outline workbench failed: ${JSON.stringify(stageOutlinePassed)}`)

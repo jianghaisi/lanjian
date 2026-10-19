@@ -9,7 +9,7 @@
 <a href="https://github.com/jianghaisi/lanjian/actions/workflows/ci.yml"><img alt="Build" src="https://github.com/jianghaisi/lanjian/actions/workflows/ci.yml/badge.svg?branch=main"></a>
 <a href="https://lanjian.jiangai.space/"><img alt="在线试用" src="https://img.shields.io/badge/在线试用-立即打开-d89b38?style=flat-square"></a>
 </p>
-<p align="center"><a href="https://github.com/jianghaisi/lanjian/releases/tag/v0.1.5"><strong>下载 Windows 安装包 ↗</strong></a> · <a href="https://lanjian.jiangai.space/"><strong>在线试用 ↗</strong></a> · <a href="README.en.md">English</a></p>
+<p align="center"><a href="https://github.com/jianghaisi/lanjian/releases/tag/v0.1.6"><strong>下载 Windows 安装包 ↗</strong></a> · <a href="https://lanjian.jiangai.space/"><strong>在线试用 ↗</strong></a> · <a href="README.en.md">English</a></p>
 
 岚笺是一款本地小说写作工具，将正文、资料、人物设定、大纲和故事事件集中在同一部作品中管理。你可以独立创作，也可以接入模型，与智能助笔讨论情节，再自行决定保留哪些内容。
 
@@ -163,15 +163,15 @@ flowchart TB
 
 ### 下载安装
 
-1. 打开 [v0.1.5 Release](https://github.com/jianghaisi/lanjian/releases/tag/v0.1.5)，下载 **Lanjian-0.1.5-Setup-x64.exe**。
+1. 打开 [v0.1.6 Release](https://github.com/jianghaisi/lanjian/releases/tag/v0.1.6)，下载 **Lanjian-0.1.6-Setup-x64.exe**。
 2. 安装并启动应用，创建空白作品，选择自己的作品保存目录。
 3. 即使没有模型密钥，也可以手工编辑。需要使用 AI 时，再在应用内配置接口和模型。
 4. 本地语音、模型商店下载等均为可选功能，基础编辑不需要提前准备这些组件。
 
-当前安装包面向 **Windows x64**。有关签名状态、验证范围及已知问题，请参阅 [发布说明](docs/releases/v0.1.5.md)。可通过 PowerShell 校验 SHA-256：
+当前安装包面向 **Windows x64**。有关签名状态、验证范围及已知问题，请参阅 [发布说明](docs/releases/v0.1.6.md)。可通过 PowerShell 校验 SHA-256：
 
 ~~~powershell
-Get-FileHash .\Lanjian-0.1.5-Setup-x64.exe -Algorithm SHA256
+Get-FileHash .\Lanjian-0.1.6-Setup-x64.exe -Algorithm SHA256
 ~~~
 
 将校验结果与 Release 中的 SHA256SUMS.txt 对照。安装包不需要用户另行安装 Node.js；Python 和模型权重不随安装包分发。
@@ -247,7 +247,7 @@ npm --prefix desktop run desktop:dist
 | 模型 | 作者自行配置；可选本地模型 | 站长开放的模型与积分规则 |
 | 游客 | 可无密钥手工编辑 | 公开参考书只读体验 |
 | 原生能力 | 文件选择、桌宠和可选本地运行时 | 浏览器权限内的功能 |
-| 版本 | 本仓库 v0.1.5 安装包 | 独立上线，以实际站点为准 |
+| 版本 | 本仓库 v0.1.6 安装包 | 独立上线，以实际站点为准 |
 
 完整的在线创作功能需要后端、身份配置和持久化存储，不能只将静态文件上传到 GitHub Pages。可以使用现有的 Node.js 24 / Docker 自托管方案，具体说明见 [部署指南](docs/DEPLOYMENT.md) 和 [托管运维说明](docs/HOSTED-DEPLOYMENT.md)。
 

@@ -66,12 +66,14 @@ export type OutlineExpansionAdoptionResult = { keys: string[]; mirrorPending: bo
 
 export type OutlineExpansionProposal = {
   creativePolicy?: CreativePolicyRecord[]
-  methodVersion?: 'story-v1'
+  methodVersion?: 'story-v1' | 'story-v2-direct-chapter'
   id: string
   createdAt: string
   source: PlanningOutlineSource
   sourceStale: boolean
   childType: 'volume' | 'stage' | 'chapter'
+  /** Exact direct children seen when a volume was split into another chapter batch. */
+  siblingRevisions?: Array<{ key: string; revision: string }>
   children: Array<{
     title: string
     content: string

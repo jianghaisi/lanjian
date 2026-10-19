@@ -12,7 +12,9 @@ import { decodeCreativePolicyRecords } from '../../../../contracts/writing-plugi
 
 const type = 'outline_expansion'
 const running = (status: string) => ['queued', 'preparing', 'running', 'streaming'].includes(status)
-type Checkpoint = { methodVersion?: 'story-v1'; version: 1; request: OutlineExpansionTaskInput; source: PlanningOutlineSource; model: string }
+type ExpansionSibling = { key: string; title: string; content: string; revision: string }
+type Checkpoint = { methodVersion?: 'story-v1' | 'story-v2-direct-chapter'; version: 1; request: OutlineExpansionTaskInput;
+  source: PlanningOutlineSource; model: string; siblings?: ExpansionSibling[] }
 
 /** Uses the database task/Artifact lifecycle; never creates formal outline nodes. */
 export class OutlineExpansionTaskService {
@@ -42,7 +44,14 @@ export class OutlineExpansionTaskService {
       if ([...this.active.values()].some(item => item.root === root)) throw this.conflict('请先停止或等待本书的逐层规划任务。')
       const source = await this.source(input.parentKey)
       if (!source || source.revision !== input.expectedRevision || !source.content.trim()) throw this.conflict('父级为空或已经变化，请重新打开后拆解。')
-      const checkpoint: Checkpoint = { version: 1, methodVersion: 'story-v1', request: input, source, model: await this.model() }
+      const siblings = source.kind === 'volume' ? await this.db(root, db => {
+        const nodes = db.formalOutlines().filter(node => node.parentLegacyKey === source.key).sort((a, b) => a.seq - b.seq)
+        if (nodes.some(node => node.nodeType === 'stage')) throw this.conflict('本卷已有阶段纲，请从对应阶段继续拆章。')
+        return nodes.map((node, index) => ({ key: node.legacyKey, title: node.title,
+          content: index === nodes.length - 1 ? node.content : '', revision: node.revision }))
+      }) : []
+      const checkpoint: Checkpoint = { version: 1, methodVersion: 'story-v2-direct-chapter', request: input, source,
+        model: await this.model(), ...(source.kind === 'volume' ? { siblings } : {}) }
       if (resolve(root) !== resolve(await this.projects.currentPath())) throw this.conflict('作品已经切换，本次未启动生成。')
       const task = await this.dbWrite(root, db => db.createTaskRun({ id: randomUUID(), taskType: type, idempotencyKey: input.operationId,
         taskContract: createTaskContractSnapshot(type), checkpointJson: JSON.stringify(checkpoint) }))
@@ -135,7 +144,8 @@ export class OutlineExpansionTaskService {
       if (controller.signal.aborted) return
       await this.dbWrite(root, db => { if (this.require(db, task.id).status === 'queued') db.transitionTaskRun({ id: task.id, status: 'running' }) })
       if (controller.signal.aborted) return
-      const proposal = await this.runner.expandNextLayer(checkpoint.request, controller.signal, checkpoint.model, checkpoint.methodVersion ?? 'legacy')
+      const proposal = await this.runner.expandNextLayer(checkpoint.request, controller.signal, checkpoint.model,
+        checkpoint.methodVersion ?? 'legacy', checkpoint.siblings)
       if (controller.signal.aborted) return
       const content = JSON.stringify(proposal)
       await this.dbWrite(root, db => {
@@ -178,10 +188,15 @@ export class OutlineExpansionTaskService {
     if (artifact?.schemaValid) {
       const value = JSON.parse(artifact.content) as OutlineExpansionProposal
       if (value.source?.key !== checkpoint.source.key || value.source.revision !== checkpoint.source.revision || value.source.projectFingerprint !== checkpoint.source.projectFingerprint) throw this.conflict('候选来源与任务记录不一致。')
-      proposal = { ...value, children: parseOutlineExpansion(JSON.stringify({ children: value.children }), checkpoint.request.count, checkpoint.methodVersion === 'story-v1' && value.methodVersion === 'story-v1'),
+      proposal = { ...value, children: parseOutlineExpansion(JSON.stringify({ children: value.children }), checkpoint.request.count,
+        Boolean(checkpoint.methodVersion && value.methodVersion === checkpoint.methodVersion)),
         ...(value.creativePolicy !== undefined ? { creativePolicy: decodeCreativePolicyRecords(value.creativePolicy) } : {}) }
     }
+    const currentSiblings = checkpoint.siblings && db.formalOutlines().filter(node => node.parentLegacyKey === checkpoint.source.key)
+      .map(node => ({ key: node.legacyKey, revision: node.revision })).sort((a, b) => a.key.localeCompare(b.key))
+    const frozenSiblings = checkpoint.siblings?.map(({ key, revision }) => ({ key, revision })).sort((a, b) => a.key.localeCompare(b.key))
     const sourceStale = parents.get(checkpoint.source.key) !== checkpoint.source.revision
+      || (artifact?.status !== 'applied' && currentSiblings !== undefined && JSON.stringify(currentSiblings) !== JSON.stringify(frozenSiblings))
     return { id: task.id, status: task.status, createdAt: task.createdAt, model: checkpoint.model, request: checkpoint.request,
       sourceStale, proposal: proposal ? { ...proposal, sourceStale } : null, error: task.errorMessage,
       ...(artifact && !artifact.schemaValid ? { rawResult: artifact.content } : {}),

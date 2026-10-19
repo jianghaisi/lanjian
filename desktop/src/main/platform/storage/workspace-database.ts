@@ -3980,12 +3980,15 @@ export class SqliteWorkspaceDatabase implements WorkspaceDatabasePort {
       if (!parent || parent.revision !== input.expectedParentRevision) {
         throw new AppError('CONFLICT', '父级大纲已经变化，请重新预览后采用。', { recoverable: true })
       }
-      const childType = parent.nodeType === 'summary' ? 'volume' : parent.nodeType === 'volume' ? 'stage' : parent.nodeType === 'stage' ? 'chapter' : null
+      const childType = input.children[0]?.nodeType
+      const validLayer = parent.nodeType === 'summary' && childType === 'volume'
+        || parent.nodeType === 'volume' && (childType === 'stage' || childType === 'chapter')
+        || parent.nodeType === 'stage' && childType === 'chapter'
       const actualKeys = nodes.filter(node => node.parentLegacyKey === parent.legacyKey).map(node => node.legacyKey).sort()
       if (JSON.stringify(actualKeys) !== JSON.stringify([...input.expectedChildKeys].sort())) {
         throw new AppError('CONFLICT', '父级下的目录已经变化，请重新预览后采用。', { recoverable: true })
       }
-      if (!childType || input.children.length < 1 || input.children.length > 12
+      if (!validLayer || input.children.length < 1 || input.children.length > 12
         || new Set(input.children.map(child => child.legacyKey)).size !== input.children.length
         || new Set(input.children.map(child => child.seq)).size !== input.children.length) {
         throw new AppError('VALIDATION_ERROR', '逐层采用必须包含同一层的一批新子纲。', { recoverable: true })

@@ -6,7 +6,9 @@ const props = defineProps<{ source: PlanningOutlineSource | null; tasks: Outline
 const emit = defineEmits<{ close: []; refresh: []; start: [input: { count: number; instruction: string }]; cancel: [id: string]; retry: [id: string]; preview: [id: string]; dismissPreview: []; adopt: [] }>()
 const count = ref(3)
 const instruction = ref('')
-const layer = computed(() => props.source?.kind === 'volume' ? '阶段' : props.source?.kind === 'stage' ? '章' : '卷')
+const layer = computed(() => props.source?.kind === 'summary' ? '卷' : '章')
+const candidateLayer = (task: OutlineExpansionTask) => task.proposal?.childType === 'stage' ? '阶段'
+  : task.proposal?.childType === 'volume' ? '卷' : '章'
 const running = computed(() => props.tasks.find(task => ['queued', 'preparing', 'running', 'streaming'].includes(task.status)))
 const labels: Record<string, string> = { queued: '排队中', preparing: '准备中', running: '生成中', streaming: '生成中', succeeded: '候选已保存', failed: '生成失败', cancelled: '已停止', interrupted: '已中断，可重新生成' }
 </script>
@@ -47,7 +49,7 @@ const labels: Record<string, string> = { queued: '排队中', preparing: '准备
           <button v-if="preview?.taskId !== task.id" class="control-button secondary compact" type="button" data-testid="preview-outline-expansion-adoption" :disabled="busy || loading || task.sourceStale" @click="emit('preview', task.id)">预览并采用</button>
         </div>
         <section v-if="preview?.taskId === task.id" class="expansion-adoption" data-testid="outline-expansion-adoption-preview" aria-label="采用预览" tabindex="-1">
-          <h3>将新增 {{ preview.children.length }} 项{{ layer }}纲</h3>
+          <h3>将新增 {{ preview.children.length }} 项{{ candidateLayer(task) }}纲</h3>
           <p>归入「{{ preview.parentTitle }}」。保留已有大纲及正文，仅新增以下内容，保存后仍需复核。</p>
           <details v-for="(child, index) in preview.children" :key="child.key" :open="index === 0" class="expansion-child">
             <summary>{{ index + 1 }} · {{ child.title }}</summary><p>{{ child.content }}</p>

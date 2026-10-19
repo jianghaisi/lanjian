@@ -45,7 +45,7 @@ const foundation: FoundationData = {
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 
 test('expands exactly one hierarchy layer with generation and content review and preserves the parent snapshot', async () => {
-  for (const [kind, key, expected] of [['summary', 'total', 'volume'], ['volume', 'volume-1', 'stage'], ['stage', 'stage-1', 'chapter']] as const) {
+  for (const [kind, key, expected] of [['summary', 'total', 'volume'], ['volume', 'volume-1', 'chapter'], ['stage', 'stage-1', 'chapter']] as const) {
     let revision = hash('parent')
     let calls = 0
     const source = () => ({ projectFingerprint: hash('book'), key, kind, title: '父级标题', content: '父稿保留原有冲突。', revision })
@@ -62,10 +62,24 @@ test('expands exactly one hierarchy layer with generation and content review and
     const proposal = await service.expandNextLayer({ parentKey: key, expectedRevision: revision, count: 1, instruction: '保留吐槽' })
     assert.equal(calls, 1)
     assert.equal(proposal.childType, expected)
+    assert.equal(proposal.methodVersion, 'story-v2-direct-chapter')
     assert.equal(proposal.source.revision, hash('parent'))
     assert.equal(proposal.sourceStale, true)
     assert.equal(proposal.children[0].events[0].characters[0], '沈砚')
   }
+})
+
+test('old frozen expansion method still expands volume into stage', async () => {
+  const source = { projectFingerprint: hash('book'), key: 'volume-1', kind: 'volume' as const,
+    title: '第一卷', content: '主角找到旧信。', revision: hash('parent') }
+  const service = new PlanningDraftService({ complete: async (instruction) => ({ content: instruction.startsWith('复核下方')
+    ? '{"issues":[]}' : JSON.stringify({ children: [{ title: '寻找证人', content: '主角据旧信找到证人。',
+      events: [{ time: '次日', characters: ['主角'], location: '旧街', event: '找到证人。' }] }] }) }) },
+  { bookProfile: async () => profile, foundation: async () => foundation, planningOutline: async () => source })
+  const result = await service.expandNextLayer({ parentKey: source.key, expectedRevision: source.revision, count: 1, instruction: '' },
+    undefined, undefined, 'story-v1')
+  assert.equal(result.childType, 'stage')
+  assert.equal(result.methodVersion, 'story-v1')
 })
 
 test('rejects invalid expansion counts, stale parents, cross-project results and cancelled calls', async () => {
@@ -130,6 +144,10 @@ test('parses strict planning candidates and rejects incomplete output', () => {
   assert.throws(() => parsePlanningBlueprint('{"premise":"只有命题"}'), /缺少核心命题/)
   assert.throws(() => parsePlanningVolumes(volumesJson, 3), /应有 3 卷/)
   assert.throws(() => parsePlanningTotalOutline('not-json'), /不是有效 JSON/)
+  assert.throws(() => parsePlanningBlueprint(''), /没有返回内容/)
+  assert.throws(() => parsePlanningBlueprint('{"premise":"未闭合"'), /对象未闭合/)
+  assert.throws(() => parsePlanningBlueprint('[{"premise":"非对象"}]'), /最外层是数组/)
+  assert.throws(() => parsePlanningBlueprint('{"premise": bad}'), /JSON 语法/)
 })
 
 test('uses the per-book repair count for malformed planning JSON', async () => {

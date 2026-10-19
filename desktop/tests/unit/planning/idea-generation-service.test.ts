@@ -281,7 +281,8 @@ async function adoptionFixture(t: TestContext) {
   const workspace = new WorkspaceService(base.projects, undefined, undefined, documents, undefined, undefined, base.authority)
   const parent = (await workspace.planningOutline('total'))!
   const tasks = new OutlineExpansionTaskService(base.projects, base.databases, {
-    expandNextLayer: async () => ({ id: randomUUID(), createdAt: new Date().toISOString(), source: parent, sourceStale: false, childType: 'volume',
+    expandNextLayer: async () => ({ id: randomUUID(), createdAt: new Date().toISOString(), source: parent, sourceStale: false,
+      methodVersion: 'story-v2-direct-chapter', childType: 'volume',
       children: [{ title: '旧街回声', content: '追索线索。', events: [{ time: '翌日', characters: ['主角'], location: '钟楼', event: '发现线索并出发。' }] }] })
   }, key => workspace.planningOutline(key), async () => 'test')
   const task = await tasks.start({ operationId: randomUUID(), parentKey: 'total', expectedRevision: parent.revision, count: 1, instruction: '' })
@@ -475,7 +476,7 @@ test('next-layer adoption supports volume to stage to chapter without creating m
   } finally { db.close() }
 })
 
-test('runs the complete approved idea to setting, summary, volume, stage and chapter-outline chain', async (t) => {
+test('runs the complete approved idea to setting, summary, volume and direct chapter-outline chain', async (t) => {
   const { projects, databases, authority, project, idea } = await fixture(t)
   const documents = new DocumentService(projects, undefined, authority)
   const approvedSetting = await authority.saveIdea(project.path, { ...idea, status: 'approved' })
@@ -497,8 +498,14 @@ test('runs the complete approved idea to setting, summary, volume, stage and cha
     { title: '会说话的证据', content: '主角以玩笑掩饰试探，从熟人口中确认回声出现的条件。', event: '主角确认回声只记录谎话，并带着证据离开。' }
   ]
   let calls = 0
+  let sawContinuation = false
   const runner = new PlanningDraftService({ complete: async (_instruction, _draft, context) => {
     if(_instruction.startsWith('复核下方完整候选'))return {content:'{"issues":[]}'} // Draft-generation count below excludes the independent review fixture.
+    if (calls === 2) {
+      assert.match(_instruction, /本卷已有 1 份直属章纲/)
+      assert.match(_instruction, /主角在旧街寻找说谎者留下的回声证据/)
+      sawContinuation = true
+    }
     assert.match(context || '', /作者已批准的正式设定/)
     assert.match(context || '', /钟楼只记住谎话/)
     const response = responses[calls++]
@@ -509,7 +516,7 @@ test('runs the complete approved idea to setting, summary, volume, stage and cha
 
   let parentKey = 'total'
   const adoptedKeys: string[] = []
-  for (const expectedType of ['volume', 'stage', 'chapter'] as const) {
+  for (const expectedType of ['volume', 'chapter'] as const) {
     const parent = await workspace.planningOutline(parentKey)
     assert.ok(parent)
     const started = await tasks.start({ operationId: randomUUID(), parentKey, expectedRevision: parent.revision, count: 1, instruction: '保留轻松对白与吐槽空间' })
@@ -524,20 +531,60 @@ test('runs the complete approved idea to setting, summary, volume, stage and cha
     await new Promise(resolve => setTimeout(resolve, 10))
   }
 
+  const volume = (await workspace.planningOutline(adoptedKeys[0]))!
+  const continued = await tasks.start({ operationId: randomUUID(), parentKey: volume.key,
+    expectedRevision: volume.revision, count: 1, instruction: '接续前章结果' })
+  assert.equal((await expansionTerminal(tasks, continued.id)).status, 'succeeded')
+  const nextPreview = await adoption.preview(continued.id)
+  adoptedKeys.push((await adoption.adopt(nextPreview.token)).keys[0])
+
   assert.equal(calls, 3)
+  assert.equal(sawContinuation, true)
   const database = (await databases.openExisting(project.path))!
   try {
     const outlines = database.formalOutlines()
-    assert.deepEqual(outlines.map(node => node.nodeType), ['summary', 'volume', 'stage', 'chapter'])
+    assert.deepEqual(outlines.map(node => node.nodeType), ['summary', 'volume', 'chapter', 'chapter'])
     assert.deepEqual(outlines.slice(1).map(node => node.legacyKey), adoptedKeys)
     assert.equal(outlines[1].parentLegacyKey, 'total')
     assert.equal(outlines[2].parentLegacyKey, outlines[1].legacyKey)
-    assert.equal(outlines[3].parentLegacyKey, outlines[2].legacyKey)
+    assert.equal(outlines[3].parentLegacyKey, outlines[1].legacyKey)
     assert.equal(JSON.parse(outlines[0].planning.metadataJson).sourceIdeaId, promotedSummary.idea.id)
     assert.equal(JSON.parse(promotedSetting.entity.profileJson).sourceIdeaId, approvedSetting.id)
     assert.equal(outlines.slice(1).every(node => JSON.parse(node.planning.metadataJson).events[0].characters[0] === '主角'), true)
     assert.deepEqual(database.formalChapters(), originalManuscripts)
   } finally { database.close() }
+})
+
+test('direct chapter candidate becomes stale when the volume chapter directory changes', async (t) => {
+  const { projects, databases, authority, project } = await fixture(t)
+  const documents = new DocumentService(projects, undefined, authority)
+  await documents.updateOutline('total', '主角追查钟楼回声。')
+  const db = (await databases.openExisting(project.path))!
+  db.writeFormalOutline({ legacyKey: 'volume-1', parentLegacyKey: 'total', nodeType: 'volume', seq: 1,
+    title: '回声之卷', content: '主角追查旧街回声的来源。' })
+  db.close()
+  const workspace = new WorkspaceService(projects, undefined, undefined, documents, undefined, undefined, authority)
+  const source = (await workspace.planningOutline('volume-1'))!
+  const runner = new PlanningDraftService({ complete: async (instruction) => {
+    if (instruction.startsWith('复核下方完整候选')) return { content: '{"issues":[]}' }
+    return { content: JSON.stringify({ children: [{ title: '旧街取证', content: '主角前往旧街取得回声证据。',
+      events: [{ time: '次日', characters: ['主角'], location: '旧街', event: '主角取得回声证据。' }] }] }) }
+  } }, workspace)
+  const tasks = new OutlineExpansionTaskService(projects, databases, runner, key => workspace.planningOutline(key), async () => 'test')
+  const adoption = new OutlineExpansionAdoptionService(projects, databases, key => workspace.planningOutline(key), root => authority.retryMirrors(root))
+  const started = await tasks.start({ operationId: randomUUID(), parentKey: source.key,
+    expectedRevision: source.revision, count: 1, instruction: '' })
+  assert.equal((await expansionTerminal(tasks, started.id)).proposal?.childType, 'chapter')
+  const preview = await adoption.preview(started.id)
+  const changed = (await databases.openExisting(project.path))!
+  changed.writeFormalOutline({ legacyKey: 'chapter-1', parentLegacyKey: 'volume-1', nodeType: 'chapter', seq: 1,
+    title: '作者新增章', content: '作者先写下的章纲。' })
+  changed.close()
+  assert.equal((await tasks.status(started.id)).sourceStale, true)
+  await assert.rejects(adoption.adopt(preview.token), /目录已经变化|章节目录已经变化/)
+  const final = (await databases.openExisting(project.path))!
+  try { assert.deepEqual(final.formalOutlines().filter(node => node.parentLegacyKey === 'volume-1').map(node => node.title), ['作者新增章']) }
+  finally { final.close() }
 })
 
 test('outline expansion IPC only accepts bounded next-layer requests', () => {
