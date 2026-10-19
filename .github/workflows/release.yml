@@ -45,13 +45,17 @@ jobs:
           $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases" --paginate | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'Cannot verify existing releases' }
           if ($releases.tag_name -contains $env:RELEASE_TAG) { throw 'Release already exists; assets will not be overwritten' }
-      - name: Install, test and build
+          $sha = (git rev-parse HEAD).Trim()
+          $ci = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$sha&status=success&per_page=10" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot verify full CI result' }
+          if (@($ci.workflow_runs | Where-Object { $_.head_sha -eq $sha -and $_.conclusion -eq 'success' }).Count -eq 0) { throw 'Tag commit has no successful full CI run' }
+      - name: Install and build validated tag
         env:
           LANJIAN_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
         run: |
           node scripts/ci.mjs install
           npm --prefix services/plugin-marketplace run build
-          node scripts/ci.mjs check
+          npm --prefix desktop run desktop:build
       - name: Build Windows x64 installer
         working-directory: desktop
         run: npm exec electron-builder -- --win nsis --x64 --publish never
