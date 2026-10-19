@@ -67,12 +67,17 @@ test('multi-stage planning captures all methods once, preserves author input, re
 })
 
 test('all next-layer kinds use their actual plugin method; a disabled later phase prevents the first model send', async () => {
-  for (const [kind, key, slot] of [['summary', 'total', 'volume-outline'], ['volume', 'volume-1', 'stage-outline'], ['stage', 'stage-1', 'chapter-outline']] as const) {
+  for (const [kind, key, slot, method] of [
+    ['summary', 'total', 'volume-outline', undefined],
+    ['volume', 'volume-1', 'chapter-outline', undefined],
+    ['volume', 'volume-1', 'stage-outline', 'story-v1'],
+    ['stage', 'stage-1', 'chapter-outline', undefined]
+  ] as const) {
     const f = selection([slot, 'outline-review']), calls: string[] = []
     const source = { key, kind, revision: hash('parent'), projectFingerprint: hash('book'), title: '父级', content: '周子昂留下。' }
     const service = new PlanningDraftService({ complete: async instruction => { calls.push(instruction); return { content: instruction.startsWith('复核下方') ? '{"issues":[]}' : JSON.stringify({ children: [{ title: '下一段', content: '周子昂留下后面对城市变化。', events: [{ time: '翌日', characters: ['周子昂'], location: '城市', event: '承担代价，关系改变。' }] }] }) } } },
       { bookProfile: async () => profile, foundation: async () => foundation, planningOutline: async () => source }, undefined, undefined, async () => [], async () => creativePolicyRun(f.packages, f.composition))
-    const result = await service.expandNextLayer({ parentKey: key, expectedRevision: source.revision, count: 1, instruction: '' })
+    const result = await service.expandNextLayer({ parentKey: key, expectedRevision: source.revision, count: 1, instruction: '' }, undefined, undefined, method)
     assert.match(calls[0], new RegExp('个人方法标记 ' + slot)); assert.match(calls[1], /个人方法标记 outline-review/)
     assert.deepEqual(result.creativePolicy?.map(p => p.slot), [slot, 'genre-guidance', 'outline-review'])
   }
